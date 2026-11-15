@@ -1,0 +1,105 @@
+diff --git a/tools/recomp/lifter.py b/tools/recomp/lifter.py
+index a6afcd0..34a8752 100644
+--- a/tools/recomp/lifter.py
++++ b/tools/recomp/lifter.py
+@@ -1232,10 +1232,19 @@ def _make_condition(jcc, flag_setter, flag_ops):
+ 
+     # ── xadd: exchange and add, flags from addition ──
+     if flag_setter == "xadd":
++        # The lift snapshots the sum into _fa/_fas (see the atomic arm of
++        # _lift_misc, the only place an xadd is lifted). Reading the
++        # destination again here tests a different word once its address
++        # register has moved, and a different value once another thread has
++        # touched it.
+         if jcc in ("je", "jz"):
+-            return f"({lhs} == 0)", desc
++            return "(_fa == 0)", desc
+         if jcc in ("jne", "jnz"):
+-            return f"({lhs} != 0)", desc
++            return "(_fa != 0)", desc
++        if jcc == "js":
++            return "(_fas < 0)", desc
++        if jcc == "jns":
++            return "(_fas >= 0)", desc
+         return None
+ 
+     # ── repe cmpsb / repne scasb: string comparison ──
+@@ -2323,9 +2332,23 @@ class Lifter:
+                 src = _fmt_operand_read(ops[1])
+                 if atomic_m == "xadd":
+                     # dst = dst + src, and src receives dst's old value.
++                    #
++                    # The flags are the sum's, and the sum is snapshotted into
++                    # _fa here rather than re-read from the destination at the
++                    # jcc. Re-reading was wrong twice over. The address can
++                    # change between the two: Sid Meier's Pirates! releases a
++                    # reference with `lock xadd [edi], eax / pop edi / jne`, so
++                    # the branch tested whatever the caller's edi pointed at,
++                    # and every child added to a UI node was destroyed on the
++                    # spot. And the word itself can change: guest threads run
++                    # in parallel on Windows, so another thread's AddRef or
++                    # Release between the atomic and the re-read decides this
++                    # thread's branch -- two releases can both see zero.
+                     return [
+-                        "{ uint32_t _old = RECOMP_ATOMIC_ADD32("
+-                        f"XBOX_PTR({addr}), {src});",
++                        f"{{ uint32_t _src = {src};",
++                        "  uint32_t _old = RECOMP_ATOMIC_ADD32("
++                        f"XBOX_PTR({addr}), _src);",
++                        "  _fa = _old + _src; _fas = (int32_t)_fa;",
+                         "  " + _fmt_operand_write(ops[1], "_old") + " }"
+                         f"  /* {m} */",
+                     ]
+diff --git a/tools/recomp/test_lifter_lock_flags.py b/tools/recomp/test_lifter_lock_flags.py
+index cbbd992..4ad1cc4 100644
+--- a/tools/recomp/test_lifter_lock_flags.py
++++ b/tools/recomp/test_lifter_lock_flags.py
+@@ -106,9 +106,29 @@ class LockPrefixFlagsTest(unittest.TestCase):
+                     f"{mnemonic} left its jcc on the _flags placeholder:\n{out}")
+ 
+     def test_the_branch_reads_the_sum(self):
+-        """xadd sets ZF from the sum, which is what its destination now holds."""
++        """xadd sets ZF from the sum, snapshotted when the xadd runs."""
+         out = _lift(_release_sequence("lock xadd"))
+-        self.assertIn("MEM32(eax)", out, out)
++        self.assertIn("_fa = _old + _src", out, out)
++        self.assertIn("(_fa != 0)", out, out)
++
++    def test_the_branch_survives_the_address_register_moving(self):
++        """`lock xadd [edi], eax / pop edi / jne` must not test the new edi.
++
++        Sid Meier's Pirates! releases a reference this way (0x0020AD80). The
++        condition used to be MEM32(edi) != 0 evaluated after the pop, so it
++        read whatever the caller's edi pointed at, found zero, and destroyed
++        an object that was still referenced.
++        """
++        insns = [
++            _insn(0x20AD80, 4, "lock xadd", "dword ptr [edi], eax",
++                  [_mem("edi"), Operand(type="reg", reg="eax")]),
++            _insn(0x20AD84, 1, "pop", "edi", [Operand(type="reg", reg="edi")]),
++            _insn(0x20AD85, 2, "jne", "0x20ad8f",
++                  [Operand(type="imm", imm=0x20AD8F)]),
++        ]
++        out = _lift(insns)
++        self.assertNotIn("MEM32(edi) != 0", out, out)
++        self.assertIn("(_fa != 0)", out, out)
+ 
+     def test_lock_cmpxchg_does_not_inherit_stale_flags(self):
+         """A `cmp` before a `lock cmpxchg` must not decide the cmpxchg's jcc.
+diff --git a/tools/recomp/translator.py b/tools/recomp/translator.py
+index af52033..9665288 100644
+--- a/tools/recomp/translator.py
++++ b/tools/recomp/translator.py
+@@ -1788,8 +1788,11 @@ class FunctionTranslator:
+         # sahf and the fcomi family leave an EFLAGS image in _fa, and sahf
+         # reads the OF before it from _fb.
+         # mul and imul leave "the product did not fit" (CF = OF) in _fa.
++        # xadd snapshots its sum into _fa/_fas for the jcc that follows it
++        # (lifter.py, the atomic arm), so it needs them declared too.
+         if any(insn.mnemonic in ("cmp", "test", "bsf", "bsr", "cmpxchg",
+-                                 "lock cmpxchg", "inc", "dec", "sahf",
++                                 "lock cmpxchg", "xadd", "lock xadd",
++                                 "inc", "dec", "sahf",
+                                  "mul", "imul",
+                                  "fcomi", "fcomip", "fcompi", "fucomi",
+                                  "fucomip", "fucompi")

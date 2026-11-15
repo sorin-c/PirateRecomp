@@ -48,6 +48,13 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    checkout also pulls xemu and its firmware trees, which the build does not
    use and which fail on Windows with "Filename too long".
 
+   Then apply the toolkit patches (see [Toolkit patches](#toolkit-patches)),
+   before the lift:
+
+   ```
+   git -C xboxrecomp apply ..\patches\0001-lifter-xadd-flags-snapshot.patch
+   ```
+
 2. **Game files.** Extract your disc image into `game/`, so that
    `game/default.xbe` exists beside the rest of the disc. The toolkit can do
    it:
@@ -80,6 +87,31 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    cmake -S . -B build
    cmake --build build --config Release --target pirates_recomp pirates_launcher
    ```
+
+## Toolkit patches
+
+`patches/` holds changes to the toolkit that this game needs and that are not
+in the pinned `xboxrecomp` commit yet. They are applied to the submodule's
+working tree, never committed inside it, so the submodule still points at an
+upstream commit. Apply them in number order, after the submodule init and
+before the lift, from the repository root:
+
+```
+git -C xboxrecomp apply ..\patches\0001-lifter-xadd-flags-snapshot.patch
+```
+
+- **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
+  `translator.py`, and a regression test in `test_lifter_lock_flags.py`).
+  The jcc after `xadd` / `lock xadd` was lifted as a re-read of the
+  destination (`MEM32(edi) != 0`) at the branch instead of the sum the
+  instruction produced. This game releases a reference with
+  `lock xadd [edi], eax / pop edi / jne` (0x0020AD80), so the branch tested
+  whatever the popped edi pointed at, and every child added to a UI node was
+  destroyed on the spot. The game then made virtual calls into freed memory
+  and crashed about a second after `CreateDevice`. The re-read was also racy
+  across guest threads. The lift now snapshots the sum into `_fa`/`_fas`,
+  as it already did for `cmpxchg`. Without it the build boots and crashes;
+  with it the game reaches its main menu.
 
 ## Running a build of your own
 
