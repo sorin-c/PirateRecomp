@@ -119,10 +119,16 @@ extern uint32_t g_xbox_code_hi;
  * at 0x000DB88A, taken when its "movies off" byte 0x004D67C7 is set. For the
  * three intro movies this wrapper takes that same exit before the player is
  * entered: no file is opened and the caller carries on as after a movie it
- * did not get to play. Every other movie (the bonus content, the land
- * battle and story movies) goes to the player as before. The three are
- * queued by sub_00126050 at boot (2KG_NTSC.bik, Firaxis_Logo.bik) and by the
- * title screen's attract loop sub_001267C0 (those two and Pirates!.bik).
+ * did not get to play. The three intro ones are queued by sub_00126050 at
+ * boot (2KG_NTSC.bik, Firaxis_Logo.bik) and by the title screen's attract
+ * loop sub_001267C0 (those two and Pirates!.bik).
+ *
+ * Every other movie is skipped the same way (the project asked for anything
+ * movie-like that slows testing down to go): the land battle intro, victory
+ * and defeat, the hint movies and the bonus content. None is needed for the
+ * game to advance -- the player returns "not played" for them on a console
+ * with its movies-off byte set too. RECOMP_PIRATES_SKIP_INTRO=intro keeps
+ * the old behaviour, skipping only the three intro movies.
  *
  * Not the game's own option byte at 0x004F92E5: it looks like one (it is
  * tested before the logos) but it also sends the game from boot into the
@@ -158,13 +164,18 @@ void sub_000DB7A0(void)
         ? (const char *)((uintptr_t)name_va + g_xbox_mem_offset) : "";
 
     if (skip < 0) {
-        skip = xbox_EnvSwitch("RECOMP_PIRATES_SKIP_INTRO", 1);
-        fprintf(stderr, "[PIRATES] intro movies %s (RECOMP_PIRATES_SKIP_INTRO=%d)\n",
-                skip ? "skipped" : "played", skip);
+        const char *v = getenv("RECOMP_PIRATES_SKIP_INTRO");
+        /* 2 = every movie (the default), 1 via "intro" = the three only. */
+        if (v && _stricmp(v, "intro") == 0)
+            skip = 1;
+        else
+            skip = xbox_EnvSwitch("RECOMP_PIRATES_SKIP_INTRO", 1) ? 2 : 0;
+        fprintf(stderr, "[PIRATES] movies: %s (RECOMP_PIRATES_SKIP_INTRO)\n",
+                skip == 2 ? "all skipped" : skip == 1 ? "intro skipped" : "all played");
         fflush(stderr);
     }
-    if (skip && pirates_is_intro_movie(name)) {
-        fprintf(stderr, "[PIRATES] skipped intro movie %s\n", name);
+    if (skip == 2 || (skip == 1 && pirates_is_intro_movie(name))) {
+        fprintf(stderr, "[PIRATES] skipped movie %s\n", name);
         fflush(stderr);
         g_eax &= ~0xFFu;   /* xor al, al: "not played" */
         g_esp += 4;        /* ret: pop the return address the caller pushed */

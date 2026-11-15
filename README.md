@@ -55,7 +55,6 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0001-lifter-xadd-flags-snapshot.patch
    git -C xboxrecomp apply ..\patches\0002-kernel-empty-directory-pattern.patch
    git -C xboxrecomp apply ..\patches\0003-input-live-file.patch
-git -C xboxrecomp apply ..\patches\0003-input-live-file.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -127,6 +126,15 @@ git -C xboxrecomp apply ..\patches\0003-input-live-file.patch
   music, with no error anywhere. An empty name now means every entry, as the
   POSIX backend already read it. With it the 2K and Firaxis movies play
   with sound and the title and menu music plays.
+
+- **0003-input-live-file** (`src/hle/input_host.c`). Test tooling, not a
+  game fix: `RECOMP_INPUT_LIVE=<file>` presses each line appended to the
+  file (`a`, `dpad_down:300`, `lstick_left+a:800`), one after another.
+  Fixed `RECOMP_INPUT_SEQ` timelines drift by tens of seconds over this
+  game's long loading screens; this lets a test look at a screenshot first
+  and press second (`tools/test/drive.ps1`). Does nothing unless the
+  variable is set.
+
 ## Running a build of your own
 
 ```
@@ -143,14 +151,12 @@ maps to the game folder: in a build of your own they are written into
 `game/UDATA`. Test runs belong on a copy of `game/` without `UDATA`
 (`RECOMP_GAME_DIR`) and with `RECOMP_SAVE_DIR` set to a fresh folder.
 
-- **0003-input-live-file** (`src/hle/input_host.c`). Test tooling, not a game fix: `RECOMP_INPUT_LIVE=<file>` presses each line appended to the file (`a`, `dpad_down:300`, `lstick_left+a:800`), one after another. Fixed `RECOMP_INPUT_SEQ` timelines drift by tens of seconds over this game's long loading screens; this lets a test look at a screenshot first and press second. Does nothing unless the variable is set.
-
 **Settings.** Environment variables this game reads on top of the toolkit's
 own (`xboxrecomp/CLAUDE.md` lists those):
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `RECOMP_PIRATES_SKIP_INTRO` | `1` | Go from boot straight to the title screen, past the 2K and Firaxis logos and the Pirates! intro movie, through the game's own skip switch (`src/recomp_manual.c`). `0` plays them as the disc does. On during bring-up. |
+| `RECOMP_PIRATES_SKIP_INTRO` | `1` | Skip every Bink movie through the movie player's own "not played" exit (`src/recomp_manual.c`): the 2K and Firaxis logos at boot, and the opening story (`PiratesOpening1.bik`) and mutiny (`PiratesOpening2.bik`) after NEW GAME, which are pre-rendered movies, not in-engine scenes. `intro` skips only the 2K, Firaxis and Pirates! movies; `0` plays everything as the disc does. On during bring-up. |
 
 ## The disc
 
