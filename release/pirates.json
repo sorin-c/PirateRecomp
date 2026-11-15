@@ -1,0 +1,12 @@
+{
+  "title_name": "Sid Meier's Pirates!",
+  "title_id": "TODO",
+  "project": "..",
+  "exe": "pirates_recomp",
+  "launcher": "pirates_launcher",
+  "release_name": "pirates",
+  "xbe": "default.xbe",
+  "images": [
+    {"sha1": "TODO", "name": "Disc (USA, Europe)"}
+  ]
+}
