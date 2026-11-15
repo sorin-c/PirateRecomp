@@ -1,0 +1,20 @@
+diff --git a/src/kernel/kernel_file.c b/src/kernel/kernel_file.c
+index 8551fa9..8bedd2a 100644
+--- a/src/kernel/kernel_file.c
++++ b/src/kernel/kernel_file.c
+@@ -1142,7 +1142,14 @@ NTSTATUS __stdcall xbox_NtQueryDirectoryFile(
+         WCHAR* clean_path = dir_path;
+         if (wcsncmp(clean_path, L"\\\\?\\", 4) == 0)
+             clean_path += 4;
+-        if (FileName && FileName->Buffer) {
++        /* An empty pattern means every entry, as a missing one does -- the
++         * POSIX backend below already reads it so. XAPI's FindFirstFile hands
++         * the kernel a zero-length name for "*.*": Sid Meier's Pirates! scans
++         * d:\Assets\*.* recursively to index its loose Bink movies and WAV
++         * music, and with "<dir>\" + "" as the search path FindFirstFileW
++         * failed, so the scan found nothing and the game skipped every logo
++         * movie and all of its music without a word. */
++        if (FileName && FileName->Buffer && FileName->Length > 0) {
+             WCHAR pattern_wide[MAX_PATH];
+             MultiByteToWideChar(CP_ACP, 0, FileName->Buffer, FileName->Length,
+                                 pattern_wide, MAX_PATH);

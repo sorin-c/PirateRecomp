@@ -53,6 +53,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
 
    ```
    git -C xboxrecomp apply ..\patches\0001-lifter-xadd-flags-snapshot.patch
+   git -C xboxrecomp apply ..\patches\0002-kernel-empty-directory-pattern.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -98,6 +99,7 @@ before the lift, from the repository root:
 
 ```
 git -C xboxrecomp apply ..\patches\0001-lifter-xadd-flags-snapshot.patch
+git -C xboxrecomp apply ..\patches\0002-kernel-empty-directory-pattern.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -113,6 +115,15 @@ git -C xboxrecomp apply ..\patches\0001-lifter-xadd-flags-snapshot.patch
   as it already did for `cmpxchg`. Without it the build boots and crashes;
   with it the game reaches its main menu.
 
+- **0002-kernel-empty-directory-pattern** (`src/kernel/kernel_file.c`).
+  On Windows, `NtQueryDirectoryFile` with a zero-length file name built
+  the search path `<dir>\` and `FindFirstFileW` failed. XAPI's
+  `FindFirstFile` passes exactly that for `*.*`, and the game indexes its
+  loose files by scanning `d:\Assets\*.*` recursively, so it found none of
+  `assets\Bink\*.bik` or `assets\sounds\*.wav`: no logo movies and no
+  music, with no error anywhere. An empty name now means every entry, as the
+  POSIX backend already read it. With it the 2K and Firaxis movies play
+  with sound and the title and menu music plays.
 ## Running a build of your own
 
 ```
