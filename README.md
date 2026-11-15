@@ -140,6 +140,13 @@ maps to the game folder: in a build of your own they are written into
 `game/UDATA`. Test runs belong on a copy of `game/` without `UDATA`
 (`RECOMP_GAME_DIR`) and with `RECOMP_SAVE_DIR` set to a fresh folder.
 
+**Settings.** Environment variables this game reads on top of the toolkit's
+own (`xboxrecomp/CLAUDE.md` lists those):
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `RECOMP_PIRATES_SKIP_INTRO` | `1` | Go from boot straight to the title screen, past the 2K and Firaxis logos and the Pirates! intro movie, through the game's own skip switch (`src/recomp_manual.c`). `0` plays them as the disc does. On during bring-up. |
+
 ## The disc
 
 The retail disc (USA, Europe, En/Fr/De/Es/It): title ID `0x5454008F`, XDK

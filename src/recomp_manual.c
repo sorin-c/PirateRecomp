@@ -105,6 +105,74 @@ extern uint32_t g_xbox_code_hi;
  * means this title was lifted before the macros published it. */
 /* g_icall_dispatch_form: recomp_cpu.h. */
 
+/* ── Sid Meier's Pirates!: skip the intro movies ───────────────
+ *
+ * RECOMP_PIRATES_SKIP_INTRO=1 (the default during bring-up) goes from boot
+ * straight to the title screen; =0 plays the 2K and Firaxis logos and the
+ * Pirates! intro as the disc does. Asked for by the project so a test run is
+ * not a minute of movies before anything can be pressed -- START does not
+ * skip them.
+ *
+ * How: sub_000DB7A0 is the game's movie player (cdecl: the movie's name at
+ * [esp+4] and a volume at [esp+8], a mode in eax). It plays a whole movie and
+ * returns, and it already has an exit for "not played" -- `xor al, al; ret`
+ * at 0x000DB88A, taken when its "movies off" byte 0x004D67C7 is set. For the
+ * three intro movies this wrapper takes that same exit before the player is
+ * entered: no file is opened and the caller carries on as after a movie it
+ * did not get to play. Every other movie (the bonus content, the land
+ * battle and story movies) goes to the player as before. The three are
+ * queued by sub_00126050 at boot (2KG_NTSC.bik, Firaxis_Logo.bik) and by the
+ * title screen's attract loop sub_001267C0 (those two and Pirates!.bik).
+ *
+ * Not the game's own option byte at 0x004F92E5: it looks like one (it is
+ * tested before the logos) but it also sends the game from boot into the
+ * Xbox Live menu instead of the title screen -- a "started from a Live
+ * invitation" path, not a skip.
+ *
+ * Delete this when it is no longer wanted: at 0 the wrapper only passes
+ * through. */
+int xbox_EnvSwitch(const char *name, int default_on);
+extern void sub_000DB7A0_gen(void);
+#if !defined(_MSC_VER)
+#  include <strings.h>
+#  define _stricmp strcasecmp
+#endif
+
+static int pirates_is_intro_movie(const char *name)
+{
+    static const char *const intro[] = {
+        "2KG_NTSC.bik", "Firaxis_Logo.bik", "Pirates!.bik"
+    };
+    size_t i;
+    for (i = 0; i < sizeof intro / sizeof intro[0]; i++)
+        if (_stricmp(name, intro[i]) == 0)
+            return 1;
+    return 0;
+}
+
+void sub_000DB7A0(void)
+{
+    static int skip = -1;
+    uint32_t name_va = *(volatile uint32_t *)((uintptr_t)(g_esp + 4u) + g_xbox_mem_offset);
+    const char *name = name_va
+        ? (const char *)((uintptr_t)name_va + g_xbox_mem_offset) : "";
+
+    if (skip < 0) {
+        skip = xbox_EnvSwitch("RECOMP_PIRATES_SKIP_INTRO", 1);
+        fprintf(stderr, "[PIRATES] intro movies %s (RECOMP_PIRATES_SKIP_INTRO=%d)\n",
+                skip ? "skipped" : "played", skip);
+        fflush(stderr);
+    }
+    if (skip && pirates_is_intro_movie(name)) {
+        fprintf(stderr, "[PIRATES] skipped intro movie %s\n", name);
+        fflush(stderr);
+        g_eax &= ~0xFFu;   /* xor al, al: "not played" */
+        g_esp += 4;        /* ret: pop the return address the caller pushed */
+        return;
+    }
+    sub_000DB7A0_gen();
+}
+
 /* ── Manual function overrides ─────────────────────────────── */
 
 /*
