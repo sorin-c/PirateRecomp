@@ -88,7 +88,7 @@ extern ptrdiff_t g_xbox_mem_offset;
 
 /* The entry point is read from the XBE header by the parse stage
  * (game/default_analysis.json, "entry_point"). 0 until the first parse. */
-#define YOUR_GAME_ENTRY_POINT   0x00000000  /* XBE entry point VA */
+#define YOUR_GAME_ENTRY_POINT   0x001AC88A  /* XBE entry point VA */
 /* Relative to the executable's own directory, build/<Config>/: the game's
  * files live in game/ at the repository root (README.md). RECOMP_GAME_DIR
  * overrides it. */

@@ -10,7 +10,7 @@ $Here = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Toolkit = if ($env:XBOXRECOMP_DIR) { $env:XBOXRECOMP_DIR } else { Join-Path $Here "xboxrecomp" }
 $Xbe = Join-Path $Here "game\default.xbe"
 if (-not (Test-Path $Xbe)) {
-    Write-Error "no $Xbe: put the disc's files in game\ (README.md)"
+    Write-Error "no ${Xbe}: put the disc's files in game\ (README.md)"
 }
 if (-not (Test-Path (Join-Path $Here "game\default_xdk_symbols.json"))) {
     Write-Host "game\default_xdk_symbols.json is missing: without it nothing is replaced"
@@ -19,9 +19,9 @@ if (-not (Test-Path (Join-Path $Here "game\default_xdk_symbols.json"))) {
 }
 Push-Location $Toolkit
 try {
-    $py = if ($env:PYTHON) { @($env:PYTHON) } else { @("py", "-3") }
-    & $py[0] @($py[1..($py.Length-1)]) scripts\recompile.py $Xbe `
-        --work-dir (Join-Path $Here "build\pipeline") --project $Here @args
+    $cmd = @("scripts\recompile.py", $Xbe, "--work-dir", (Join-Path $Here "build\pipeline"),
+             "--project", $Here) + $args
+    if ($env:PYTHON) { & $env:PYTHON @cmd } else { & py -3 @cmd }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
     Pop-Location

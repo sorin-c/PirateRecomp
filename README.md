@@ -6,7 +6,8 @@ program, built against the
 You bring your own copy of the game, and it is built from that copy on your
 computer. This repository contains no game code or data.
 
-**Status: bring-up.** Nothing runs yet. The goals, in order:
+**Status: bring-up.** The XBE lifts cleanly (15,947 functions); nothing has
+been built or run yet. The goals, in order:
 
 1. Playable on Windows.
 2. Widescreen, 4K internal resolution and an uncapped frame rate.
@@ -37,11 +38,15 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
 1. **Clone with the submodule.**
 
    ```
-   git clone --recurse-submodules https://github.com/sorin-c/PirateRecomp.git
+   git clone https://github.com/sorin-c/PirateRecomp.git
    cd PirateRecomp
+   git submodule update --init
+   git -C xboxrecomp submodule update --init
    ```
 
-   An existing clone: `git submodule update --init --recursive`.
+   That is the toolkit and its direct dependencies only. A fully recursive
+   checkout also pulls xemu and its firmware trees, which the build does not
+   use and which fail on Windows with "Filename too long".
 
 2. **Game files.** Extract your disc image into `game/`, so that
    `game/default.xbe` exists beside the rest of the disc. The toolkit can do
@@ -91,6 +96,15 @@ points.
 maps to the game folder: in a build of your own they are written into
 `game/UDATA`. Test runs belong on a copy of `game/` without `UDATA`
 (`RECOMP_GAME_DIR`) and with `RECOMP_SAVE_DIR` set to a fresh folder.
+
+## The disc
+
+The retail disc (USA, Europe, En/Fr/De/Es/It): title ID `0x5454008F`, XDK
+5849, built 2005-06-20, entry point `0x001AC88A`. `default.xbe` SHA-1
+`19191d2b0364c6ca7ee2a6fc063f3c8e3c843244`. Beside the game's code it links
+D3D8, D3DX8, DirectSound, Xbox Live (XONLINE/XNET), Bink video, Miles'
+MSSMIXER and the Dolby encoder; XbSymbolDatabase names 399 of the XDK
+functions in it.
 
 ## What is specific to this game
 
