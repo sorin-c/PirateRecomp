@@ -54,6 +54,8 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    ```
    git -C xboxrecomp apply ..\patches\0001-lifter-xadd-flags-snapshot.patch
    git -C xboxrecomp apply ..\patches\0002-kernel-empty-directory-pattern.patch
+   git -C xboxrecomp apply ..\patches\0003-input-live-file.patch
+git -C xboxrecomp apply ..\patches\0003-input-live-file.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -100,6 +102,7 @@ before the lift, from the repository root:
 ```
 git -C xboxrecomp apply ..\patches\0001-lifter-xadd-flags-snapshot.patch
 git -C xboxrecomp apply ..\patches\0002-kernel-empty-directory-pattern.patch
+git -C xboxrecomp apply ..\patches\0003-input-live-file.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -139,6 +142,8 @@ points.
 maps to the game folder: in a build of your own they are written into
 `game/UDATA`. Test runs belong on a copy of `game/` without `UDATA`
 (`RECOMP_GAME_DIR`) and with `RECOMP_SAVE_DIR` set to a fresh folder.
+
+- **0003-input-live-file** (`src/hle/input_host.c`). Test tooling, not a game fix: `RECOMP_INPUT_LIVE=<file>` presses each line appended to the file (`a`, `dpad_down:300`, `lstick_left+a:800`), one after another. Fixed `RECOMP_INPUT_SEQ` timelines drift by tens of seconds over this game's long loading screens; this lets a test look at a screenshot first and press second. Does nothing unless the variable is set.
 
 **Settings.** Environment variables this game reads on top of the toolkit's
 own (`xboxrecomp/CLAUDE.md` lists those):
