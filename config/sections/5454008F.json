@@ -1,0 +1,12 @@
+{
+ "data": [
+  {
+   "pattern": "XON_RD",
+   "note": "Sid Meier's Pirates!: the XONLINE library's read-only data, as in Pro Evolution Soccer 5 (4B4E0030.json). The first lift swept one phantom function out of it. Checked in disasm/xrefs.json after that lift: no call or jump from outside the section lands in it."
+  },
+  {
+   "pattern": "BINKDATA",
+   "note": "Sid Meier's Pirates!: Bink's writable tables (W flag, 54 KB, 4 bytes of BSS). The first lift found 3 phantom functions in it. The only call into it in disasm/xrefs.json is from 0x00512B6C, inside DSSTDFX -- the DSP effects image, already data -- so it is data decoded as code, not a caller."
+  }
+ ]
+}

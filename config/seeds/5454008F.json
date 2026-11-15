@@ -1,0 +1,12 @@
+[
+ {
+  "start": "0x0038F162",
+  "observed": true,
+  "note": "XPP (USB input): reached by `call [eax+4]` at 0x0038E559 while XAPI walks its device-type table ([ICALL] unresolved call target on the first run). Starts right after the `ret 4` at 0x0038F15F and decodes as a function body (xor eax,eax / cmp byte [0x38E2D0] / push edi ...)."
+ },
+ {
+  "start": "0x0034BB2F",
+  "observed": true,
+  "note": "XNET: indirect call from 0x003442BE (`call [eax+0xc]`) on the first run, never found by static discovery. Starts right after the `ret` at 0x0034BB2E; the body is a bounded switch on [ecx+0x8C8] through the table at 0x0034BDE1."
+ }
+]
