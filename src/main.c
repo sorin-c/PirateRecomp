@@ -53,6 +53,10 @@
 #include <xbox/xboxrecomp.h>
 #include "xbox_watchpoint.h"
 #include "xbox_fault_route.h"
+/* pirates.ini (xboxrecomp/src/config/recomp_config.h): a line of the file,
+ * or the environment variable named, which wins. */
+const char *recomp_config_lookup(const char *env_name, const char *key);
+int recomp_config_bool(const char *env_name, const char *key, int fallback);
 
 /*
  * If xboxrecomp.h is not an umbrella header in your setup, include
@@ -434,6 +438,10 @@ static int title_main(int argc, char **argv)
     (void)argc;
     (void)argv;
 
+    /* Before anything prints: a windowed program has nowhere to print
+     * unless this says where. */
+    host_setup_output(g_log_path, sizeof g_log_path);
+
     /* One guest thread in lifted code at a time, as on the console's single
      * CPU. The toolkit turns this on by default only for ARM hosts. On x86
      * Pirates! ran its threads truly in parallel, and about half the runs
@@ -441,19 +449,36 @@ static int title_main(int argc, char **argv)
      * thread stopped dead after NEW GAME, the governor's welcome froze on
      * its last line, or two threads crashed in the same memmove during the
      * town load. With the lock, 4 runs of 4 went through cleanly, at the
-     * same load time (10-16 s) and the same battle frame time. Set
-     * RECOMP_GUEST_LOCK=0 to run without it. */
-    if (!getenv("RECOMP_GUEST_LOCK")) {
-#ifdef _WIN32
-        _putenv_s("RECOMP_GUEST_LOCK", "1");
-#else
-        setenv("RECOMP_GUEST_LOCK", "1", 0);
-#endif
-    }
+     * same load time (10-16 s) and the same battle frame time.
+     * RECOMP_GUEST_LOCK=0 (or guest_lock = 0 in pirates.ini) runs without
+     * it. */
+    /* pirates.ini, beside the executable (src/settings_title.h): switches
+     * the toolkit reads only from the environment are set from the file
+     * here, unless the environment already says. */
+    {
+        static const struct { const char *env, *key, *def; } from_file[] = {
+            { "RECOMP_GUEST_LOCK", "guest_lock", "1" },
+            { "RECOMP_MUTE",       "mute",       "0" },
+        };
+        size_t i;
 
-    /* Before anything prints: a windowed program has nowhere to print
-     * unless this says where. */
-    host_setup_output(g_log_path, sizeof g_log_path);
+        for (i = 0; i < sizeof from_file / sizeof from_file[0]; i++) {
+            const char *v;
+
+            if (getenv(from_file[i].env))
+                continue;
+            v = recomp_config_lookup(NULL, from_file[i].key);
+            if (!v)
+                v = from_file[i].def;
+            if (strcmp(from_file[i].env, "RECOMP_MUTE") == 0 && strcmp(v, "0") == 0)
+                continue;                   /* any value at all mutes */
+#ifdef _WIN32
+            _putenv_s(from_file[i].env, v);
+#else
+            setenv(from_file[i].env, v, 0);
+#endif
+        }
+    }
 
     /* stdout unbuffered for immediate visibility. stderr, the log, is
      * buffered: the toolkit writes a line for every file read, path lookup
@@ -466,8 +491,7 @@ static int title_main(int argc, char **argv)
      * to unbuffered, for chasing a crash that leaves no report. */
     setvbuf(stdout, NULL, _IONBF, 0);
     {
-        const char *v = getenv("RECOMP_PIRATES_LOG_BUFFER");
-        if (v && *v == '0')
+        if (!recomp_config_bool("RECOMP_PIRATES_LOG_BUFFER", "log_buffer", 1))
             setvbuf(stderr, NULL, _IONBF, 0);
         else
             setvbuf(stderr, NULL, _IOFBF, 1u << 16);

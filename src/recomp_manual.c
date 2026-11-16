@@ -138,6 +138,10 @@ extern uint32_t g_xbox_code_hi;
  * Delete this when it is no longer wanted: at 0 the wrapper only passes
  * through. */
 int xbox_EnvSwitch(const char *name, int default_on);
+/* pirates.ini (src/settings_title.h): the file's line, or the environment
+ * variable named, which wins. xboxrecomp/src/config/recomp_config.h. */
+const char *recomp_config_lookup(const char *env_name, const char *key);
+int recomp_config_bool(const char *env_name, const char *key, int fallback);
 extern void sub_000DB7A0_gen(void);
 #if !defined(_MSC_VER)
 #  include <strings.h>
@@ -164,12 +168,12 @@ void sub_000DB7A0(void)
         ? (const char *)((uintptr_t)name_va + g_xbox_mem_offset) : "";
 
     if (skip < 0) {
-        const char *v = getenv("RECOMP_PIRATES_SKIP_INTRO");
+        const char *v = recomp_config_lookup("RECOMP_PIRATES_SKIP_INTRO", "skip_intro");
         /* 2 = every movie (the default), 1 via "intro" = the three only. */
         if (v && _stricmp(v, "intro") == 0)
             skip = 1;
         else
-            skip = xbox_EnvSwitch("RECOMP_PIRATES_SKIP_INTRO", 1) ? 2 : 0;
+            skip = recomp_config_bool("RECOMP_PIRATES_SKIP_INTRO", "skip_intro", 1) ? 2 : 0;
         fprintf(stderr, "[PIRATES] movies: %s (RECOMP_PIRATES_SKIP_INTRO)\n",
                 skip == 2 ? "all skipped" : skip == 1 ? "intro skipped" : "all played");
         fflush(stderr);
@@ -203,7 +207,7 @@ void sub_00126BC0(void)
 {
     static int on = -1;
     if (on < 0) {
-        on = xbox_EnvSwitch("RECOMP_PIRATES_MINIGAMES", 0);
+        on = recomp_config_bool("RECOMP_PIRATES_MINIGAMES", "minigames", 0);
         if (on) {
             *(volatile uint8_t *)((uintptr_t)0x004D69C0u + g_xbox_mem_offset) = 1;
             fprintf(stderr, "[PIRATES] debug MINIGAMES menu on (RECOMP_PIRATES_MINIGAMES)\n");
@@ -246,7 +250,7 @@ void sub_001A9220(void)   /* XAPI ResetEvent(HANDLE), stdcall */
     uint32_t obj = *(volatile uint32_t *)((uintptr_t)0x004D67B0u + g_xbox_mem_offset);
 
     if (pause < 0)
-        pause = xbox_EnvSwitch("RECOMP_PIRATES_CACHE_PAUSE", 0);
+        pause = recomp_config_bool("RECOMP_PIRATES_CACHE_PAUSE", "cache_pause", 0);
     if (!pause && obj && h &&
         h == *(volatile uint32_t *)((uintptr_t)(obj + 0x38u) + g_xbox_mem_offset)) {
         g_eax = 1;         /* TRUE */

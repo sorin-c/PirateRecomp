@@ -1,0 +1,168 @@
+diff --git a/src/config/recomp_config.c b/src/config/recomp_config.c
+index d3b048c..cef72d2 100644
+--- a/src/config/recomp_config.c
++++ b/src/config/recomp_config.c
+@@ -25,6 +25,32 @@
+ #define RECOMP_MKDIR(p) mkdir((p), 0755)
+ #endif
+ 
++#if defined(_WIN32)
++#include <windows.h>     /* GetModuleFileNameA: the title's settings file */
++#else
++#include <unistd.h>      /* readlink: the same, on Linux */
++#endif
++
++/* A title's own settings file, beside its executables.
++ *
++ * RECOMP_TITLE_SETTINGS_FILE (a file name, from the title's CMakeLists)
++ * puts the settings in that file in the folder of the running executable
++ * -- the game and its launcher sit in one folder, so both read and write the
++ * same file -- instead of the per-user one. A player edits it in place.
++ * RECOMP_DISPLAY_CONFIG still names a file outright, and an environment
++ * variable still overrides any line.
++ *
++ * RECOMP_TITLE_SETTINGS_HEADER (a header path) adds the title's own keys:
++ * it defines recomp_title_settings[], { key, default, comment } each, which
++ * recomp_settings_write appends after the toolkit's, keeping the value a key
++ * already has in the file. Without it, a save from the launcher would drop
++ * every key it does not know. */
++#if defined(RECOMP_TITLE_SETTINGS_HEADER)
++#include RECOMP_TITLE_SETTINGS_HEADER
++#define RECOMP_TITLE_SETTINGS_COUNT \
++    ((int)(sizeof recomp_title_settings / sizeof recomp_title_settings[0]))
++#endif
++
+ #define MAX_ENTRIES 64
+ #define MAX_KEY     64
+ #define MAX_VALUE   512
+@@ -274,6 +300,47 @@ static void title_file(char *out, size_t n, const char *dir)
+         snprintf(out, n, "%s%ctitles%cdefault.conf", dir, sep, sep);
+ }
+ 
++/* The title's settings file in the running executable's folder, or 0. */
++static int beside_exe_file(char *out, size_t n)
++{
++#if defined(RECOMP_TITLE_SETTINGS_FILE)
++    char exe[1024];
++    char *slash;
++    size_t len;
++
++#  if defined(_WIN32)
++    len = (size_t)GetModuleFileNameA(NULL, exe, (DWORD)sizeof exe);
++    if (!len || len >= sizeof exe)
++        return 0;
++    exe[len] = '\0';
++    slash = strrchr(exe, '\\');
++    if (!slash)
++        slash = strrchr(exe, '/');
++#  else
++    len = 0;
++    {
++        long r = -1;
++#    if defined(__linux__)
++        r = (long)readlink("/proc/self/exe", exe, sizeof exe - 1);
++#    endif
++        if (r <= 0)
++            return 0;
++        exe[r] = '\0';
++    }
++    slash = strrchr(exe, '/');
++#  endif
++    if (!slash)
++        return 0;
++    slash[1] = '\0';
++    snprintf(out, n, "%s%s", exe, RECOMP_TITLE_SETTINGS_FILE);
++    return 1;
++#else
++    (void)out;
++    (void)n;
++    return 0;
++#endif
++}
++
+ static int readable(const char *path)
+ {
+     FILE *f = fopen(path, "rb");
+@@ -446,6 +513,36 @@ int recomp_settings_write(const char *path, const RecompSettings *s)
+         s = &d;
+     }
+ 
++#if defined(RECOMP_TITLE_SETTINGS_HEADER)
++    /* The values the title's keys have in the file now, so a save from the
++     * launcher keeps them. */
++    char title_vals[RECOMP_TITLE_SETTINGS_COUNT][MAX_VALUE];
++    {
++        Entry saved[MAX_ENTRIES];
++        int saved_count = g_entry_count, i;
++        FILE *old;
++
++        memcpy(saved, g_entries, sizeof saved);
++        g_entry_count = 0;
++        old = fopen(path, "rb");
++        if (old) {
++            parse(old);
++            fclose(old);
++        }
++        for (i = 0; i < RECOMP_TITLE_SETTINGS_COUNT; i++) {
++            const char *v = NULL;
++            int k;
++
++            for (k = 0; k < g_entry_count; k++)
++                if (strcmp(g_entries[k].key, recomp_title_settings[i].key) == 0)
++                    v = g_entries[k].value;
++            snprintf(title_vals[i], MAX_VALUE, "%s", v ? v : recomp_title_settings[i].def);
++        }
++        memcpy(g_entries, saved, sizeof saved);
++        g_entry_count = saved_count;
++    }
++#endif
++
+     make_parents(path);
+     f = fopen(path, "wb");
+     if (!f)
+@@ -611,6 +708,16 @@ int recomp_settings_write(const char *path, const RecompSettings *s)
+         "syslink_upnp = %d\n",
+         s->syslink_upnp ? 1 : 0);
+ 
++#if defined(RECOMP_TITLE_SETTINGS_HEADER)
++    {
++        int i;
++
++        for (i = 0; i < RECOMP_TITLE_SETTINGS_COUNT; i++)
++            fprintf(f, "\n%s%s = %s\n", recomp_title_settings[i].comment,
++                    recomp_title_settings[i].key, title_vals[i]);
++    }
++#endif
++
+     fclose(f);
+     return 1;
+ }
+@@ -639,6 +746,8 @@ int recomp_settings_path(uint32_t title_id, char *out, size_t n)
+         snprintf(out, n, "%s", env);
+         return 1;
+     }
++    if (beside_exe_file(out, n))
++        return 1;
+     if (!user_dir(dir, sizeof dir))
+         return 0;
+     {
+@@ -675,6 +784,19 @@ static void load(void)
+         return;
+     }
+ 
++    if (beside_exe_file(path, sizeof path)) {
++        if (!readable(path))
++            recomp_settings_write(path, NULL);
++        f = fopen(path, "rb");
++        if (f) {
++            parse(f);
++            fclose(f);
++            snprintf(g_path, sizeof g_path, "%s", path);
++            g_have_path = 1;
++            return;
++        }
++    }
++
+     if (user_dir(dir, sizeof dir)) {
+         title_file(path, sizeof path, dir);
+         if (!readable(path))
