@@ -56,6 +56,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0002-kernel-empty-directory-pattern.patch
    git -C xboxrecomp apply ..\patches\0003-input-live-file.patch
    git -C xboxrecomp apply ..\patches\0004-d3d-bump-env-map.patch
+   git -C xboxrecomp apply ..\patches\0005-hle-walk-draw-simple-states.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -104,6 +105,7 @@ git -C xboxrecomp apply ..\patches\0001-lifter-xadd-flags-snapshot.patch
 git -C xboxrecomp apply ..\patches\0002-kernel-empty-directory-pattern.patch
 git -C xboxrecomp apply ..\patches\0003-input-live-file.patch
 git -C xboxrecomp apply ..\patches\0004-d3d-bump-env-map.patch
+git -C xboxrecomp apply ..\patches\0005-hle-walk-draw-simple-states.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -146,6 +148,18 @@ git -C xboxrecomp apply ..\patches\0004-d3d-bump-env-map.patch
   `PSDistortReflections_XB` pass uses it to ripple the reflection the sea
   samples. `_LUM`'s luminance scale is still not applied (`BUMPENVLSCALE`
   and `LOFFSET` are not forwarded).
+
+- **0005-hle-walk-draw-simple-states** (`src/hle/hle_d3d8_state.c`,
+  `hle_d3d8_vertex.c`). The game pushes its terrain draws into the push
+  buffer itself, and the toolkit's push-buffer walk only draws them at the
+  next replaced call. By then the game's SetRenderState has already stored
+  the states for what comes next in the state array: blending, alpha test
+  and depth write put back after the third terrain pass. Drawn with those,
+  that pass painted its faded-out deep-water vertices over the sea as opaque
+  black tiles, in seven frames out of eight. The walk now keeps the simple
+  render states (depth, blend, alpha test, colour mask, stencil) in buffer
+  order, and the draws it makes use them. The array itself is unchanged.
+  `RECOMP_HLE_D3D8_WALK_RS=0` turns it off. Cull mode is not covered.
 
 ## Running a build of your own
 

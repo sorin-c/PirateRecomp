@@ -1,0 +1,197 @@
+diff --git a/src/hle/hle_d3d8_state.c b/src/hle/hle_d3d8_state.c
+index 96ef214..4a8e5a0 100644
+--- a/src/hle/hle_d3d8_state.c
++++ b/src/hle/hle_d3d8_state.c
+@@ -225,10 +225,60 @@ static int rs_slot(uint32_t state)
+     return -1;
+ }
+ 
++/* The simple render states (slots 57-81) as the push buffer has them at the
++ * point the walk has reached, for the draws the walk itself makes
++ * (hle_d3d8_vertex.c). A title's SetRenderState stores the array at call
++ * time and writes the method into the buffer; a draw the title pushed
++ * earlier, which the walk only reaches at the next replaced call, would
++ * otherwise be drawn with states set after it. Sid Meier's Pirates! ends
++ * each terrain pass by putting back blending, alpha test and depth write
++ * (SRCALPHA / INVSRCALPHA, z write on); drawn with those, the third pass
++ * painted its faded-out deep-water vertices over the sea as opaque black
++ * tiles in most frames, and the coast came out right only when a walk ran
++ * between the draw and the put-back. The array itself is left alone: an
++ * XDK build that is not LTCG writes its own transient changes with the same
++ * methods (hle_d3d8_vertex.c), which must not stay in it. */
++#define WALK_RS_SLOTS 82u
++static uint32_t g_walk_rs[WALK_RS_SLOTS];
++static uint8_t  g_walk_rs_set[WALK_RS_SLOTS];
++int hle_d3d8_pb_walking(void);               /* hle_d3d8_vertex.c */
++int xbox_EnvSwitch(const char *name, int default_on);   /* xbox_memory_layout.c */
++static int simple_state_slot(uint32_t method);
++
++static int walk_rs_on(void)
++{
++    static int on = -1;
++    if (on < 0)
++        on = xbox_EnvSwitch("RECOMP_HLE_D3D8_WALK_RS", 1);
++    return on;
++}
++
++/* A simple-state method the walk passed, in buffer order. */
++void hle_d3d8_walk_simple_seen(uint32_t method, uint32_t value)
++{
++    int slot = simple_state_slot(method);
++
++    if (slot >= 0 && (uint32_t)slot < WALK_RS_SLOTS) {
++        g_walk_rs[slot] = value;
++        g_walk_rs_set[slot] = 1;
++    }
++}
++
++/* The walk lost its place: what it holds is no longer the buffer's. */
++void hle_d3d8_walk_simple_reset(void)
++{
++    memset(g_walk_rs_set, 0, sizeof g_walk_rs_set);
++}
++
+ static uint32_t guest_rs(uint32_t state)
+ {
+     int slot = rs_slot(state);
+-    return slot < 0 ? 0u : HLE_MEM32(hle_var_D3D_g_RenderState + 4u * (uint32_t)slot);
++    if (slot < 0)
++        return 0u;
++    if ((uint32_t)slot < WALK_RS_SLOTS && g_walk_rs_set[slot] && hle_d3d8_pb_walking() &&
++        walk_rs_on())
++        return g_walk_rs[slot];
++    return HLE_MEM32(hle_var_D3D_g_RenderState + 4u * (uint32_t)slot);
+ }
+ 
+ /* A texture stage state's slot (4039+ numbering, as g_ts_map has them) in
+@@ -1065,36 +1115,49 @@ HLE_ORIGINAL(D3DDevice_SetRenderState_Simple);
+  * title has SetRenderState_Simple inlined -- Halo 2's LTCG build does, at
+  * every use, so nothing replaced ever saw its depth, blend, colour-mask and
+  * stencil changes, and its depth-only and stencil passes drew solid colour. */
+-int hle_d3d8_state_store_simple(uint32_t method, uint32_t value)
++static const struct { uint16_t method; uint8_t state; } g_simple_map[] = {
++    { 0x0354, 57 },  /* ZFUNC              NV097_SET_DEPTH_FUNC */
++    { 0x033C, 58 },  /* ALPHAFUNC          NV097_SET_ALPHA_FUNC */
++    { 0x0304, 59 },  /* ALPHABLENDENABLE   NV097_SET_BLEND_ENABLE */
++    { 0x0300, 60 },  /* ALPHATESTENABLE    NV097_SET_ALPHA_TEST_ENABLE */
++    { 0x0340, 61 },  /* ALPHAREF           NV097_SET_ALPHA_REF */
++    { 0x0344, 62 },  /* SRCBLEND           NV097_SET_BLEND_FUNC_SFACTOR */
++    { 0x0348, 63 },  /* DESTBLEND          NV097_SET_BLEND_FUNC_DFACTOR */
++    { 0x035C, 64 },  /* ZWRITEENABLE       NV097_SET_DEPTH_MASK */
++    { 0x0310, 65 },  /* DITHERENABLE       NV097_SET_DITHER_ENABLE */
++    { 0x037C, 66 },  /* SHADEMODE          NV097_SET_SHADE_MODE */
++    { 0x0358, 67 },  /* COLORWRITEENABLE   NV097_SET_COLOR_MASK */
++    { 0x0374, 68 },  /* STENCILZFAIL       NV097_SET_STENCIL_OP_ZFAIL */
++    { 0x0378, 69 },  /* STENCILPASS        NV097_SET_STENCIL_OP_ZPASS */
++    { 0x0364, 70 },  /* STENCILFUNC        NV097_SET_STENCIL_FUNC */
++    { 0x0368, 71 },  /* STENCILREF         NV097_SET_STENCIL_FUNC_REF */
++    { 0x036C, 72 },  /* STENCILMASK        NV097_SET_STENCIL_FUNC_MASK */
++    { 0x0360, 73 },  /* STENCILWRITEMASK   NV097_SET_STENCIL_MASK */
++    { 0x0350, 74 },  /* BLENDOP            NV097_SET_BLEND_EQUATION */
++    { 0x034C, 75 },  /* BLENDCOLOR         NV097_SET_BLEND_COLOR */
++    { 0x09F8, 76 },  /* SWATHWIDTH         NV097_SET_SWATH_WIDTH */
++    { 0x0384, 77 },  /* POLYGONOFFSETZSLOPESCALE */
++    { 0x0388, 78 },  /* POLYGONOFFSETZOFFSET */
++    { 0x0330, 79 },  /* POINTOFFSETENABLE */
++    { 0x0334, 80 },  /* WIREFRAMEOFFSETENABLE */
++    { 0x0338, 81 },  /* SOLIDOFFSETENABLE */
++};
++
++/* The array slot a simple-state method stores, -1 for another method. */
++static int simple_state_slot(uint32_t method)
+ {
+-    static const struct { uint16_t method; uint8_t state; } map[] = {
+-        { 0x0354, 57 },  /* ZFUNC              NV097_SET_DEPTH_FUNC */
+-        { 0x033C, 58 },  /* ALPHAFUNC          NV097_SET_ALPHA_FUNC */
+-        { 0x0304, 59 },  /* ALPHABLENDENABLE   NV097_SET_BLEND_ENABLE */
+-        { 0x0300, 60 },  /* ALPHATESTENABLE    NV097_SET_ALPHA_TEST_ENABLE */
+-        { 0x0340, 61 },  /* ALPHAREF           NV097_SET_ALPHA_REF */
+-        { 0x0344, 62 },  /* SRCBLEND           NV097_SET_BLEND_FUNC_SFACTOR */
+-        { 0x0348, 63 },  /* DESTBLEND          NV097_SET_BLEND_FUNC_DFACTOR */
+-        { 0x035C, 64 },  /* ZWRITEENABLE       NV097_SET_DEPTH_MASK */
+-        { 0x0310, 65 },  /* DITHERENABLE       NV097_SET_DITHER_ENABLE */
+-        { 0x037C, 66 },  /* SHADEMODE          NV097_SET_SHADE_MODE */
+-        { 0x0358, 67 },  /* COLORWRITEENABLE   NV097_SET_COLOR_MASK */
+-        { 0x0374, 68 },  /* STENCILZFAIL       NV097_SET_STENCIL_OP_ZFAIL */
+-        { 0x0378, 69 },  /* STENCILPASS        NV097_SET_STENCIL_OP_ZPASS */
+-        { 0x0364, 70 },  /* STENCILFUNC        NV097_SET_STENCIL_FUNC */
+-        { 0x0368, 71 },  /* STENCILREF         NV097_SET_STENCIL_FUNC_REF */
+-        { 0x036C, 72 },  /* STENCILMASK        NV097_SET_STENCIL_FUNC_MASK */
+-        { 0x0360, 73 },  /* STENCILWRITEMASK   NV097_SET_STENCIL_MASK */
+-        { 0x0350, 74 },  /* BLENDOP            NV097_SET_BLEND_EQUATION */
+-        { 0x034C, 75 },  /* BLENDCOLOR         NV097_SET_BLEND_COLOR */
+-        { 0x09F8, 76 },  /* SWATHWIDTH         NV097_SET_SWATH_WIDTH */
+-        { 0x0384, 77 },  /* POLYGONOFFSETZSLOPESCALE */
+-        { 0x0388, 78 },  /* POLYGONOFFSETZOFFSET */
+-        { 0x0330, 79 },  /* POINTOFFSETENABLE */
+-        { 0x0334, 80 },  /* WIREFRAMEOFFSETENABLE */
+-        { 0x0338, 81 },  /* SOLIDOFFSETENABLE */
+-    };
+     size_t i;
++
++    method &= 0x1FFCu;
++    for (i = 0; i < sizeof g_simple_map / sizeof g_simple_map[0]; i++)
++        if (g_simple_map[i].method == method)
++            return g_simple_map[i].state;
++    return -1;
++}
++
++int hle_d3d8_state_store_simple(uint32_t method, uint32_t value)
++{
++    int slot;
+     /* RECOMP_HLE_D3D8_RS_SIMPLE=0 leaves the array stale, as before this
+      * replacement, to tell a wrong state apart from a wrong draw. */
+     static int store = -1;
+@@ -1103,15 +1166,12 @@ int hle_d3d8_state_store_simple(uint32_t method, uint32_t value)
+         const char *e = getenv("RECOMP_HLE_D3D8_RS_SIMPLE");
+         store = !(e && *e == '0');
+     }
+-    method &= 0x1FFCu;
+-    for (i = 0; i < sizeof map / sizeof map[0]; i++) {
+-        if (map[i].method == method) {
+-            if (hle_var_D3D_g_RenderState && store)
+-                HLE_MEM32(hle_var_D3D_g_RenderState + 4u * map[i].state) = value;
+-            return 1;
+-        }
+-    }
+-    return 0;
++    slot = simple_state_slot(method);
++    if (slot < 0)
++        return 0;
++    if (hle_var_D3D_g_RenderState && store)
++        HLE_MEM32(hle_var_D3D_g_RenderState + 4u * (uint32_t)slot) = value;
++    return 1;
+ }
+ 
+ uint32_t hle_d3d8_push_position(void);          /* hle_d3d8_vertex.c */
+diff --git a/src/hle/hle_d3d8_vertex.c b/src/hle/hle_d3d8_vertex.c
+index 793ee1f..b070823 100644
+--- a/src/hle/hle_d3d8_vertex.c
++++ b/src/hle/hle_d3d8_vertex.c
+@@ -471,6 +471,10 @@ static int pb_array_method(uint32_t method)
+ int hle_d3d8_state_store_simple(uint32_t method, uint32_t value);
+ int  hle_d3d8_title_ltcg(void);
+ int  hle_d3d8_simple_states_by_walk(void);   /* below */
++/* ...and, for any title, their values in buffer order for the walk's own
++ * draws (hle_d3d8_state.c). */
++void hle_d3d8_walk_simple_seen(uint32_t method, uint32_t value);
++void hle_d3d8_walk_simple_reset(void);
+ /* ...and the title's own clears: SET_ZSTENCIL_CLEAR_VALUE (0x1D8C),
+  * SET_COLOR_CLEAR_VALUE (0x1D90), CLEAR_SURFACE (0x1D94, which clears) and
+  * SET_CLEAR_RECT_HORIZONTAL / _VERTICAL (0x1D98, 0x1D9C). */
+@@ -1036,6 +1040,7 @@ void hle_d3d8_push_constants_sync(void)
+                 uint32_t m = noninc ? method : method + 4u * i;
+                 uint32_t v = HLE_MEM32(va + 4u + 4u * i);
+                 if (inl && ((m >= PB_SIMPLE_FIRST && m < PB_SIMPLE_END) || m == PB_SWATH)) {
++                    hle_d3d8_walk_simple_seen(m, v);
+                     if (!g_w_nodraw && hle_d3d8_title_ltcg())
+                         (void)hle_d3d8_state_store_simple(m, v);
+                     else
+@@ -1081,6 +1086,7 @@ resync:
+     walking = 0;
+     pb_flush();
+     flush_simple_states();
++    hle_d3d8_walk_simple_reset();
+     hle_d3d8_texture_queue_flush();
+     g_pb_resyncs++;
+     {

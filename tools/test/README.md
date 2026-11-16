@@ -20,6 +20,8 @@ folder, so a run never touches `game\UDATA` or your real saves.
 | `montage.ps1`, `tile.ps1` | Contact sheets of a run's screenshots. |
 | `pcmstat.py` | Loudness per 5 s of `RECOMP_AUDIO_CAPTURE` output, to check sound in a muted run. |
 | `capdraw.py`, `capstate.py` | One draw of a `.d3dcap` frame capture: its vertices decoded by the declaration and the vertex-program constants, or every render and stage state in force. |
+| `capbetween.py` | Every chunk a `.d3dcap` capture recorded between two draws, states named: what changed state between them. |
+| `xpu.py` | Decode the game's compiled pixel shaders (`.xpu`): texture modes, combiner count. |
 | `vs-battle.ps1` | Drives a fresh start into a VS MODE ship battle. |
 | `xdis.py`, `findimm.py`, `secxrefs.py` | Disassemble a guest address, find code using a constant, count code references into a section (capstone). |
 
