@@ -6,8 +6,24 @@ program, built against the
 You bring your own copy of the game, and it is built from that copy on your
 computer. This repository contains no game code or data.
 
-**Status: bring-up.** The XBE lifts cleanly (15,947 functions); nothing has
-been built or run yet. The goals, in order:
+**Status: bring-up, partly playable.** It builds and runs on Windows, with
+five toolkit patches (below).
+
+- Works: the logo movies, title screen and main menu with music; a new game
+  through crew sign-up to the first town; the governor, tavern, merchant,
+  shipwright and status screens; sailing the world map; saving at sea and
+  loading after a restart; a VS MODE ship battle; the game's own 16:9 mode
+  (`RECOMP_WIDESCREEN=1`) and a higher internal resolution
+  (`RECOMP_RES_SCALE`).
+- Broken: the governor's welcome scene freezes in about half the runs (the
+  sound streamer stalls), which blocks career play; character shadows draw
+  white, and characters draw as black silhouettes in some rooms; loading
+  screens are slow; seams show near the screen edges at sea in 16:9; the
+  game holds itself to 30 fps at sea and in battle.
+- Untested: sword duels, land battles, treasure hunts, dancing, a career
+  ship battle to its end, and play with a real pad or keyboard.
+
+The goals, in order:
 
 1. Playable on Windows.
 2. Widescreen, 4K internal resolution and an uncapped frame rate.
