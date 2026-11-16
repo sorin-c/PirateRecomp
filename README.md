@@ -7,7 +7,7 @@ You bring your own copy of the game, and it is built from that copy on your
 computer. This repository contains no game code or data.
 
 **Status: bring-up, partly playable.** It builds and runs on Windows, with
-nine toolkit patches (below).
+eleven toolkit patches (below).
 
 - Works: the logo movies, title screen and main menu with music; a new game
   through crew sign-up to the first town; the governor, tavern, merchant,
@@ -90,7 +90,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0008-d3d-vertex-blending.patch
    git -C xboxrecomp apply ..\patches\0009-d3d-lighting-without-normals.patch
    git -C xboxrecomp apply ..\patches\0010-hle-declaration-blend-weights.patch
-git -C xboxrecomp apply ..\patches\0010-hle-declaration-blend-weights.patch
+   git -C xboxrecomp apply ..\patches\0011-d3d-normal-matrix.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -145,6 +145,7 @@ git -C xboxrecomp apply ..\patches\0007-d3d-light-indices.patch
 git -C xboxrecomp apply ..\patches\0008-d3d-vertex-blending.patch
 git -C xboxrecomp apply ..\patches\0009-d3d-lighting-without-normals.patch
 git -C xboxrecomp apply ..\patches\0010-hle-declaration-blend-weights.patch
+git -C xboxrecomp apply ..\patches\0011-d3d-normal-matrix.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -238,6 +239,14 @@ git -C xboxrecomp apply ..\patches\0010-hle-declaration-blend-weights.patch
   dropped on the way, so 0008's blending never saw them: the dancers'
   dresses in the governor's ball came apart into strips. The weights now
   follow the position as XYZB1-4.
+
+- **0011-d3d-normal-matrix** (`src/d3d/d3d8_shaders.c`). The fixed-function
+  vertex shader's normal matrices (WorldInvTranspose, WorldViewInvTranspose)
+  were uploaded transposed once too often, so the shader got inverse(world)
+  instead of its transpose and turned every lit normal by the inverse of the
+  world rotation. Objects whose world matrix rotates were lit from the wrong
+  side: in the sword duel, the duellists' skin and shirts were lit only by
+  the garden's teal fill lights behind them and came out green.
 
 ## Running a build of your own
 

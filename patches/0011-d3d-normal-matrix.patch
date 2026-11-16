@@ -1,0 +1,39 @@
+diff --git a/src/d3d/d3d8_shaders.c b/src/d3d/d3d8_shaders.c
+index e1036f1..790ace1 100644
+--- a/src/d3d/d3d8_shaders.c
++++ b/src/d3d/d3d8_shaders.c
+@@ -1130,17 +1130,28 @@ static void ff_vs_prepare_draw(DWORD fvf)
+             mat4_transpose(world_t, (const float *)world);
+             memcpy(cb->world, world_t, sizeof(world_t));
+ 
+-            /* WorldInvTranspose = transpose(inverse(world)) */
++            /* WorldInvTranspose = transpose(inverse(world)). Every matrix
++             * here is uploaded transposed, so that the shader's
++             * mul(row vector, M) sees M itself (World above is uploaded as
++             * world_t). The shader's M is to be transpose(inverse(world)), so
++             * what is uploaded is inverse(world) as it is. It was uploaded
++             * transposed, which gave the shader inverse(world): every lit
++             * normal was turned by the inverse of the world rotation, the
++             * wrong way. Sid Meier's Pirates! characters, whose bones
++             * rotate, were lit from behind -- dark faces, with only the
++             * teal fill lights at their backs reaching them -- in the sword
++             * duel. Untouched where the world matrix has no rotation. */
+             mat4_inverse(world_inv, (const float *)world);
+-            mat4_transpose(world_inv_t, world_inv);
+-            memcpy(cb->world_inv_transpose, world_inv_t, sizeof(world_inv_t));
++            (void)world_inv_t;
++            memcpy(cb->world_inv_transpose, world_inv, sizeof(world_inv));
+ 
+-            /* WorldView (camera space) and its inverse-transpose */
++            /* WorldView (camera space) and its inverse-transpose, the same
++             * way. */
+             mat4_transpose(wv_t, wv);
+             memcpy(cb->world_view, wv_t, sizeof(wv_t));
+             mat4_inverse(wv_inv, wv);
+-            mat4_transpose(wv_inv_t, wv_inv);
+-            memcpy(cb->world_view_inv_transpose, wv_inv_t, sizeof(wv_inv_t));
++            (void)wv_inv_t;
++            memcpy(cb->world_view_inv_transpose, wv_inv, sizeof(wv_inv));
+ 
+             cb->screen_w = (float)d3d8_GetGuestWidth();
+             cb->screen_h = (float)d3d8_GetGuestHeight();
