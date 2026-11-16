@@ -25,12 +25,15 @@ eleven toolkit patches (below).
 - Minigames (16 Nov): a career boarding (button matching, the sword duel,
   defeat, prison and release) works. The game's own debug menu
   (`RECOMP_PIRATES_MINIGAMES` below) starts dancing, dueling, land battles
-  and town sneaking, and all of them load and play. Open there: in the
-  garden duel skin and shirts are tinted green; the town-sneak hero has no
-  head or hands, and leaving town sneak through the pause menu crashed
-  twice in two runs (a corrupt heap block); a game's first load on a fresh
-  save folder can freeze while the game copies its data into its cache
-  (not with `RECOMP_GUEST_LOCK=0`).
+  and town sneaking, and all of them load and play (the garden duel's
+  green skin is fixed by patch 0011). Open: the town-sneak hero was drawn
+  without head or hands (not re-checked since 0011), and opening the pause
+  menu in town sneak crashed twice in two runs (a corrupt heap block in
+  sub_00141190; logs in `NOTES-for-Sorin.md`).
+- Fixed 16 Nov: the first load on a fresh save folder froze on the loading
+  screen. The game copies its archives to the cache only while a movie or
+  loading screen is up, and with the movies skipped the copy stopped
+  part-way through a file (`RECOMP_PIRATES_CACHE_PAUSE` below).
 - Untested: treasure hunts (there is no debug entry for them; the landing
   party they start from works), a career ship battle to its end, and play
   with a real pad or keyboard.
@@ -276,6 +279,7 @@ own (`xboxrecomp/CLAUDE.md` lists those):
 | `RECOMP_PIRATES_SKIP_INTRO` | `1` | Skip every Bink movie through the movie player's own "not played" exit (`src/recomp_manual.c`): the 2K and Firaxis logos at boot, and the opening story (`PiratesOpening1.bik`) and mutiny (`PiratesOpening2.bik`) after NEW GAME, which are pre-rendered movies, not in-engine scenes. `intro` skips only the 2K, Firaxis and Pirates! movies; `0` plays everything as the disc does. On during bring-up. |
 | `RECOMP_PIRATES_LOG_BUFFER` | `1` | The log (stderr) is buffered (64 KB). The toolkit logs every file read, path lookup and event, and unbuffered that took about half the game's main-thread time: a new game's first town loaded in 47 s or more instead of 10-16 s. `0` goes back to unbuffered, for a crash that leaves no report. |
 | `RECOMP_PIRATES_MINIGAMES` | `0` | `1` shows the developers' own "MINIGAMES (*DEBUG!*)" entry on the main menu: dancing, dueling (any stage and difficulty), button matching, a ship battle, town sneaking and a land battle, each straight from the menu. The menu draws it while byte 0x004D69C0 is set (`src/recomp_manual.c` sets it); the game toggles it on a debug input no pad produces. For testing; a player never needs it. |
+| `RECOMP_PIRATES_CACHE_PAUSE` | `0` | The game copies its `.FPK` archives from the disc into the cache (`<save folder>\Cache`) on first use, on a job thread that copies only while its "go" event is set: the game sets it for a movie or a loading screen and resets it afterwards, so the copy never competes with gameplay for the DVD. With the movies skipped those windows were microseconds long, the copy stopped part-way through a file, and loading a save then waited for that file: three of three loads on a fresh save folder froze. `src/recomp_manual.c` leaves that one event set, so the copy finishes in the background (about a minute, once per save folder). `1` passes the resets on as the disc does. |
 | `RECOMP_GUEST_LOCK` | `1` (set by `src/main.c`) | One game thread runs lifted code at a time, as on the console's single CPU (the toolkit's default is on only for ARM). Without it, about half the runs through a new career's first governor visit froze or crashed: the main thread stopped after NEW GAME, the governor's welcome hung on its last line, or two threads crashed in one memmove. With it, 7 of 7 runs went through, at the same load time and frame rate. `0` turns it off. |
 
 ## The disc
