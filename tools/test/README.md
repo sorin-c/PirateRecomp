@@ -22,6 +22,7 @@ folder, so a run never touches `game\UDATA` or your real saves.
 | `capdraw.py`, `capstate.py` | One draw of a `.d3dcap` frame capture: its vertices decoded by the declaration and the vertex-program constants, or every render and stage state in force. |
 | `capbetween.py` | Every chunk a `.d3dcap` capture recorded between two draws, states named: what changed state between them. |
 | `xpu.py` | Decode the game's compiled pixel shaders (`.xpu`): texture modes, combiner count. |
+| `governor.ps1` | Drives a new career (English, default name) into the start town's governor's welcome, for the governor-scene freeze. |
 | `vs-battle.ps1` | Drives a fresh start into a VS MODE ship battle. |
 | `xdis.py`, `findimm.py`, `secxrefs.py` | Disassemble a guest address, find code using a constant, count code references into a section (capstone). |
 

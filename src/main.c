@@ -438,10 +438,23 @@ static int title_main(int argc, char **argv)
      * unless this says where. */
     host_setup_output(g_log_path, sizeof g_log_path);
 
-    /* Unbuffered output for immediate visibility during debugging, and so a
-     * crash keeps the tail of the log rather than losing it in a buffer. */
+    /* stdout unbuffered for immediate visibility. stderr, the log, is
+     * buffered: the toolkit writes a line for every file read, path lookup
+     * and event the game makes, and unbuffered each line was several writes
+     * straight to the log file. The game's main thread spent about half its
+     * time in NtWriteFile, and a new game's first town took 47 s or more to
+     * load instead of 10-16 s. The toolkit flushes wherever it reports a
+     * problem, so a crash still leaves its own lines; what can be lost is the
+     * last few routine ones before it. RECOMP_PIRATES_LOG_BUFFER=0 goes back
+     * to unbuffered, for chasing a crash that leaves no report. */
     setvbuf(stdout, NULL, _IONBF, 0);
-    setvbuf(stderr, NULL, _IONBF, 0);
+    {
+        const char *v = getenv("RECOMP_PIRATES_LOG_BUFFER");
+        if (v && *v == '0')
+            setvbuf(stderr, NULL, _IONBF, 0);
+        else
+            setvbuf(stderr, NULL, _IOFBF, 1u << 16);
+    }
 
     printf("=== Sid Meier's Pirates! - Static Recompilation ===\n");
     printf("Loading XBE...\n");

@@ -203,6 +203,7 @@ own (`xboxrecomp/CLAUDE.md` lists those):
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `RECOMP_PIRATES_SKIP_INTRO` | `1` | Skip every Bink movie through the movie player's own "not played" exit (`src/recomp_manual.c`): the 2K and Firaxis logos at boot, and the opening story (`PiratesOpening1.bik`) and mutiny (`PiratesOpening2.bik`) after NEW GAME, which are pre-rendered movies, not in-engine scenes. `intro` skips only the 2K, Firaxis and Pirates! movies; `0` plays everything as the disc does. On during bring-up. |
+| `RECOMP_PIRATES_LOG_BUFFER` | `1` | The log (stderr) is buffered (64 KB). The toolkit logs every file read, path lookup and event, and unbuffered that took about half the game's main-thread time: a new game's first town loaded in 47 s or more instead of 10-16 s. `0` goes back to unbuffered, for a crash that leaves no report. |
 
 ## The disc
 
