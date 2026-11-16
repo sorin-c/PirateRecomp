@@ -213,6 +213,49 @@ void sub_00126BC0(void)
     sub_00126BC0_gen();
 }
 
+/* ── Sid Meier's Pirates!: keep the disc-to-cache copy running ─
+ *
+ * On first use the game copies its .FPK archives from the disc into the
+ * utility drive's cache (Z:, the save folder's Cache), one file at a time
+ * through TRANSFER.TMP, on a job thread (sub_00154390). That thread copies
+ * a chunk only while a "go" event is set: the object at 0x004D67B0, its
+ * handle at +0x38 (wait at 0x00154F62). The game sets it for the length of
+ * a loading screen (sub_001264A0) and of each movie it plays (the logos,
+ * the attract movie, the opening story in sub_00090CC0), and resets it
+ * afterwards, so the copy never competes with gameplay for the drive.
+ *
+ * With the movies skipped (RECOMP_PIRATES_SKIP_INTRO) each of those
+ * windows is a few microseconds, so the copier stopped part-way through a
+ * file. Loading a save then needed that file: sub_0008F7D0 runs with the
+ * event reset (just after the opening story's Set/Reset in sub_00090CC0)
+ * and waited for a copy that was paused, and the game froze on its loading
+ * screen. Three of three loads on a fresh save folder froze, each at a
+ * different file; with a full cache, none did.
+ *
+ * So the reset is not passed on for that one event: the copy runs in the
+ * background until it is done (a minute or two, once per save folder).
+ * Every other ResetEvent goes through unchanged. A PC drive does not need
+ * the pause the console's DVD did. RECOMP_PIRATES_CACHE_PAUSE=1 passes the
+ * resets on as the disc does. */
+extern void sub_001A9220_gen(void);
+
+void sub_001A9220(void)   /* XAPI ResetEvent(HANDLE), stdcall */
+{
+    static int pause = -1;
+    uint32_t h = *(volatile uint32_t *)((uintptr_t)(g_esp + 4u) + g_xbox_mem_offset);
+    uint32_t obj = *(volatile uint32_t *)((uintptr_t)0x004D67B0u + g_xbox_mem_offset);
+
+    if (pause < 0)
+        pause = xbox_EnvSwitch("RECOMP_PIRATES_CACHE_PAUSE", 0);
+    if (!pause && obj && h &&
+        h == *(volatile uint32_t *)((uintptr_t)(obj + 0x38u) + g_xbox_mem_offset)) {
+        g_eax = 1;         /* TRUE */
+        g_esp += 8;        /* ret 4: the return address and the handle */
+        return;
+    }
+    sub_001A9220_gen();
+}
+
 /* ── Manual function overrides ─────────────────────────────── */
 
 /*
