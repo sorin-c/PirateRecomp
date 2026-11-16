@@ -197,6 +197,18 @@ if(COMMAND recomp_title_widescreen)
     recomp_title_widescreen(NATIVE REGISTER 96)
 endif()
 
+# The settings file: pirates.ini beside pirates_launcher.exe and
+# pirates_recomp.exe, read by both, instead of the toolkit's per-user file
+# (toolkit patch 0012). It is written with the defaults, commented, the
+# first time either runs. src/settings_title.h adds the game's own lines
+# (movies, the debug MINIGAMES menu, mute and the debugging switches); an
+# environment variable still overrides any line.
+if(TARGET xbox_config)
+    target_compile_definitions(xbox_config PRIVATE
+        RECOMP_TITLE_SETTINGS_FILE="pirates.ini"
+        RECOMP_TITLE_SETTINGS_HEADER="${CMAKE_CURRENT_SOURCE_DIR}/src/settings_title.h")
+endif()
+
 # The launcher (the toolkit's src/launcher): resolution, widescreen, frame
 # rate, fullscreen and the controls, written to the file the game reads,
 # then the game started. Beside the game's executable, as pirates_launcher.
