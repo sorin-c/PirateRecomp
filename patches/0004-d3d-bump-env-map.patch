@@ -1,0 +1,101 @@
+diff --git a/src/d3d/d3d8_combiners.c b/src/d3d/d3d8_combiners.c
+index 3bdd4fa..b395bb0 100644
+--- a/src/d3d/d3d8_combiners.c
++++ b/src/d3d/d3d8_combiners.c
+@@ -742,11 +742,31 @@ static int emit_xbox_textures(const NV2ACombinerState *state, char *buf,
+             EMIT("    r_t%d = float4(0, 0, 0, 1);\n", i);
+             break;
+         case XTM_PROJECT2D:
+-        case XTM_BUMPENVMAP:
+-        case XTM_BUMPENVMAP_LUM:
+             EMIT("    r_t%d = tex%d.Sample(samp%d, input.tc%d.xy / qdiv(input.tc%d.w)"
+                  " * tex_scale[%d].xy);\n", i, i, i, i, i, i);
+             break;
++        case XTM_BUMPENVMAP:
++        case XTM_BUMPENVMAP_LUM:
++            /* The source stage's (du, dv), through the stage's bump matrix,
++             * offsets this stage's coordinates. A signed host format holds
++             * (U, V) in .rg already; an unsigned colour's first two bytes
++             * (.b, .g of a BGRA texel) are read as two's complement, as the
++             * NV2A reads them. The _LUM variant's luminance scale is not
++             * applied: BUMPENVLSCALE and LOFFSET are not forwarded. */
++            if (i == 0) {
++                EMIT("    r_t%d = tex%d.Sample(samp%d, input.tc%d.xy / qdiv(input.tc%d.w)"
++                     " * tex_scale[%d].xy);\n", i, i, i, i, i, i);
++                break;
++            }
++            EMIT("    {\n");
++            EMIT("        float2 duv = bump_signed[%d] != 0 ? r_t%d.rg : bump_s8(r_t%d.bg);\n",
++                 i, in, in);
++            EMIT("        float2 off = float2(dot(bump_mat[%d].xz, duv),"
++                 " dot(bump_mat[%d].yw, duv));\n", i, i);
++            EMIT("        r_t%d = tex%d.Sample(samp%d, (input.tc%d.xy / qdiv(input.tc%d.w)"
++                 " + off) * tex_scale[%d].xy);\n", i, i, i, i, i, i);
++            EMIT("    }\n");
++            break;
+         case XTM_PROJECT3D:
+             EMIT("    r_t%d = tex%d.Sample(samp%d, input.tc%d.xyz / qdiv(input.tc%d.w));\n",
+                  i, i, i, i, i);
+@@ -859,7 +879,14 @@ int d3d8_combiners_generate_hlsl(const NV2ACombinerState *state,
+     EMIT("    uint4  shadow_func;\n");    /* x: D3DCMPFUNC, y: compare reversed */
+     EMIT("    float4 fog_params;\n");     /* start, end, density, D3DFOGMODE */
+     EMIT("    uint4  fog_src;\n");        /* x: NV2A_FOG_SRC_*, y: range fog */
++    EMIT("    float4 bump_mat[4];\n");     /* per stage: BUMPENVMAT00, 01, 10, 11 */
++    EMIT("    uint4  bump_signed;\n");     /* per stage: the bump source is SNORM */
+     EMIT("};\n\n");
++    /* An unsigned texel's bytes read as a bump source: two's complement. */
++    EMIT("float2 bump_s8(float2 u) {\n");
++    EMIT("    float2 b = round(saturate(u) * 255.0);\n");
++    EMIT("    return (b >= 128.0 ? b - 256.0 : b) / 127.0;\n");
++    EMIT("}\n\n");
+ 
+     /* ---- Input structure ----
+      *
+@@ -1673,6 +1700,30 @@ BOOL d3d8_combiners_prepare_draw(void)
+             UINT w = 0, h = 0;
+ 
+             cb->alpha_only[i] = format == D3DFMT_A8 || format == D3DFMT_LIN_A8;
++            /* Bump-environment stages: see NV2APSConstants.bump_mat. */
++            memset(cb->bump_mat[i], 0, sizeof cb->bump_mat[i]);
++            cb->bump_signed[i] = 0;
++            if (i > 0 && (g_combiner_state.xmode[i] == XTM_BUMPENVMAP ||
++                          g_combiner_state.xmode[i] == XTM_BUMPENVMAP_LUM)) {
++                const DWORD *tss = d3d8_GetTSS((DWORD)i);
++                D3DFORMAT src = d3d8_base_format(
++                    d3d8_GetStageTexture((DWORD)g_combiner_state.input_tex[i]));
++                if (tss) {
++                    memcpy(&cb->bump_mat[i][0], &tss[D3DTSS_BUMPENVMAT00], sizeof(float));
++                    memcpy(&cb->bump_mat[i][1], &tss[D3DTSS_BUMPENVMAT01], sizeof(float));
++                    memcpy(&cb->bump_mat[i][2], &tss[D3DTSS_BUMPENVMAT10], sizeof(float));
++                    memcpy(&cb->bump_mat[i][3], &tss[D3DTSS_BUMPENVMAT11], sizeof(float));
++                }
++                switch (src) {
++                case D3DFMT_Q8W8V8U8: case D3DFMT_X8L8V8U8: case D3DFMT_LIN_X8L8V8U8:
++                case D3DFMT_V8U8: case D3DFMT_LIN_V8U8:
++                case D3DFMT_L6V5U5: case D3DFMT_LIN_L6V5U5:
++                case D3DFMT_V16U16: case D3DFMT_LIN_V16U16:
++                    cb->bump_signed[i] = 1; break;
++                default:
++                    break;
++                }
++            }
+             /* Linear textures are addressed in texels on the NV2A; see
+              * NV2APSConstants.tex_scale. */
+             cb->tex_scale[i][0] = cb->tex_scale[i][1] = 1.0f;
+diff --git a/src/d3d/d3d8_combiners.h b/src/d3d/d3d8_combiners.h
+index 8cf7df9..c294a4f 100644
+--- a/src/d3d/d3d8_combiners.h
++++ b/src/d3d/d3d8_combiners.h
+@@ -341,6 +341,12 @@ typedef struct NV2APSConstants {
+     UINT  fog_src;
+     UINT  fog_range;                        /* range fog: |distance| */
+     UINT  fog_pad[2];
++    /* Bump-environment stages (BUMPENVMAP, BUMPENVMAP_LUM): the stage's
++     * 2x2 matrix (D3DTSS_BUMPENVMAT00, 01, 10, 11), and whether the source
++     * stage's texel is already signed on the host (a SNORM bump format: 1)
++     * or is an unsigned colour whose bytes the NV2A reads as signed (0). */
++    float bump_mat[NV2A_MAX_TEXTURES][4];
++    UINT  bump_signed[NV2A_MAX_TEXTURES];
+ } NV2APSConstants;
+ 
+ /* NV2APSConstants.fog_src. The fog unit sits before the combiners, so their

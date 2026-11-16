@@ -55,6 +55,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0001-lifter-xadd-flags-snapshot.patch
    git -C xboxrecomp apply ..\patches\0002-kernel-empty-directory-pattern.patch
    git -C xboxrecomp apply ..\patches\0003-input-live-file.patch
+   git -C xboxrecomp apply ..\patches\0004-d3d-bump-env-map.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -102,6 +103,7 @@ before the lift, from the repository root:
 git -C xboxrecomp apply ..\patches\0001-lifter-xadd-flags-snapshot.patch
 git -C xboxrecomp apply ..\patches\0002-kernel-empty-directory-pattern.patch
 git -C xboxrecomp apply ..\patches\0003-input-live-file.patch
+git -C xboxrecomp apply ..\patches\0004-d3d-bump-env-map.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -134,6 +136,16 @@ git -C xboxrecomp apply ..\patches\0003-input-live-file.patch
   game's long loading screens; this lets a test look at a screenshot first
   and press second (`tools/test/drive.ps1`). Does nothing unless the
   variable is set.
+
+- **0004-d3d-bump-env-map** (`src/d3d/d3d8_combiners.c`, `.h`). The pixel
+  shader translator sampled `BUMPENVMAP` and `BUMPENVMAP_LUM` stages as
+  plain 2D textures and ignored the bump matrix, which the HLE layer
+  already forwards. The stage's coordinates are now offset by the source
+  stage's (du, dv) through `BUMPENVMAT00..11`, reading an unsigned colour's
+  bytes as two's complement as the NV2A does. The game's
+  `PSDistortReflections_XB` pass uses it to ripple the reflection the sea
+  samples. `_LUM`'s luminance scale is still not applied (`BUMPENVLSCALE`
+  and `LOFFSET` are not forwarded).
 
 ## Running a build of your own
 
