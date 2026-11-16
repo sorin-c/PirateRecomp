@@ -7,7 +7,7 @@ You bring your own copy of the game, and it is built from that copy on your
 computer. This repository contains no game code or data.
 
 **Status: bring-up, partly playable.** It builds and runs on Windows, with
-five toolkit patches (below).
+six toolkit patches (below).
 
 - Works: the logo movies, title screen and main menu with music; a new game
   through crew sign-up to the first town; the governor, tavern, merchant,
@@ -75,6 +75,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0003-input-live-file.patch
    git -C xboxrecomp apply ..\patches\0004-d3d-bump-env-map.patch
    git -C xboxrecomp apply ..\patches\0005-hle-walk-draw-simple-states.patch
+   git -C xboxrecomp apply ..\patches\0006-d3d-spot-falloff-nan.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -124,6 +125,7 @@ git -C xboxrecomp apply ..\patches\0002-kernel-empty-directory-pattern.patch
 git -C xboxrecomp apply ..\patches\0003-input-live-file.patch
 git -C xboxrecomp apply ..\patches\0004-d3d-bump-env-map.patch
 git -C xboxrecomp apply ..\patches\0005-hle-walk-draw-simple-states.patch
+git -C xboxrecomp apply ..\patches\0006-d3d-spot-falloff-nan.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -178,6 +180,14 @@ git -C xboxrecomp apply ..\patches\0005-hle-walk-draw-simple-states.patch
   render states (depth, blend, alpha test, colour mask, stencil) in buffer
   order, and the draws it makes use them. The array itself is unchanged.
   `RECOMP_HLE_D3D8_WALK_RS=0` turns it off. Cull mode is not covered.
+
+- **0006-d3d-spot-falloff-nan** (`src/d3d/d3d8_shaders.c`). The
+  fixed-function lighting shader raised a spot light's cone ratio to its
+  falloff everywhere, so a light with falloff 0 gave pow(0, 0), NaN on the
+  GPU, at every vertex outside the cone, and the NaN made the whole lit
+  colour black. The main menu is lit by two such spots, and the sea chart
+  behind it came out black. The spot term now follows D3D: 0 outside the
+  outer cone, 1 inside the inner one, and the falloff curve only between.
 
 ## Running a build of your own
 

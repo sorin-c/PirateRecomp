@@ -1,0 +1,24 @@
+diff --git a/src/d3d/d3d8_shaders.c b/src/d3d/d3d8_shaders.c
+index 1109c13..3ac6ec8 100644
+--- a/src/d3d/d3d8_shaders.c
++++ b/src/d3d/d3d8_shaders.c
+@@ -251,8 +251,17 @@ static const char g_vs_source[] =
+     "                    float cosAngle = dot(-lightDir, normalize(Lights[i].DirRange.xyz));\n"
+     "                    float cosOuter = Lights[i].Spot.y;\n"
+     "                    float cosInner = Lights[i].Spot.x;\n"
+-    "                    spotFactor = saturate((cosAngle - cosOuter) / max(cosInner - cosOuter, 0.0001));\n"
+-    "                    spotFactor = pow(spotFactor, Lights[i].Atten.w);\n"
++    /* Outside the outer cone 0, inside the inner cone 1, and the falloff
++     * curve only between them, as D3D defines it. pow() was taken of the
++     * clamped ratio everywhere, and a falloff of 0 then made pow(0, 0) --
++     * NaN on the GPU -- for every vertex outside the cone, which turned the
++     * whole lit colour black. Sid Meier's Pirates! lights its main menu with
++     * two such spots (falloff 0, theta 0), and the sea chart behind the menu
++     * came out black. */
++    "                    if (cosAngle <= cosOuter) spotFactor = 0.0;\n"
++    "                    else if (cosAngle >= cosInner) spotFactor = 1.0;\n"
++    "                    else spotFactor = pow((cosAngle - cosOuter) / max(cosInner - cosOuter, 0.0001),\n"
++    "                                          Lights[i].Atten.w);\n"
+     "                }\n"
+     "            }\n"
+     "\n"
