@@ -16,8 +16,8 @@ nine toolkit patches (below).
   (`RECOMP_WIDESCREEN=1`) and a higher internal resolution
   (`RECOMP_RES_SCALE`).
 - Broken: one of the governor's guests is
-  drawn without a head; seams show near the screen edges at sea in
-  16:9; the game holds itself to 30 fps at sea and in battle.
+  drawn without a head; the game holds itself to 30 fps at sea and in
+  battle.
 - Fixed since the first status: the governor's welcome freeze and a crash
   during the town load (game threads ran in parallel; `RECOMP_GUEST_LOCK`
   below), and slow loading screens (the log was unbuffered;
