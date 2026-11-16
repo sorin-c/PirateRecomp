@@ -1,0 +1,18 @@
+diff --git a/src/d3d/d3d8_device.c b/src/d3d/d3d8_device.c
+index 04677ca..0a5ddb4 100644
+--- a/src/d3d/d3d8_device.c
++++ b/src/d3d/d3d8_device.c
+@@ -33,7 +33,12 @@
+ #define MAX_TEXTURE_STAGES   4
+ #define MAX_TSS_STATES       32
+ #define MAX_TRANSFORMS       512
+-#define MAX_LIGHTS           8
++/* Light indices, not lights at once: D3D8 lets a title use any index and
++ * only limits how many are enabled together (8, which d3d8_shaders.c packs).
++ * At 8 slots every SetLight and LightEnable above index 7 was dropped.
++ * Sid Meier's Pirates! lights its rooms with lights 39-43, so its characters
++ * there were lit by nothing and drew as black silhouettes. */
++#define MAX_LIGHTS           256
+ 
+ typedef struct D3D8DeviceState {
+ 

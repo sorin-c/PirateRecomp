@@ -7,7 +7,7 @@ You bring your own copy of the game, and it is built from that copy on your
 computer. This repository contains no game code or data.
 
 **Status: bring-up, partly playable.** It builds and runs on Windows, with
-six toolkit patches (below).
+seven toolkit patches (below).
 
 - Works: the logo movies, title screen and main menu with music; a new game
   through crew sign-up to the first town; the governor, tavern, merchant,
@@ -15,8 +15,8 @@ six toolkit patches (below).
   loading after a restart; a VS MODE ship battle; the game's own 16:9 mode
   (`RECOMP_WIDESCREEN=1`) and a higher internal resolution
   (`RECOMP_RES_SCALE`).
-- Broken: character shadows draw white, and characters draw as black
-  silhouettes in some rooms; seams show near the screen edges at sea in
+- Broken: character shadows draw white; some characters in rooms are
+  missing parts (a head, part of a face); seams show near the screen edges at sea in
   16:9; the game holds itself to 30 fps at sea and in battle.
 - Fixed since the first status: the governor's welcome freeze and a crash
   during the town load (game threads ran in parallel; `RECOMP_GUEST_LOCK`
@@ -76,6 +76,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0004-d3d-bump-env-map.patch
    git -C xboxrecomp apply ..\patches\0005-hle-walk-draw-simple-states.patch
    git -C xboxrecomp apply ..\patches\0006-d3d-spot-falloff-nan.patch
+   git -C xboxrecomp apply ..\patches\0007-d3d-light-indices.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -126,6 +127,7 @@ git -C xboxrecomp apply ..\patches\0003-input-live-file.patch
 git -C xboxrecomp apply ..\patches\0004-d3d-bump-env-map.patch
 git -C xboxrecomp apply ..\patches\0005-hle-walk-draw-simple-states.patch
 git -C xboxrecomp apply ..\patches\0006-d3d-spot-falloff-nan.patch
+git -C xboxrecomp apply ..\patches\0007-d3d-light-indices.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -188,6 +190,14 @@ git -C xboxrecomp apply ..\patches\0006-d3d-spot-falloff-nan.patch
   colour black. The main menu is lit by two such spots, and the sea chart
   behind it came out black. The spot term now follows D3D: 0 outside the
   outer cone, 1 inside the inner one, and the falloff curve only between.
+
+- **0007-d3d-light-indices** (`src/d3d/d3d8_device.c`). The host device
+  kept 8 light slots and dropped `SetLight` and `LightEnable` for any index
+  above 7. D3D8 allows any index and limits only how many lights are
+  enabled at once. The game lights its rooms with lights 39-43, so
+  characters in the governor's mansion, the shipwright's and the merchant's
+  were lit by nothing and drew as black silhouettes. 256 slots now; the
+  shader still packs the first 8 enabled.
 
 ## Running a build of your own
 
