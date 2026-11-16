@@ -185,8 +185,16 @@ endif()
 # does). So the player's Widescreen switch needs only the console flag.
 # Checked with RECOMP_WIDESCREEN=1: title, main menu and the 3D scenes come
 # out unstretched. The default stays 4:3 until the player turns it on.
+#
+# REGISTER 96: its vertex programs keep their projection at c96 (the
+# console's c0), not the toolkit's default c60. The toolkit treats a program
+# that does not read the projection register as screen-space 2D and, in 16:9,
+# squeezes it about the middle to keep a 4:3 HUD in proportion. Pirates!'
+# terrain programs were squeezed that way: at sea the land filled only the
+# middle 84% of the screen, and the sea quads drawn by fixed function showed
+# as plain strips at both edges.
 if(COMMAND recomp_title_widescreen)
-    recomp_title_widescreen(NATIVE)
+    recomp_title_widescreen(NATIVE REGISTER 96)
 endif()
 
 # The launcher (the toolkit's src/launcher): resolution, widescreen, frame
