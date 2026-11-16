@@ -150,6 +150,10 @@ points.
 maps to the game folder: in a build of your own they are written into
 `game/UDATA`. Test runs belong on a copy of `game/` without `UDATA`
 (`RECOMP_GAME_DIR`) and with `RECOMP_SAVE_DIR` set to a fresh folder.
+The save folder also holds the emulated console's identity (`console.ini`,
+its MAC address, part of what XAPI signs settings and saves with), so
+deleting it or pointing `RECOMP_SAVE_DIR` somewhere new makes existing
+settings and console-bound saves read as damaged: keep one folder per player.
 
 **Settings.** Environment variables this game reads on top of the toolkit's
 own (`xboxrecomp/CLAUDE.md` lists those):
