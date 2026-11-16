@@ -184,6 +184,35 @@ void sub_000DB7A0(void)
     sub_000DB7A0_gen();
 }
 
+/* ── Sid Meier's Pirates!: the debug MINIGAMES menu ────────────
+ *
+ * RECOMP_PIRATES_MINIGAMES=1 adds "MINIGAMES (*DEBUG!*)", the developers'
+ * own main-menu entry, between BONUS CONTENT and VS MODE. It starts the
+ * sword duel, land battle, dancing and the rest straight from the main menu,
+ * which is how they are tested without a career that happens to reach them.
+ * Off by default: a player never sees it.
+ *
+ * How: sub_00126BC0 is the main menu. It draws that entry, and counts it in
+ * the cursor's wrap-around, only while the byte 0x004D69C0 is set; the same
+ * function toggles that byte on a debug input (event 0x57) that no Xbox pad
+ * produces. sub_0012A1D0, which acts on the choice, reads the same byte, so
+ * setting it before the menu runs is all it takes. */
+extern void sub_00126BC0_gen(void);
+
+void sub_00126BC0(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        on = xbox_EnvSwitch("RECOMP_PIRATES_MINIGAMES", 0);
+        if (on) {
+            *(volatile uint8_t *)((uintptr_t)0x004D69C0u + g_xbox_mem_offset) = 1;
+            fprintf(stderr, "[PIRATES] debug MINIGAMES menu on (RECOMP_PIRATES_MINIGAMES)\n");
+            fflush(stderr);
+        }
+    }
+    sub_00126BC0_gen();
+}
+
 /* ── Manual function overrides ─────────────────────────────── */
 
 /*

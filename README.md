@@ -7,7 +7,7 @@ You bring your own copy of the game, and it is built from that copy on your
 computer. This repository contains no game code or data.
 
 **Status: bring-up, partly playable.** It builds and runs on Windows, with
-nine toolkit patches (below).
+eleven toolkit patches (below).
 
 - Works: the logo movies, title screen and main menu with music; a new game
   through crew sign-up to the first town; the governor, tavern, merchant,
@@ -22,8 +22,18 @@ nine toolkit patches (below).
   during the town load (game threads ran in parallel; `RECOMP_GUEST_LOCK`
   below), and slow loading screens (the log was unbuffered;
   `RECOMP_PIRATES_LOG_BUFFER`).
-- Untested: sword duels, land battles, treasure hunts, dancing, a career
-  ship battle to its end, and play with a real pad or keyboard.
+- Minigames (16 Nov): a career boarding (button matching, the sword duel,
+  defeat, prison and release) works. The game's own debug menu
+  (`RECOMP_PIRATES_MINIGAMES` below) starts dancing, dueling, land battles
+  and town sneaking, and all of them load and play. Open there: in the
+  garden duel skin and shirts are tinted green; the town-sneak hero has no
+  head or hands, and leaving town sneak through the pause menu crashed
+  twice in two runs (a corrupt heap block); a game's first load on a fresh
+  save folder can freeze while the game copies its data into its cache
+  (not with `RECOMP_GUEST_LOCK=0`).
+- Untested: treasure hunts (there is no debug entry for them; the landing
+  party they start from works), a career ship battle to its end, and play
+  with a real pad or keyboard.
 
 The goals, in order:
 
@@ -79,6 +89,8 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0007-d3d-light-indices.patch
    git -C xboxrecomp apply ..\patches\0008-d3d-vertex-blending.patch
    git -C xboxrecomp apply ..\patches\0009-d3d-lighting-without-normals.patch
+   git -C xboxrecomp apply ..\patches\0010-hle-declaration-blend-weights.patch
+   git -C xboxrecomp apply ..\patches\0011-d3d-normal-matrix.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -132,6 +144,8 @@ git -C xboxrecomp apply ..\patches\0006-d3d-spot-falloff-nan.patch
 git -C xboxrecomp apply ..\patches\0007-d3d-light-indices.patch
 git -C xboxrecomp apply ..\patches\0008-d3d-vertex-blending.patch
 git -C xboxrecomp apply ..\patches\0009-d3d-lighting-without-normals.patch
+git -C xboxrecomp apply ..\patches\0010-hle-declaration-blend-weights.patch
+git -C xboxrecomp apply ..\patches\0011-d3d-normal-matrix.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -219,6 +233,21 @@ git -C xboxrecomp apply ..\patches\0009-d3d-lighting-without-normals.patch
   position-only quad whose colour comes from the material (black,
   translucent), and every character's shadow came out white.
 
+- **0010-hle-declaration-blend-weights** (`src/hle/hle_d3d8.c`). A
+  fixed-function draw described by a vertex declaration (no program) is
+  drawn through an equivalent FVF, and the blend weights (v1) were
+  dropped on the way, so 0008's blending never saw them: the dancers'
+  dresses in the governor's ball came apart into strips. The weights now
+  follow the position as XYZB1-4.
+
+- **0011-d3d-normal-matrix** (`src/d3d/d3d8_shaders.c`). The fixed-function
+  vertex shader's normal matrices (WorldInvTranspose, WorldViewInvTranspose)
+  were uploaded transposed once too often, so the shader got inverse(world)
+  instead of its transpose and turned every lit normal by the inverse of the
+  world rotation. Objects whose world matrix rotates were lit from the wrong
+  side: in the sword duel, the duellists' skin and shirts were lit only by
+  the garden's teal fill lights behind them and came out green.
+
 ## Running a build of your own
 
 ```
@@ -246,6 +275,7 @@ own (`xboxrecomp/CLAUDE.md` lists those):
 | --- | --- | --- |
 | `RECOMP_PIRATES_SKIP_INTRO` | `1` | Skip every Bink movie through the movie player's own "not played" exit (`src/recomp_manual.c`): the 2K and Firaxis logos at boot, and the opening story (`PiratesOpening1.bik`) and mutiny (`PiratesOpening2.bik`) after NEW GAME, which are pre-rendered movies, not in-engine scenes. `intro` skips only the 2K, Firaxis and Pirates! movies; `0` plays everything as the disc does. On during bring-up. |
 | `RECOMP_PIRATES_LOG_BUFFER` | `1` | The log (stderr) is buffered (64 KB). The toolkit logs every file read, path lookup and event, and unbuffered that took about half the game's main-thread time: a new game's first town loaded in 47 s or more instead of 10-16 s. `0` goes back to unbuffered, for a crash that leaves no report. |
+| `RECOMP_PIRATES_MINIGAMES` | `0` | `1` shows the developers' own "MINIGAMES (*DEBUG!*)" entry on the main menu: dancing, dueling (any stage and difficulty), button matching, a ship battle, town sneaking and a land battle, each straight from the menu. The menu draws it while byte 0x004D69C0 is set (`src/recomp_manual.c` sets it); the game toggles it on a debug input no pad produces. For testing; a player never needs it. |
 | `RECOMP_GUEST_LOCK` | `1` (set by `src/main.c`) | One game thread runs lifted code at a time, as on the console's single CPU (the toolkit's default is on only for ARM). Without it, about half the runs through a new career's first governor visit froze or crashed: the main thread stopped after NEW GAME, the governor's welcome hung on its last line, or two threads crashed in one memmove. With it, 7 of 7 runs went through, at the same load time and frame rate. `0` turns it off. |
 
 ## The disc

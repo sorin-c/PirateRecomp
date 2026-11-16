@@ -1,0 +1,58 @@
+diff --git a/src/hle/hle_d3d8.c b/src/hle/hle_d3d8.c
+index 3150e56..9eace83 100644
+--- a/src/hle/hle_d3d8.c
++++ b/src/hle/hle_d3d8.c
+@@ -1769,9 +1769,10 @@ static int ff_from_declaration(uint32_t handle, uint32_t stride)
+         n++;
+     }
+ 
+-    /* FVF order: position, normal, diffuse, specular, texture sets. */
++    /* FVF order: position, blend weights, normal, diffuse, specular,
++     * texture sets. */
+     {
+-        static const int order[] = { 0, 2, 3, 4, 9, 10, 11, 12 };
++        static const int order[] = { 0, 1, 2, 3, 4, 9, 10, 11, 12 };
+         int o;
+ 
+         for (o = 0; o < (int)(sizeof order / sizeof order[0]) && !why; o++) {
+@@ -1821,6 +1822,20 @@ static int ff_from_declaration(uint32_t handle, uint32_t stride)
+                         why = "a position that is not 3 or 4 wide";
+                     g_ff.floats[g_ff.count] = floats;
+                     break;
++                case 1:
++                    /* Blend weights (v1) follow the position as XYZB1-4,
++                     * for a skinned mesh under D3DRS_VERTEXBLEND (patch
++                     * 0008 blends them). Dropped, every vertex followed
++                     * world matrix 0 alone, and Pirates!' dancers' dresses
++                     * came apart into strips. */
++                    if ((g_ff.fvf & 0x00Eu) != 0x002u)
++                        why = "blend weights on a position that is not XYZ";
++                    else if (floats > 4)
++                        why = "more than four blend weights";
++                    else
++                        g_ff.fvf = (g_ff.fvf & ~0x00Eu) | (DWORD)(0x004 + 2 * floats);
++                    g_ff.floats[g_ff.count] = floats;
++                    break;
+                 case 2:
+                     if (floats != 3)
+                         why = "a normal that is not 3 wide";
+@@ -1845,7 +1860,7 @@ static int ff_from_declaration(uint32_t handle, uint32_t stride)
+         }
+     }
+     for (k = 0; k < n; k++)
+-        if (in[k].reg == 1 || in[k].reg == 5 || in[k].reg == 6 ||
++        if (in[k].reg == 5 || in[k].reg == 6 ||
+             in[k].reg == 7 || in[k].reg == 8 || in[k].reg > 12)
+             dropped++;                           /* weights, fog, point size, back colours */
+ 
+@@ -1889,8 +1904,8 @@ static int ff_from_declaration(uint32_t handle, uint32_t stride)
+     if (notes < 8 && dropped) {
+         notes++;
+         fprintf(stderr, "[HLE-D3D8] fixed-function declaration 0x%08X: drawn as FVF "
+-                        "0x%08lX without %d input(s) an FVF cannot carry (blend "
+-                        "weights, fog, point size or back-face colours)\n",
++                        "0x%08lX without %d input(s) an FVF cannot carry (fog, "
++                        "point size or back-face colours)\n",
+                 handle, (unsigned long)g_ff.fvf, dropped);
+     }
+     return 1;
