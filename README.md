@@ -7,7 +7,7 @@ You bring your own copy of the game, and it is built from that copy on your
 computer. This repository contains no game code or data.
 
 **Status: bring-up, partly playable.** It builds and runs on Windows, with
-five toolkit patches (below).
+nine toolkit patches (below).
 
 - Works: the logo movies, title screen and main menu with music; a new game
   through crew sign-up to the first town; the governor, tavern, merchant,
@@ -15,8 +15,8 @@ five toolkit patches (below).
   loading after a restart; a VS MODE ship battle; the game's own 16:9 mode
   (`RECOMP_WIDESCREEN=1`) and a higher internal resolution
   (`RECOMP_RES_SCALE`).
-- Broken: character shadows draw white, and characters draw as black
-  silhouettes in some rooms; seams show near the screen edges at sea in
+- Broken: one of the governor's guests is
+  drawn without a head; seams show near the screen edges at sea in
   16:9; the game holds itself to 30 fps at sea and in battle.
 - Fixed since the first status: the governor's welcome freeze and a crash
   during the town load (game threads ran in parallel; `RECOMP_GUEST_LOCK`
@@ -75,6 +75,10 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0003-input-live-file.patch
    git -C xboxrecomp apply ..\patches\0004-d3d-bump-env-map.patch
    git -C xboxrecomp apply ..\patches\0005-hle-walk-draw-simple-states.patch
+   git -C xboxrecomp apply ..\patches\0006-d3d-spot-falloff-nan.patch
+   git -C xboxrecomp apply ..\patches\0007-d3d-light-indices.patch
+   git -C xboxrecomp apply ..\patches\0008-d3d-vertex-blending.patch
+   git -C xboxrecomp apply ..\patches\0009-d3d-lighting-without-normals.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -124,6 +128,10 @@ git -C xboxrecomp apply ..\patches\0002-kernel-empty-directory-pattern.patch
 git -C xboxrecomp apply ..\patches\0003-input-live-file.patch
 git -C xboxrecomp apply ..\patches\0004-d3d-bump-env-map.patch
 git -C xboxrecomp apply ..\patches\0005-hle-walk-draw-simple-states.patch
+git -C xboxrecomp apply ..\patches\0006-d3d-spot-falloff-nan.patch
+git -C xboxrecomp apply ..\patches\0007-d3d-light-indices.patch
+git -C xboxrecomp apply ..\patches\0008-d3d-vertex-blending.patch
+git -C xboxrecomp apply ..\patches\0009-d3d-lighting-without-normals.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -178,6 +186,38 @@ git -C xboxrecomp apply ..\patches\0005-hle-walk-draw-simple-states.patch
   render states (depth, blend, alpha test, colour mask, stencil) in buffer
   order, and the draws it makes use them. The array itself is unchanged.
   `RECOMP_HLE_D3D8_WALK_RS=0` turns it off. Cull mode is not covered.
+
+- **0006-d3d-spot-falloff-nan** (`src/d3d/d3d8_shaders.c`). The
+  fixed-function lighting shader raised a spot light's cone ratio to its
+  falloff everywhere, so a light with falloff 0 gave pow(0, 0), NaN on the
+  GPU, at every vertex outside the cone, and the NaN made the whole lit
+  colour black. The main menu is lit by two such spots, and the sea chart
+  behind it came out black. The spot term now follows D3D: 0 outside the
+  outer cone, 1 inside the inner one, and the falloff curve only between.
+
+- **0007-d3d-light-indices** (`src/d3d/d3d8_device.c`). The host device
+  kept 8 light slots and dropped `SetLight` and `LightEnable` for any index
+  above 7. D3D8 allows any index and limits only how many lights are
+  enabled at once. The game lights its rooms with lights 39-43, so
+  characters in the governor's mansion, the shipwright's and the merchant's
+  were lit by nothing and drew as black silhouettes. 256 slots now; the
+  shader still packs the first 8 enabled.
+
+- **0008-d3d-vertex-blending** (`src/d3d/d3d8_shaders.c`,
+  `src/hle/hle_d3d8_state.c`). `D3DRS_VERTEXBLEND` was not forwarded, and
+  the fixed-function vertex shader skipped the blend weights in XYZB1-5
+  vertices. Every skinned vertex was drawn with world matrix 0 alone, so
+  the game's characters came apart: torsos torn, limbs and coats out of
+  place. The Xbox values (n WEIGHTS = 2n-1, n WEIGHTS n MATRICES = 2n)
+  are forwarded, and the shader blends position and normal over up to
+  four world matrices.
+
+- **0009-d3d-lighting-without-normals** (`src/d3d/d3d8_shaders.c`). With
+  lighting on, a vertex without a normal was left unlit, with a white
+  diffuse colour. D3D lights it with a zero normal, so only the emissive
+  and ambient terms count. The game darkens its stencil shadows with a lit,
+  position-only quad whose colour comes from the material (black,
+  translucent), and every character's shadow came out white.
 
 ## Running a build of your own
 

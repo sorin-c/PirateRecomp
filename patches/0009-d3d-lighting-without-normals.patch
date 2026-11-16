@@ -1,0 +1,29 @@
+diff --git a/src/d3d/d3d8_shaders.c b/src/d3d/d3d8_shaders.c
+index e54757a..e1036f1 100644
+--- a/src/d3d/d3d8_shaders.c
++++ b/src/d3d/d3d8_shaders.c
+@@ -225,7 +225,9 @@ static const char g_vs_source[] =
+     "    if (Flags & FLAG_HAS_SPECULAR) vertSpecular = input.specular.bgra;\n"
+     "\n"
+     "    // World-space normal (lighting) and camera-space normal (TCI / fog)\n"
+-    "    float3 worldNormal = float3(0, 0, 1);\n"
++    /* No normal in the vertex: D3D lights it with a zero normal, so only
++     * the emissive and ambient terms count. */
++    "    float3 worldNormal = float3(0, 0, 0);\n"
+     "    if (Flags & FLAG_HAS_NORMAL) {\n"
+     "        worldNormal = normalize(mul(bnrm, (float3x3)WorldInvTranspose));\n"
+     "        nrmCam = normalize(mul(bnrm, (float3x3)WorldViewInvTranspose));\n"
+@@ -238,7 +240,12 @@ static const char g_vs_source[] =
+     "    o.tex3 = gen_tex(3, input, posCam, nrmCam);\n"
+     "\n"
+     "    // Lighting\n"
+-    "    if ((Flags & FLAG_LIGHTING) && (Flags & FLAG_HAS_NORMAL)) {\n"
++    /* Lit whether or not the vertex has a normal. A vertex without one took
++     * its diffuse colour unlit, white, as before: Sid Meier's Pirates! darkens
++     * its stencil shadows with a lit position-only quad whose colour is the
++     * material's (black, translucent), and every character shadow came out
++     * white. */
++    "    if (Flags & FLAG_LIGHTING) {\n"
+     "        float3 worldPos = mul(float4(bpos, 1.0), World).xyz;\n"
+     "        float3 viewDir = normalize(EyePos.xyz - worldPos);\n"
+     "\n"
