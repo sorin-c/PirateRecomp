@@ -434,6 +434,23 @@ static int title_main(int argc, char **argv)
     (void)argc;
     (void)argv;
 
+    /* One guest thread in lifted code at a time, as on the console's single
+     * CPU. The toolkit turns this on by default only for ARM hosts. On x86
+     * Pirates! ran its threads truly in parallel, and about half the runs
+     * through a new career's first governor visit went wrong. The main
+     * thread stopped dead after NEW GAME, the governor's welcome froze on
+     * its last line, or two threads crashed in the same memmove during the
+     * town load. With the lock, 4 runs of 4 went through cleanly, at the
+     * same load time (10-16 s) and the same battle frame time. Set
+     * RECOMP_GUEST_LOCK=0 to run without it. */
+    if (!getenv("RECOMP_GUEST_LOCK")) {
+#ifdef _WIN32
+        _putenv_s("RECOMP_GUEST_LOCK", "1");
+#else
+        setenv("RECOMP_GUEST_LOCK", "1", 0);
+#endif
+    }
+
     /* Before anything prints: a windowed program has nowhere to print
      * unless this says where. */
     host_setup_output(g_log_path, sizeof g_log_path);
