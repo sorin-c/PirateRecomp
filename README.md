@@ -15,11 +15,13 @@ five toolkit patches (below).
   loading after a restart; a VS MODE ship battle; the game's own 16:9 mode
   (`RECOMP_WIDESCREEN=1`) and a higher internal resolution
   (`RECOMP_RES_SCALE`).
-- Broken: the governor's welcome scene freezes in about half the runs (the
-  sound streamer stalls), which blocks career play; character shadows draw
-  white, and characters draw as black silhouettes in some rooms; loading
-  screens are slow; seams show near the screen edges at sea in 16:9; the
-  game holds itself to 30 fps at sea and in battle.
+- Broken: character shadows draw white, and characters draw as black
+  silhouettes in some rooms; seams show near the screen edges at sea in
+  16:9; the game holds itself to 30 fps at sea and in battle.
+- Fixed since the first status: the governor's welcome freeze and a crash
+  during the town load (game threads ran in parallel; `RECOMP_GUEST_LOCK`
+  below), and slow loading screens (the log was unbuffered;
+  `RECOMP_PIRATES_LOG_BUFFER`).
 - Untested: sword duels, land battles, treasure hunts, dancing, a career
   ship battle to its end, and play with a real pad or keyboard.
 
@@ -203,6 +205,8 @@ own (`xboxrecomp/CLAUDE.md` lists those):
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `RECOMP_PIRATES_SKIP_INTRO` | `1` | Skip every Bink movie through the movie player's own "not played" exit (`src/recomp_manual.c`): the 2K and Firaxis logos at boot, and the opening story (`PiratesOpening1.bik`) and mutiny (`PiratesOpening2.bik`) after NEW GAME, which are pre-rendered movies, not in-engine scenes. `intro` skips only the 2K, Firaxis and Pirates! movies; `0` plays everything as the disc does. On during bring-up. |
+| `RECOMP_PIRATES_LOG_BUFFER` | `1` | The log (stderr) is buffered (64 KB). The toolkit logs every file read, path lookup and event, and unbuffered that took about half the game's main-thread time: a new game's first town loaded in 47 s or more instead of 10-16 s. `0` goes back to unbuffered, for a crash that leaves no report. |
+| `RECOMP_GUEST_LOCK` | `1` (set by `src/main.c`) | One game thread runs lifted code at a time, as on the console's single CPU (the toolkit's default is on only for ARM). Without it, about half the runs through a new career's first governor visit froze or crashed: the main thread stopped after NEW GAME, the governor's welcome hung on its last line, or two threads crashed in one memmove. With it, 7 of 7 runs went through, at the same load time and frame rate. `0` turns it off. |
 
 ## The disc
 
