@@ -4,7 +4,9 @@ param([int]$Seconds = 60, [string]$Tag = "run", [switch]$Sound, [hashtable]$Env 
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
 $sp = $(if ($env:PIRATES_TEST_OUT) { $env:PIRATES_TEST_OUT } else { [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\..\..\testrun")) })
 $runs = Join-Path $sp "runs"; New-Item -ItemType Directory -Force $runs | Out-Null
-$saves = if ($SaveDir) { $SaveDir } else { Join-Path $sp "saves_$Tag" }; New-Item -ItemType Directory -Force $saves | Out-Null
+# One save folder for every run: it holds the emulated console's identity
+# (console.ini), and the game's settings and saves are signed per console.
+$saves = if ($SaveDir) { $SaveDir } else { Join-Path $sp "saves" }; New-Item -ItemType Directory -Force $saves | Out-Null
 $env:RECOMP_SAVE_DIR = $saves
 # The game's E:/T:/Z: data (UDATA, TDATA, CACHE) lives in the game folder, so
 # runs use a hard-linked copy whose data folders start empty unless -KeepData.

@@ -23,7 +23,11 @@ switch ($Cmd) {
       }
     }
     $s = Get-State; if ($s.pid) { Stop-Process -Id $s.pid -Force -ErrorAction SilentlyContinue }
-    $saves = if ($saveDir) { $saveDir } else { Join-Path $sp "saves_$tag" }; New-Item -ItemType Directory -Force $saves | Out-Null
+    # One save folder for every run: the runtime keeps the emulated console's
+    # identity (console.ini, its MAC address) there, and XAPI signs the game's
+    # settings and saves per console. A folder per run is a new console per
+    # run, and the game then calls the last run's settings "damaged".
+    $saves = if ($saveDir) { $saveDir } else { Join-Path $sp "saves" }; New-Item -ItemType Directory -Force $saves | Out-Null
     $env:RECOMP_SAVE_DIR = $saves
     $env:RECOMP_GAME_DIR = $(if ($env:PIRATES_TEST_GAME) { $env:PIRATES_TEST_GAME } else { [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\..\..\testgame")) })
     if (-not $keep) { foreach ($d in "UDATA", "TDATA", "CACHE") { Remove-Item -Recurse -Force (Join-Path $env:RECOMP_GAME_DIR $d) -ErrorAction SilentlyContinue } }
