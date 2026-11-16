@@ -178,6 +178,17 @@ endif()
 # # if it is not. See src/config/CMakeLists.txt.
 # recomp_title_widescreen(HOR_PLUS REGISTER 60)
 
+# Sid Meier's Pirates! has a 16:9 mode of its own: at boot it reads the
+# console's video flags through XGetVideoFlags (0x001AAB0D, called from
+# 0x000FF4A6) and, with the widescreen bit set, creates a 720x480 back buffer
+# and lays out its menus and camera for 16:9 (anamorphic, as the console
+# does). So the player's Widescreen switch needs only the console flag.
+# Checked with RECOMP_WIDESCREEN=1: title, main menu and the 3D scenes come
+# out unstretched. The default stays 4:3 until the player turns it on.
+if(COMMAND recomp_title_widescreen)
+    recomp_title_widescreen(NATIVE)
+endif()
+
 # The launcher (the toolkit's src/launcher): resolution, widescreen, frame
 # rate, fullscreen and the controls, written to the file the game reads,
 # then the game started. Beside the game's executable, as pirates_launcher.
