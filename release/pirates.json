@@ -1,0 +1,12 @@
+{
+  "title_name": "Sid Meier's Pirates!",
+  "title_id": "5454008F",
+  "project": "..",
+  "exe": "pirates_recomp",
+  "launcher": "pirates_launcher",
+  "release_name": "pirates",
+  "xbe": "default.xbe",
+  "images": [
+    {"sha1": "19191d2b0364c6ca7ee2a6fc063f3c8e3c843244", "name": "Disc (USA, Europe, multi-language)"}
+  ]
+}

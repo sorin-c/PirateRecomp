@@ -1,0 +1,171 @@
+diff --git a/src/hle/input_host.c b/src/hle/input_host.c
+index 7f96e0e..893db0f 100644
+--- a/src/hle/input_host.c
++++ b/src/hle/input_host.c
+@@ -206,11 +206,13 @@ static int seq_active(void)
+  * letters instead of finishing and the run never left the menus. While a
+  * script runs it is the only input on port 0, unless
+  * RECOMP_INPUT_SEQ_PAD=1 asks for the pad as well. */
++static int live_active(void);   /* RECOMP_INPUT_LIVE, below */
++
+ static int seq_owns_pad(void)
+ {
+     static int with_pad = -1;
+ 
+-    if (!seq_active())
++    if (!seq_active() && !live_active())
+         return 0;
+     if (with_pad < 0) {
+         const char *v = getenv("RECOMP_INPUT_SEQ_PAD");
+@@ -241,6 +243,143 @@ static void seq_input(RecompInputGamepad *g)
+     }
+ }
+ 
++/* RECOMP_INPUT_LIVE=<file> -- presses fed to a running title, one per line.
++ *
++ * RECOMP_INPUT_SEQ is a timeline fixed before the run starts, and a long path
++ * does not keep to one: Sid Meier's Pirates! takes five minutes from boot to
++ * its first town through loading screens whose length varies by tens of
++ * seconds from run to run, so a press timed for one screen lands on another.
++ * A person driving it looks first and presses second. This lets a test do the
++ * same: append a line to the file, the title presses it.
++ *
++ * Each line is <control>[+<control>...][:<hold ms>], the controls named as in
++ * RECOMP_INPUT_SEQ, e.g. "a", "dpad_down:300", "lstick_left+a:800". Lines are
++ * pressed one after another with a 120 ms gap, whenever they arrive; a line
++ * already in the file when the run starts is pressed then. "#" starts a
++ * comment line. The file is polled at most every 50 ms from the pad sampling
++ * path, so nothing runs when the variable is unset. Like a script, the file
++ * owns port 0 unless RECOMP_INPUT_SEQ_PAD=1. */
++#define LIVE_MAX 64
++static struct { unsigned long long start, end; int keys[4]; int nkeys; } s_live[LIVE_MAX];
++static int s_live_count;
++static int s_live_checked;
++static char s_live_path[512];
++static long s_live_offset;
++static unsigned long long s_live_last_poll, s_live_tail;
++
++static int live_active(void)
++{
++    if (!s_live_checked) {
++        const char *p = getenv("RECOMP_INPUT_LIVE");
++        s_live_checked = 1;
++        if (p && *p) {
++            strncpy(s_live_path, p, sizeof s_live_path - 1);
++            fprintf(stderr, "  [PAD] live input from %s\n", s_live_path);
++            fflush(stderr);
++        }
++    }
++    return s_live_path[0] != 0;
++}
++
++static void live_queue_line(const char *line, size_t len, unsigned long long now)
++{
++    unsigned long hold = 200;
++    int keys[4], nkeys = 0, slot, i;
++    const char *q = line, *end = line + len;
++
++    while (q < end && (*q == ' ' || *q == '\t'))
++        q++;
++    if (q >= end || *q == '#')
++        return;
++    while (q < end) {
++        size_t n = 0;
++        int k;
++        while (q + n < end && q[n] != '+' && q[n] != ':' && q[n] != ' ')
++            n++;
++        k = fake_lookup(q, n);
++        if (k < 0) {
++            fprintf(stderr, "  [PAD] live input: unknown control '%.*s'\n", (int)n, q);
++            return;
++        }
++        if (nkeys < 4)
++            keys[nkeys++] = k;
++        q += n;
++        if (q < end && *q == ':') {
++            hold = strtoul(q + 1, NULL, 10);
++            if (!hold)
++                hold = 200;
++            break;
++        }
++        if (q < end && *q == '+')
++            q++;
++        else
++            break;
++    }
++    if (!nkeys)
++        return;
++    /* A free slot: one whose press has ended. */
++    slot = -1;
++    for (i = 0; i < s_live_count; i++)
++        if (s_live[i].end <= now) { slot = i; break; }
++    if (slot < 0) {
++        if (s_live_count >= LIVE_MAX)
++            return;
++        slot = s_live_count++;
++    }
++    s_live[slot].start = s_live_tail > now ? s_live_tail : now;
++    s_live[slot].end = s_live[slot].start + hold;
++    s_live[slot].nkeys = nkeys;
++    for (i = 0; i < nkeys; i++)
++        s_live[slot].keys[i] = keys[i];
++    s_live_tail = s_live[slot].end + 120;
++    fprintf(stderr, "  [PAD] live input: %.*s\n", (int)len, line);
++    fflush(stderr);
++}
++
++static void live_poll(unsigned long long now)
++{
++    FILE *f;
++    char buf[1024];
++    size_t got, start, i;
++
++    if (now - s_live_last_poll < 50)
++        return;
++    s_live_last_poll = now;
++    f = fopen(s_live_path, "rb");
++    if (!f)
++        return;
++    if (fseek(f, s_live_offset, SEEK_SET) == 0) {
++        got = fread(buf, 1, sizeof buf, f);
++        start = 0;
++        for (i = 0; i < got; i++) {
++            if (buf[i] != '\n')
++                continue;
++            live_queue_line(buf + start,
++                            i - start - (i > start && buf[i - 1] == '\r'), now);
++            start = i + 1;
++        }
++        s_live_offset += (long)start;   /* a line still being written waits */
++    }
++    fclose(f);
++}
++
++static void live_input(RecompInputGamepad *g)
++{
++    unsigned long long now;
++    int i, k;
++
++    if (!live_active())
++        return;
++    now = GetTickCount64();
++    live_poll(now);
++    for (i = 0; i < s_live_count; i++) {
++        if (now < s_live[i].start || now >= s_live[i].end)
++            continue;
++        for (k = 0; k < s_live[i].nkeys; k++)
++            fake_apply(g, s_live[i].keys[k]);
++    }
++}
++
+ static void fake_input(RecompInputGamepad *g)
+ {
+     static int checked;
+@@ -391,6 +530,7 @@ bool recomp_input_host_sample_port(unsigned port, RecompInputGamepad *gamepad)
+         record_input(gamepad);      /* the person, before any script adds to it */
+         fake_input(gamepad);
+         seq_input(gamepad);
++        live_input(gamepad);
+     }
+     return true;
+ }
