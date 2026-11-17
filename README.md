@@ -7,7 +7,7 @@ You bring your own copy of the game, and it is built from that copy on your
 computer. This repository contains no game code or data.
 
 **Status: bring-up, partly playable.** It builds and runs on Windows, with
-seventeen toolkit patches (below).
+eighteen toolkit patches (below).
 
 - Works: the logo movies, title screen and main menu with music; a new game
   through crew sign-up to the first town; the governor, tavern, merchant,
@@ -15,8 +15,10 @@ seventeen toolkit patches (below).
   loading after a restart; a VS MODE ship battle; the game's own 16:9 mode
   (`RECOMP_WIDESCREEN=1`) and a higher internal resolution
   (`RECOMP_RES_SCALE`).
-- The game holds itself to 30 fps at sea, in battles and in the town
-  sneak (`frame_interp = 2` shows 60).
+- The game holds itself to 30 fps at sea, in battles, sword duels and the
+  town sneak; `frame_interp = 2` shows 60 there, characters included
+  (patch 0018). Menus, towns and the governor's rooms run at 60 (120
+  shown with interpolation); dancing paces itself to its music at ~50.
 - Fixed 17 Nov (patch 0017): characters' heads and hands (the town-sneak
   hero, a governor's guest) were missing or drawn huge in front of the
   camera.
@@ -100,6 +102,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0015-flip-gate-lend-any-divisor.patch
    git -C xboxrecomp apply ..\patches\0016-flip-gate-vblanks-per-swap.patch
    git -C xboxrecomp apply ..\patches\0017-hle-push-buffer-draws-ff-and-timing.patch
+   git -C xboxrecomp apply ..\patches\0018-hle-interp-fixed-function.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -161,6 +164,7 @@ git -C xboxrecomp apply ..\patches\0014-kernel-tick-count-1ms.patch
 git -C xboxrecomp apply ..\patches\0015-flip-gate-lend-any-divisor.patch
 git -C xboxrecomp apply ..\patches\0016-flip-gate-vblanks-per-swap.patch
 git -C xboxrecomp apply ..\patches\0017-hle-push-buffer-draws-ff-and-timing.patch
+git -C xboxrecomp apply ..\patches\0018-hle-interp-fixed-function.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -316,6 +320,18 @@ git -C xboxrecomp apply ..\patches\0017-hle-push-buffer-draws-ff-and-timing.patc
   the XDK feeds (v0 position, v1 weights, v2 normal, v3/v4 colours, v9-v12
   texture coordinates). `RECOMP_HLE_D3D8_PB_RUN_SYNC=0` restores the late
   draw. Needs a re-lift (`--from lift`): it adds an `HLE_ORIGINAL`.
+
+- **0018-hle-interp-fixed-function** (`src/hle/hle_d3d8_interp.c`,
+  `hle_d3d8_record.c`, `.h`). Frame interpolation blended only draws made
+  by vertex programs, through their matrix constants. Pirates! draws its
+  characters, the duels, the governor's rooms and the menus with the
+  fixed-function pipeline, so those frames were held (no in-betweens) or
+  the characters moved at 30 while the scene around them moved at 60. A
+  fixed-function draw now keeps its view, projection and world matrices
+  (one more world per blend weight), and an in-between frame draws it with
+  them blended like a program's: rotation as a quaternion, scale and
+  translation linearly, the projection term by term. Screen-space
+  (XYZRHW) draws are left as they are.
 
 ## Running a build of your own
 
