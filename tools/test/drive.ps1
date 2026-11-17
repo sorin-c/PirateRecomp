@@ -36,7 +36,10 @@ switch ($Cmd) {
     $live = Join-Path $sp "live_$tag.txt"; Set-Content -Path $live -Value $null -Encoding ascii
     $env:RECOMP_INPUT_LIVE = $live
     $log = Join-Path $runs "$tag.log"
-    $p = Start-Process -FilePath (Join-Path $root "build\Release\pirates_recomp.exe") -WorkingDirectory (Join-Path $root "build\Release") `
+    # PIRATES_TEST_EXE: another build to run (a second build tree, so the
+    # player's own build\Release is never rebuilt under them).
+    $exe = if ($env:PIRATES_TEST_EXE) { $env:PIRATES_TEST_EXE } else { Join-Path $root "build\Release\pirates_recomp.exe" }
+    $p = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) `
          -RedirectStandardError $log -RedirectStandardOutput (Join-Path $runs "$tag.stdout") -PassThru
     "pid=$($p.Id)`ntag=$tag`nlive=$live`nlog=$log`nt0=$([DateTime]::Now.Ticks)" | Set-Content $state
     "started pid $($p.Id) tag $tag"

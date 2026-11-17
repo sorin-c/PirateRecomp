@@ -1,0 +1,116 @@
+diff --git a/src/kernel/kernel.h b/src/kernel/kernel.h
+index 4bfef19..1788f01 100644
+--- a/src/kernel/kernel.h
++++ b/src/kernel/kernel.h
+@@ -718,6 +718,9 @@ ULONG_PTR __stdcall xbox_MmGetPhysicalAddress(PVOID BaseAddress);
+ 
+ VOID    __stdcall xbox_MmPersistContiguousMemory(PVOID BaseAddress, ULONG NumberOfBytes, BOOLEAN Persist);
+ ULONG   __stdcall xbox_MmQueryAddressProtect(PVOID VirtualAddress);
++/* Record the Xbox protection a contiguous allocation was made with, so
++ * MmQueryAddressProtect can report bits the host has no equivalent for. */
++void    xbox_ContiguousProtectNote(uint32_t xbox_va, uint32_t size, uint32_t protect);
+ VOID    __stdcall xbox_MmSetAddressProtect(PVOID BaseAddress, ULONG NumberOfBytes, ULONG NewProtect);
+ ULONG   __stdcall xbox_MmQueryAllocationSize(PVOID BaseAddress);
+ PVOID   __stdcall xbox_MmClaimGpuInstanceMemory(ULONG NumberOfBytes, PULONG NumberOfPaddingBytes);
+diff --git a/src/kernel/kernel_bridge.c b/src/kernel/kernel_bridge.c
+index 24f6fcd..974e2ee 100644
+--- a/src/kernel/kernel_bridge.c
++++ b/src/kernel/kernel_bridge.c
+@@ -839,6 +839,8 @@ static void bridge_MmAllocateContiguousMemory(void)
+      * hands the hardware. See xbox_ContiguousAlloc. */
+     uint32_t xbox_va = xbox_ContiguousAlloc(size, 4096);
+ 
++    if (xbox_va)    /* MmAllocateContiguousMemory is the Ex call with PAGE_READWRITE */
++        xbox_ContiguousProtectNote(xbox_va, size, 0x04);
+     if (KERNEL_LOG_ON_HALF()) {
+         fprintf(stderr, "  [KERNEL] MmAllocateContiguousMemory: size=%u → Xbox VA 0x%08X\n",
+                 size, xbox_va);
+@@ -904,8 +906,6 @@ static void bridge_MmAllocateContiguousMemoryEx(void)
+     uint32_t prot = STACK_ARG(4);
+     uint32_t xbox_va;
+ 
+-    (void)prot;
+-
+     /*
+      * A caller that constrains the range to exactly one allocation's worth is
+      * demanding a specific physical address, not expressing a preference.
+@@ -925,6 +925,9 @@ static void bridge_MmAllocateContiguousMemoryEx(void)
+         memset((void *)((uintptr_t)xbox_va + g_xbox_mem_offset), 0, size);
+         /* And the arena must not hand these pages out again. */
+         xbox_ContiguousPin(xbox_va, size);
++        /* What MmQueryAddressProtect answers for these pages: the host
++         * has no write-combine or no-cache bits to report them from. */
++        xbox_ContiguousProtectNote(xbox_va, size, prot);
+ 
+         if (KERNEL_LOG_ON_HALF()) {
+             fprintf(stderr, "  [KERNEL] MmAllocateContiguousMemoryEx: size=%u "
+@@ -938,6 +941,8 @@ static void bridge_MmAllocateContiguousMemoryEx(void)
+ 
+     if (align < 4096) align = 4096;
+     xbox_va = xbox_ContiguousAlloc(size, align);
++    if (xbox_va)
++        xbox_ContiguousProtectNote(xbox_va, size, prot);
+ 
+     if (KERNEL_LOG_ON_HALF()) {
+         fprintf(stderr, "  [KERNEL] MmAllocateContiguousMemoryEx: size=%u align=%u → Xbox VA 0x%08X\n",
+diff --git a/src/kernel/kernel_memory.c b/src/kernel/kernel_memory.c
+index 49f8d84..6d14b5d 100644
+--- a/src/kernel/kernel_memory.c
++++ b/src/kernel/kernel_memory.c
+@@ -177,9 +177,47 @@ VOID __stdcall xbox_MmPersistContiguousMemory(PVOID BaseAddress, ULONG NumberOfB
+     XBOX_TRACE(XBOX_LOG_MEM, "MmPersistContiguousMemory(%p, %u, %d) - stub", BaseAddress, NumberOfBytes, Persist);
+ }
+ 
++/* The Xbox protection of each page in the contiguous window, as the title
++ * asked for it (0 = never set).
++ *
++ * The host's page protection cannot answer MmQueryAddressProtect for these
++ * pages: PAGE_WRITECOMBINE and PAGE_NOCACHE have no host equivalent, so a
++ * page allocated with PAGE_READWRITE | PAGE_WRITECOMBINE (0x404) reads back
++ * as plain PAGE_READWRITE. Titles branch on those bits. Pirates! builds its
++ * two contiguous heaps with 0x404, and when one fills up it asks for the
++ * protection of the heap's base to decide where the overflow goes: with
++ * write-combine set, to MmAllocateContiguousMemoryEx (an address above both
++ * heaps); without it, to malloc. A malloc'd low address freed through the
++ * D3D free hook, which sets bit 31 to make a contiguous address of it, lands
++ * inside the other heap's range and is freed into that heap. The heap's
++ * block chain then runs through a live block, and the next coalesce reads a
++ * garbage size and faults (the town sneak's quit-to-menu crash). */
++extern ptrdiff_t g_xbox_mem_offset;
++static uint16_t g_contig_protect[XBOX_CONTIG_SIZE / 4096u];
++
++void xbox_ContiguousProtectNote(uint32_t xbox_va, uint32_t size, uint32_t protect)
++{
++    uint32_t page, end;
++
++    if (xbox_va < XBOX_CONTIG_BASE || !size || protect > 0xFFFFu)
++        return;
++    page = (xbox_va - XBOX_CONTIG_BASE) / 4096u;
++    end = (uint32_t)(((uint64_t)xbox_va - XBOX_CONTIG_BASE + size + 4095u) / 4096u);
++    if (end > XBOX_CONTIG_SIZE / 4096u)
++        end = XBOX_CONTIG_SIZE / 4096u;
++    for (; page < end; page++)
++        g_contig_protect[page] = (uint16_t)protect;
++}
++
+ ULONG __stdcall xbox_MmQueryAddressProtect(PVOID VirtualAddress)
+ {
+     MEMORY_BASIC_INFORMATION mbi;
++    uint32_t xbox_va = (uint32_t)((uintptr_t)VirtualAddress - (uintptr_t)g_xbox_mem_offset);
++
++    if (xbox_va >= XBOX_CONTIG_BASE &&
++        (uint64_t)xbox_va < (uint64_t)XBOX_CONTIG_BASE + XBOX_CONTIG_SIZE &&
++        g_contig_protect[(xbox_va - XBOX_CONTIG_BASE) / 4096u])
++        return g_contig_protect[(xbox_va - XBOX_CONTIG_BASE) / 4096u];
+     if (VirtualQuery(VirtualAddress, &mbi, sizeof(mbi))) {
+         /* Return the Xbox-equivalent protection */
+         return mbi.Protect;
+@@ -190,6 +228,8 @@ ULONG __stdcall xbox_MmQueryAddressProtect(PVOID VirtualAddress)
+ VOID __stdcall xbox_MmSetAddressProtect(PVOID BaseAddress, ULONG NumberOfBytes, ULONG NewProtect)
+ {
+     DWORD old_protect;
++    xbox_ContiguousProtectNote((uint32_t)((uintptr_t)BaseAddress - (uintptr_t)g_xbox_mem_offset),
++                               NumberOfBytes, NewProtect);
+ #ifdef _WIN32
+     VirtualProtect(BaseAddress, NumberOfBytes, xbox_protect_to_win32(NewProtect), &old_protect);
+ #else

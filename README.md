@@ -95,6 +95,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0010-hle-declaration-blend-weights.patch
    git -C xboxrecomp apply ..\patches\0011-d3d-normal-matrix.patch
    git -C xboxrecomp apply ..\patches\0012-config-title-settings-file.patch
+   git -C xboxrecomp apply ..\patches\0013-kernel-contiguous-protect.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -151,6 +152,7 @@ git -C xboxrecomp apply ..\patches\0009-d3d-lighting-without-normals.patch
 git -C xboxrecomp apply ..\patches\0010-hle-declaration-blend-weights.patch
 git -C xboxrecomp apply ..\patches\0011-d3d-normal-matrix.patch
 git -C xboxrecomp apply ..\patches\0012-config-title-settings-file.patch
+git -C xboxrecomp apply ..\patches\0013-kernel-contiguous-protect.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -260,6 +262,15 @@ git -C xboxrecomp apply ..\patches\0012-config-title-settings-file.patch
   also add its own commented lines to that file
   (`RECOMP_TITLE_SETTINGS_HEADER`), which a save from the launcher keeps.
   Pirates! uses both: `pirates.ini`, with `src/settings_title.h`.
+
+- **0013-kernel-contiguous-protect** (`src/kernel/kernel_memory.c`,
+  `kernel_bridge.c`). `MmQueryAddressProtect` reports the protection a
+  contiguous allocation was made with (write-combine and no-cache
+  included), not the host's, which has no such bits. Pirates! builds its two
+  contiguous heaps with write-combine and checks for it when one is full:
+  without it, the overflow went to malloc, and those low addresses, freed
+  through the D3D free hook (which sets bit 31), were freed into the other
+  heap and corrupted it. That was the crash on quitting the town sneak.
 
 ## Running a build of your own
 
