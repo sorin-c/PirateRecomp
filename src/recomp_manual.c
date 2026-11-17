@@ -283,6 +283,94 @@ void sub_00021D70(void)
     sub_00021D70_gen();
 }
 
+/* ── Sid Meier's Pirates!: a test probe for scripted play (debug) ──
+ *
+ * RECOMP_PIRATES_TEST_PROBE=<folder> (test_probe = <folder>) lets a test
+ * script see where the ships are and move the player's ship, so it can sail
+ * a career by itself (tools that steer from these files; the left stick turns
+ * the ship, about 150 degrees a second). Off (empty) by default; a player
+ * never needs it. Written from the game's clock read below, every 150-500 ms:
+ *
+ *   pos.txt     tick, player x, y (0x004564BC/C0, map units * 4,000,000,
+ *               y grows northward), map cell x, y (0x004C70EC/E8)
+ *   ships.txt   one line per object at sea: index, x, y, kind; the array
+ *               starts with the player at 0x004564BC, stride 0x45C
+ *   battle.txt  tick, ours: x, y, heading, crew (0x004D8F10..+0x1C),
+ *               enemy: x, y, heading, crew (0x004DBE08..+0x1C)
+ *   teleport.txt  written by the script: "x y" in map units moves the
+ *               player's ship there once, then the file is deleted. */
+static void pirates_probe_write(const char *dir, const char *name, const char *text)
+{
+    char fn[512]; FILE *fp;
+    snprintf(fn, sizeof fn, "%s/%s", dir, name);
+    if ((fp = fopen(fn, "w")) != NULL) { fputs(text, fp); fclose(fp); }
+}
+
+static int32_t pirates_rd32(uint32_t va)
+{
+    return *(volatile int32_t *)((uintptr_t)va + g_xbox_mem_offset);
+}
+
+static void pirates_test_probe(uint32_t now)
+{
+    static int on = -1;
+    static char dir[400];
+    static uint32_t last_pos, last_ships, last_battle;
+    char buf[8192], fn[512];
+    FILE *fp;
+    int tx, ty, i, n;
+
+    if (on < 0) {
+        const char *v = recomp_config_lookup("RECOMP_PIRATES_TEST_PROBE", "test_probe");
+        on = v && *v && strcmp(v, "0") != 0;
+        if (on) {
+            snprintf(dir, sizeof dir, "%s", v);
+            fprintf(stderr, "[PIRATES] test probe writing to %s (RECOMP_PIRATES_TEST_PROBE)\n", dir);
+            fflush(stderr);
+        }
+    }
+    if (!on)
+        return;
+    if (now - last_pos > 200u) {
+        last_pos = now;
+        snprintf(fn, sizeof fn, "%s/teleport.txt", dir);
+        if ((fp = fopen(fn, "r")) != NULL) {
+            if (fscanf(fp, "%d %d", &tx, &ty) == 2) {
+                *(volatile int32_t *)((uintptr_t)0x004564BCu + g_xbox_mem_offset) = tx * 4000000;
+                *(volatile int32_t *)((uintptr_t)0x004564C0u + g_xbox_mem_offset) = ty * 4000000;
+                fprintf(stderr, "[PIRATES] test probe: ship moved to %d,%d\n", tx, ty);
+            }
+            fclose(fp);
+            remove(fn);
+        }
+        snprintf(buf, sizeof buf, "%u %d %d %d %d\n", now,
+                 pirates_rd32(0x004564BCu), pirates_rd32(0x004564C0u),
+                 pirates_rd32(0x004C70ECu), pirates_rd32(0x004C70E8u));
+        pirates_probe_write(dir, "pos.txt", buf);
+    }
+    if (now - last_battle > 150u) {
+        last_battle = now;
+        snprintf(buf, sizeof buf, "%u %d %d %d %d %d %d %d %d\n", now,
+                 pirates_rd32(0x004D8F10u), pirates_rd32(0x004D8F14u),
+                 pirates_rd32(0x004D8F1Cu), pirates_rd32(0x004D8F2Cu),
+                 pirates_rd32(0x004DBE08u), pirates_rd32(0x004DBE0Cu),
+                 pirates_rd32(0x004DBE14u), pirates_rd32(0x004DBE24u));
+        pirates_probe_write(dir, "battle.txt", buf);
+    }
+    if (now - last_ships > 500u) {
+        last_ships = now;
+        for (i = 1, n = 0; i < 128 && n < (int)sizeof buf - 64; i++) {
+            uint32_t a = 0x004564BCu + (uint32_t)i * 0x45Cu;
+            int32_t x = pirates_rd32(a), y = pirates_rd32(a + 4u);
+            if (x || y)
+                n += snprintf(buf + n, sizeof buf - n, "%d %d %d %u\n", i, x, y,
+                              (uint32_t)pirates_rd32(a - 0xCu));
+        }
+        buf[n] = 0;
+        pirates_probe_write(dir, "ships.txt", buf);
+    }
+}
+
 /* ── Sid Meier's Pirates!: keep the disc-to-cache copy running ─
  *
  * On first use the game copies its .FPK archives from the disc into the
@@ -370,6 +458,7 @@ void sub_001A958A(void)
     uint32_t now;
 
     sub_001A958A_gen();
+    pirates_test_probe(g_eax);
     {   /* RECOMP_PIRATES_TICK_SITES=1: name each new caller once (which
          * limiter a scene uses) */
         static int sites = -1;

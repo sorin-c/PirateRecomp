@@ -33,6 +33,11 @@ static const struct {
       "# one, when a town menu opens and no treasure hunt is under way. The\n"
       "# number is how many pieces to buy (2 makes a whole map); 0 is off.\n"
       "#                                       [RECOMP_PIRATES_TREASURE_MAP]\n" },
+    { "test_probe", "",
+      "# Debug: a folder where the game writes where the ships are (at sea and\n"
+      "# in a ship battle) and reads teleport.txt to move your ship, for test\n"
+      "# scripts that play by themselves. Empty is off.\n"
+      "#                                        [RECOMP_PIRATES_TEST_PROBE]\n" },
     { "mute", "0",
       "# Play with no sound (the game still runs its audio).  [RECOMP_MUTE]\n" },
     { "guest_lock", "1",
