@@ -1,0 +1,173 @@
+diff --git a/src/hle/hle_d3d8_interp.c b/src/hle/hle_d3d8_interp.c
+index cf349f2..581d828 100644
+--- a/src/hle/hle_d3d8_interp.c
++++ b/src/hle/hle_d3d8_interp.c
+@@ -74,6 +74,7 @@
+ #include "../kernel/xbox_memory_layout.h"
+ 
+ IDirect3DDevice8 *hle_d3d8_shadow_device(void);   /* hle_d3d8.c */
++int xbox_EnvSwitch(const char *name, int default_on);
+ 
+ #define INTERP_MAX_MULTIPLE  8
+ #define INTERP_MAX_AFFINE    64                  /* registers */
+@@ -239,6 +240,13 @@ void hle_d3d8_interp_draw(void (*fn)(const void *arg), const void *arg, size_t s
+         l->cap_draws = n;
+     }
+     l->draws[l->ndraws].key = *key;
++    {   /* RECOMP_INTERP_FF=0: fixed-function draws drawn as N has them */
++        static int ff = -1;
++        if (ff < 0)
++            ff = xbox_EnvSwitch("RECOMP_INTERP_FF", 1);
++        if (!ff)
++            l->draws[l->ndraws].key.ff_worlds = 0;
++    }
+     l->draws[l->ndraws].match = -1;
+     l->draws[l->ndraws].tier = 0;
+     l->draws[l->ndraws].cut = 0;
+@@ -249,9 +257,17 @@ void hle_d3d8_interp_draw(void (*fn)(const void *arg), const void *arg, size_t s
+         key->uses_proj && g_proj >= 0 && (d3d8_vsh_bound_reads(g_proj, 4) & 1u);
+     l->draws[l->ndraws].groups =
+         key->uses_proj && g_aff_count ? d3d8_vsh_bound_reads(g_aff_first, g_aff_count) : 0;
+-    if (key->ff_worlds)
+-        memcpy(l->ff + (size_t)l->ndraws * FF_FLOATS, hle_d3d8_interp_ff_transforms(),
+-               FF_FLOATS * sizeof(float));
++    if (key->ff_worlds) {
++        /* What the device draws with, read back from it. */
++        static const DWORD st[FF_MATS] = { 2u, 3u, 256u, 257u, 258u, 259u };
++        float *f = l->ff + (size_t)l->ndraws * FF_FLOATS;
++        int m;
++        for (m = 0; m < FF_MATS; m++) {
++            const D3DMATRIX *x = d3d8_GetTransform((D3DTRANSFORMSTATETYPE)st[m]);
++            if (x)
++                memcpy(f + m * 16, x, 16 * sizeof(float));
++        }
++    }
+     r = l->regs + (size_t)l->ndraws * (size_t)g_nregs * 4;
+     if (g_proj >= 0) {
+         memcpy(r, c + g_proj * 4, 16 * sizeof(float));
+@@ -342,6 +358,13 @@ static const float *draw_translation(const InterpList *l, int i, float out[3])
+ {
+     const float *r;
+ 
++    if (l->draws[i].key.ff_worlds && l->ff) {   /* world 0's translation */
++        r = l->ff + (size_t)i * FF_FLOATS + 32;
++        out[0] = r[12];
++        out[1] = r[13];
++        out[2] = r[14];
++        return out;
++    }
+     if (!g_aff_count)
+         return NULL;
+     r = l->regs + (size_t)i * (size_t)g_nregs * 4 + (g_proj >= 0 ? 16 : 0);
+@@ -479,17 +502,29 @@ static int polar_rotation(const double *m, double *r)
+     return 1;
+ }
+ 
++/* Shepperd's method: from the largest of w, x, y, z, the rest from the
++ * off-diagonal sums. The sign-of-the-difference shortcut this replaced
++ * lost the relative sign of x, y and z at half a turn (w = 0): Pirates!'
++ * sea camera is a mirror whose proper part turns 180 degrees, and its
++ * rebuilt view flipped two axes, so the in-between frames lost the towns,
++ * the sails and the cloud shadows. */
+ static void quat_from(const double *r, double *q)
+ {
+-    double w = sqrt(fmax(0.0, 1.0 + r[0] + r[4] + r[8])) * 0.5;
+-    double x = sqrt(fmax(0.0, 1.0 + r[0] - r[4] - r[8])) * 0.5;
+-    double y = sqrt(fmax(0.0, 1.0 - r[0] + r[4] - r[8])) * 0.5;
+-    double z = sqrt(fmax(0.0, 1.0 - r[0] - r[4] + r[8])) * 0.5;
+-    double n;
+-
+-    x = copysign(x, r[7] - r[5]);
+-    y = copysign(y, r[2] - r[6]);
+-    z = copysign(z, r[3] - r[1]);
++    double tr = r[0] + r[4] + r[8], w, x, y, z, s, n;
++
++    if (tr > 0.0) {
++        s = sqrt(tr + 1.0) * 2.0;
++        w = 0.25 * s; x = (r[7] - r[5]) / s; y = (r[2] - r[6]) / s; z = (r[3] - r[1]) / s;
++    } else if (r[0] > r[4] && r[0] > r[8]) {
++        s = sqrt(1.0 + r[0] - r[4] - r[8]) * 2.0;
++        w = (r[7] - r[5]) / s; x = 0.25 * s; y = (r[1] + r[3]) / s; z = (r[2] + r[6]) / s;
++    } else if (r[4] > r[8]) {
++        s = sqrt(1.0 + r[4] - r[0] - r[8]) * 2.0;
++        w = (r[2] - r[6]) / s; x = (r[1] + r[3]) / s; y = 0.25 * s; z = (r[5] + r[7]) / s;
++    } else {
++        s = sqrt(1.0 + r[8] - r[0] - r[4]) * 2.0;
++        w = (r[3] - r[1]) / s; x = (r[2] + r[6]) / s; y = (r[5] + r[7]) / s; z = 0.25 * s;
++    }
+     n = sqrt(w * w + x * x + y * y + z * z);
+     q[0] = w / n;
+     q[1] = x / n;
+@@ -628,6 +663,18 @@ static void ff_to_regs(const float *m, float *r)
+ /* Fixed-function draw i: its view and world matrices made ready to blend
+  * (slot 0 the view, 2-5 the worlds; slot 1, the projection, is blended
+  * term by term when drawn). */
++static void ff_mul(const float *x, const float *y, float *out)   /* x * y, D3D order */
++{
++    int r, c, k;
++    for (r = 0; r < 4; r++)
++        for (c = 0; c < 4; c++) {
++            float v = 0.0f;
++            for (k = 0; k < 4; k++)
++                v += x[r * 4 + k] * y[k * 4 + c];
++            out[r * 4 + c] = v;
++        }
++}
++
+ static void prepare_ff(int i, const float *a, const float *b, int worlds, int *cut)
+ {
+     float ra[16], rb[16];
+@@ -638,6 +685,29 @@ static void prepare_ff(int i, const float *a, const float *b, int worlds, int *c
+         p->ok = 0;
+         if (m == 1 || (m >= 2 && m - 2 >= worlds))
+             continue;
++        if (m >= 2) {
++            /* A world matrix's jump is judged where the camera sees it
++             * (world times view): at sea the world sits tens of thousands
++             * of units from its origin, so "moved by half its distance"
++             * let one town's matrix blend into another's, and the town
++             * vanished from the in-between frame. */
++            float ca[16], cb[16];
++            Prepared tmp;
++            int jumped = 0;
++            ff_mul(a + m * 16, a, ca);
++            ff_mul(b + m * 16, b, cb);
++            ff_to_regs(ca, ra);
++            ff_to_regs(cb, rb);
++            prepare_group(&tmp, ra, rb, &jumped);
++            if (jumped) {
++                *cut = 1;
++                continue;
++            }
++            ff_to_regs(a + m * 16, ra);
++            ff_to_regs(b + m * 16, rb);
++            prepare_group(p, ra, rb, &jumped);
++            continue;
++        }
+         ff_to_regs(a + m * 16, ra);
+         ff_to_regs(b + m * 16, rb);
+         prepare_group(p, ra, rb, cut);
+@@ -690,7 +760,7 @@ static int prepare_frame(void)
+ 
+         if (d->key.ff_worlds) {
+             prims3d += d->key.prims;
+-            if (d->match < 0 || !prev->draws[d->match].key.ff_worlds)
++            if (d->match < 0 || d->tier != 1 || !prev->draws[d->match].key.ff_worlds)
+                 continue;
+             matched += d->key.prims;
+             prepare_ff(i, ff_of(prev, d->match), ff_of(cur, i), d->key.ff_worlds, &d->cut);
+@@ -808,7 +878,13 @@ static void set_draw_transforms(int i, double a)
+     const InterpDraw *d = &cur->draws[i];
+     const float *b = ff_of(cur, i);
+     IDirect3DDevice8 *dev = hle_d3d8_shadow_device();
+-    int blend = d->match >= 0 && !d->cut && prev->draws[d->match].key.ff_worlds;
++    /* Only a draw of the same bytes (tier 1): at sea a town's pieces share
++     * their shape and textures with the next town's, a tier 2 or 3 match
++     * paired different objects a few hundred units apart, and blending
++     * between them scattered the towns and the ships' sails out of the
++     * in-between frame (the picture flickered). */
++    int blend = d->match >= 0 && d->tier == 1 && !d->cut &&
++                prev->draws[d->match].key.ff_worlds;
+     int m, k;
+ 
+     if (!dev)
