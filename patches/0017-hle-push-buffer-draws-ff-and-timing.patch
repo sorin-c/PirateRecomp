@@ -1,0 +1,154 @@
+diff --git a/src/hle/hle_d3d8.c b/src/hle/hle_d3d8.c
+index 9eace83..935201f 100644
+--- a/src/hle/hle_d3d8.c
++++ b/src/hle/hle_d3d8.c
+@@ -1276,6 +1276,12 @@ uint32_t hle_d3d8_shadow_program_object(void)
+     return g_shadow_vs_is_program ? (g_shadow_vs & ~1u) : 0u;
+ }
+ 
++/* The FVF selected now; 0 under a program or a declaration. */
++uint32_t hle_d3d8_shadow_fvf(void)
++{
++    return g_shadow_vs_is_program ? 0u : g_shadow_vs;
++}
++
+ /* The stream a buffer draw takes its vertices from under the program
+  * selected now (struct shadow_program, base_stream); 0 under an FVF. */
+ uint32_t hle_d3d8_shadow_base_stream(void)
+diff --git a/src/hle/hle_d3d8_vertex.c b/src/hle/hle_d3d8_vertex.c
+index b070823..a47ccce 100644
+--- a/src/hle/hle_d3d8_vertex.c
++++ b/src/hle/hle_d3d8_vertex.c
+@@ -215,6 +215,77 @@ static uint8_t *push_gather(uint32_t first, uint32_t vertices, uint32_t *stride)
+     return push_gather_from(g_push_off, g_push_fmt, g_push_known, first, vertices, stride);
+ }
+ 
++uint32_t hle_d3d8_shadow_fvf(void);      /* hle_d3d8.c */
++
++/* A pushed draw under a fixed-function FVF: the arrays laid out as that FVF
++ * lays a vertex out (position and blend weights, normal, point size, diffuse,
++ * specular, texture coordinates), each field read from the input register
++ * the XDK feeds it from (v0, v1, v2, v3, v4, v9-v12). There is no program
++ * object to give the layout, so without this every fixed-function draw in a
++ * push buffer was dropped -- Pirates!' heads and hands, which Gamebryo draws
++ * from prebuilt push buffers. NULL when an array cannot be read. */
++static uint8_t *push_gather_fvf(const uint32_t off[16], const uint32_t fmt[16],
++                                uint32_t known, uint32_t first, uint32_t vertices,
++                                uint32_t *stride)
++{
++    uint32_t fvf = hle_d3d8_shadow_fvf(), pos = fvf & 0x00Eu, ntex = (fvf >> 8) & 0xFu;
++    uint32_t field_reg[16], field_off[16], field_size[16], nfield = 0, extent = 0, i, v;
++    uint8_t *out;
++
++    if (pos == 0x004u) {                         /* XYZRHW */
++        field_reg[nfield] = 0; field_off[nfield] = extent; field_size[nfield++] = 16; extent += 16;
++    } else if (pos) {                            /* XYZ, XYZB1..4 */
++        uint32_t weights = pos >= 0x006u ? (pos - 0x004u) / 2u : 0u;
++        field_reg[nfield] = 0; field_off[nfield] = extent; field_size[nfield++] = 12; extent += 12;
++        if (weights) {
++            field_reg[nfield] = 1; field_off[nfield] = extent;
++            field_size[nfield++] = 4u * weights; extent += 4u * weights;
++        }
++    }
++    if (fvf & 0x010u) {                          /* NORMAL */
++        field_reg[nfield] = 2; field_off[nfield] = extent; field_size[nfield++] = 12; extent += 12;
++    }
++    if (fvf & 0x020u) {                          /* PSIZE */
++        field_reg[nfield] = 6; field_off[nfield] = extent; field_size[nfield++] = 4; extent += 4;
++    }
++    if (fvf & 0x040u) {                          /* DIFFUSE */
++        field_reg[nfield] = 3; field_off[nfield] = extent; field_size[nfield++] = 4; extent += 4;
++    }
++    if (fvf & 0x080u) {                          /* SPECULAR */
++        field_reg[nfield] = 4; field_off[nfield] = extent; field_size[nfield++] = 4; extent += 4;
++    }
++    for (i = 0; i < ntex && i < 4u; i++) {
++        static const uint32_t floats[4] = { 2u, 3u, 4u, 1u };
++        uint32_t n = floats[(fvf >> (16u + 2u * i)) & 3u];
++        field_reg[nfield] = 9u + i; field_off[nfield] = extent;
++        field_size[nfield++] = 4u * n; extent += 4u * n;
++    }
++    if (!extent || extent > 256u)
++        return NULL;
++    out = calloc((size_t)vertices, extent);
++    if (!out)
++        return NULL;
++    for (i = 0; i < nfield; i++) {
++        uint32_t r = field_reg[i], pushed = fmt[r], pstride = pushed >> 8;
++        uint32_t va = (off[r] & 0x7FFFFFFFu) | CONTIG_BASE, size = field_size[i], psize;
++
++        if (!(known & (1u << r)) || (pushed & 0xF0u) == 0u)
++            continue;                            /* not fed: left zero */
++        psize = vsdt_bytes(pushed & 0xFFu);
++        if (psize && psize < size)
++            size = psize;
++        if (!guest_readable(va, (uint64_t)(first + vertices - 1u) * pstride + size)) {
++            free(out);
++            return NULL;
++        }
++        for (v = 0; v < vertices; v++)
++            memcpy(out + (size_t)v * extent + field_off[i],
++                   HLE_PTR(va + (first + v) * pstride), size);
++    }
++    *stride = extent;
++    return out;
++}
++
+ static uint8_t *push_gather_from(const uint32_t off[16], const uint32_t fmt[16],
+                                  uint32_t known, uint32_t first, uint32_t vertices,
+                                  uint32_t *stride)
+@@ -223,6 +294,8 @@ static uint8_t *push_gather_from(const uint32_t off[16], const uint32_t fmt[16],
+     uint32_t inl_off[16], inl_size = 0;
+     uint8_t *out;
+ 
++    if (!object && vertices && !g_gather_inline && hle_d3d8_shadow_fvf())
++        return push_gather_fvf(off, fmt, known, first, vertices, stride);
+     if (!object || !vertices || !guest_readable(object, 20u + 16u * 16u))
+         return NULL;
+     for (i = 0; i < 16u; i++) {
+@@ -1187,6 +1260,7 @@ HLE_ORIGINAL(D3DDevice_SetStreamSource);
+ HLE_ORIGINAL(CDevice_SetStateVB);
+ HLE_ORIGINAL(D3DDevice_DrawVertices);
+ HLE_ORIGINAL(D3DDevice_DrawIndexedVertices);
++HLE_ORIGINAL(D3DDevice_RunPushBuffer);
+ /* The one generic setter, on XDKs that predate the specialised forms. */
+ HLE_ORIGINAL(D3DDevice_SetVertexShaderConstant);
+ HLE_ORIGINAL(D3DDevice_SetVertexShaderConstant1);
+@@ -1407,6 +1481,37 @@ HLE_EXPORT(D3DDevice_DrawVertices)
+     }
+ }
+ 
++/* void D3DDevice_RunPushBuffer(D3DPushBuffer *pPushBuffer, D3DFixup *pFixup)
++ *
++ * A prebuilt push buffer: the body writes the device's lazy state and a jump
++ * into the buffer, whose draws (array offsets, begin/end, indices) only the
++ * walk sees. The walk ran at the next replaced call, by which time the title
++ * had moved on to the next object, so a fixed-function draw from a push
++ * buffer took the next object's transforms and textures. Pirates! draws each
++ * character's head and hands (Gamebryo skin partitions of 1,200+ triangles)
++ * this way: they came out huge, in front of the camera, or not at all. The
++ * walk is brought up to date here, as after any replaced draw, so the buffer
++ * is drawn with the state the title set for it.
++ * RECOMP_HLE_D3D8_PB_RUN_SYNC=0 leaves it to the next replaced call. */
++HLE_EXPORT(D3DDevice_RunPushBuffer)
++{
++    static int seen, on = -1;
++
++    first_call(&seen, "D3DDevice_RunPushBuffer", HLE_ARG(0));
++    if (original_missing(hle_original_D3DDevice_RunPushBuffer, "D3DDevice_RunPushBuffer"))
++        return;
++    HLE_CALL_ORIGINAL(D3DDevice_RunPushBuffer);
++    if (on < 0)
++        on = xbox_EnvSwitch("RECOMP_HLE_D3D8_PB_RUN_SYNC", 1);
++    if (on && !g_hle_original_depth && hle_d3d8_pb_inline_on()) {
++        /* the body flushed the lazy state (textures among it) as SetStateVB
++         * does for a draw: bind it before the walk draws from the buffer */
++        hle_d3d8_apply_pending_textures();
++        hle_d3d8_apply_pending_constants();
++        hle_d3d8_push_constants_sync();
++    }
++}
++
+ /* void D3DDevice_DrawIndexedVertices(D3DPRIMITIVETYPE PrimitiveType,
+  *     UINT VertexCount, const WORD *pIndexData)                             */
+ HLE_EXPORT(D3DDevice_DrawIndexedVertices)
