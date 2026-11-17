@@ -1,0 +1,108 @@
+diff --git a/src/kernel/kernel.h b/src/kernel/kernel.h
+index 1788f01..84f27b5 100644
+--- a/src/kernel/kernel.h
++++ b/src/kernel/kernel.h
+@@ -923,6 +923,9 @@ BOOLEAN __stdcall xbox_KeConnectInterrupt(PXBOX_KINTERRUPT Interrupt);
+ 
+ /* KeTickCount - exported as a data pointer, not a function */
+ extern volatile ULONG xbox_KeTickCount;
++/* KeTickCount's clock: milliseconds, at 1 ms resolution (GetTickCount moves
++ * in 15.6 ms steps). */
++ULONG xbox_TickCountMs(void);
+ 
+ /* ============================================================================
+  * Xbox Identity & Stubs (kernel_xbox.c)
+diff --git a/src/kernel/kernel_bridge.c b/src/kernel/kernel_bridge.c
+index 974e2ee..3850e77 100644
+--- a/src/kernel/kernel_bridge.c
++++ b/src/kernel/kernel_bridge.c
+@@ -229,7 +229,7 @@ static void kernel_data_init(void)
+ 
+     /* KeTickCount (ordinal 156) - initialized to current tick count.
+      * A background thread in main.c updates this every ~1ms. */
+-    BRIDGE_MEM32(XBOX_KERNEL_DATA_BASE + KDATA_TICK_COUNT) = GetTickCount();
++    BRIDGE_MEM32(XBOX_KERNEL_DATA_BASE + KDATA_TICK_COUNT) = xbox_TickCountMs();
+ 
+     /* LaunchDataPage (ordinal 164).
+      *
+@@ -2612,7 +2612,6 @@ static void bridge_KeDelayExecutionThread(void)
+     BRIDGE_ALERTABLE_APCS(alertable);
+     uint32_t interval_ptr = STACK_ARG(2);
+ 
+-
+     g_eax = (uint32_t)xbox_KeDelayExecutionThread(
+         (KPROCESSOR_MODE)wait_mode, (BOOLEAN)alertable,
+         XBOX_TO_NATIVE(interval_ptr));
+diff --git a/src/kernel/kernel_hal.c b/src/kernel/kernel_hal.c
+index 964821a..858156a 100644
+--- a/src/kernel/kernel_hal.c
++++ b/src/kernel/kernel_hal.c
+@@ -337,10 +337,48 @@ KIRQL __stdcall xbox_KeRaiseIrqlToDpcLevel(void)
+ 
+ volatile ULONG xbox_KeTickCount = 0;
+ 
++/* The millisecond clock KeTickCount shows.
++ *
++ * GetTickCount is the host's scheduler tick, and it moves in steps of
++ * 15.625 ms whatever timeBeginPeriod says. The console's KeTickCount moves
++ * every millisecond, and titles pace on it: Pirates! ends each frame by
++ * sleeping until KeTickCount is 31 ms past the frame's start. With 15.625 ms
++ * steps a frame that took 1-15 ms waited two whole steps instead, so every
++ * frame took exactly 31.25 ms; a title waiting less than a step waits a whole
++ * one.
++ *
++ * So count milliseconds from the performance counter, starting where
++ * GetTickCount was when first asked, so the value still means "milliseconds
++ * since the host booted" to a title that compares it with anything. */
++ULONG xbox_TickCountMs(void)
++{
++    static LONGLONG base_qpc, freq;
++    static ULONG base_ms;
++    static volatile LONG ready;
++    LARGE_INTEGER now;
++
++    if (!ready) {
++        LARGE_INTEGER f, c;
++        QueryPerformanceFrequency(&f);
++        QueryPerformanceCounter(&c);
++        if (InterlockedCompareExchange(&ready, 2, 0) == 0) {
++            freq = f.QuadPart ? f.QuadPart : 1000;
++            base_qpc = c.QuadPart;
++            base_ms = GetTickCount();
++            InterlockedExchange(&ready, 1);
++        }
++        while (ready != 1)
++            YieldProcessor();
++    }
++    QueryPerformanceCounter(&now);
++    return base_ms + (ULONG)(((now.QuadPart - base_qpc) / freq) * 1000
++                             + ((now.QuadPart - base_qpc) % freq) * 1000 / freq);
++}
++
+ /* Call this periodically or on-demand to update KeTickCount */
+ static void xbox_update_tick_count(void)
+ {
+-    xbox_KeTickCount = GetTickCount();
++    xbox_KeTickCount = xbox_TickCountMs();
+ }
+ 
+ /* ============================================================================
+diff --git a/src/kernel/xbox_memory_layout.c b/src/kernel/xbox_memory_layout.c
+index 52d2a02..b994c2e 100644
+--- a/src/kernel/xbox_memory_layout.c
++++ b/src/kernel/xbox_memory_layout.c
+@@ -2940,10 +2940,11 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
+          * which silently breaks every timeout that polls it: Halo's DHCP setup
+          * waits on a tick deadline that never arrives and spins forever bringing
+          * up XNet. A live clock is also just the truth -- KeTickCount ticks on
+-         * hardware whether or not anyone is asleep. GetTickCount() shares the
+-         * millisecond unit, so the rate matches. */
++         * hardware whether or not anyone is asleep. Milliseconds from the
++         * performance counter, not GetTickCount, whose 15.6 ms steps a title
++         * pacing on this clock waits out whole (xbox_TickCountMs). */
+         *(volatile uint32_t *)((uintptr_t)(XBOX_KERNEL_DATA_BASE + KDATA_TICK_COUNT)
+-                               + g_memory_offset) = GetTickCount();
++                               + g_memory_offset) = xbox_TickCountMs();
+ 
+         nv2a_ack_wait();
+     }

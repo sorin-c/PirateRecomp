@@ -96,6 +96,8 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0011-d3d-normal-matrix.patch
    git -C xboxrecomp apply ..\patches\0012-config-title-settings-file.patch
    git -C xboxrecomp apply ..\patches\0013-kernel-contiguous-protect.patch
+   git -C xboxrecomp apply ..\patches\0014-kernel-tick-count-1ms.patch
+   git -C xboxrecomp apply ..\patches\0015-flip-gate-lend-any-divisor.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -153,6 +155,8 @@ git -C xboxrecomp apply ..\patches\0010-hle-declaration-blend-weights.patch
 git -C xboxrecomp apply ..\patches\0011-d3d-normal-matrix.patch
 git -C xboxrecomp apply ..\patches\0012-config-title-settings-file.patch
 git -C xboxrecomp apply ..\patches\0013-kernel-contiguous-protect.patch
+git -C xboxrecomp apply ..\patches\0014-kernel-tick-count-1ms.patch
+git -C xboxrecomp apply ..\patches\0015-flip-gate-lend-any-divisor.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -271,6 +275,21 @@ git -C xboxrecomp apply ..\patches\0013-kernel-contiguous-protect.patch
   without it, the overflow went to malloc, and those low addresses, freed
   through the D3D free hook (which sets bit 31), were freed into the other
   heap and corrupted it. That was the crash on quitting the town sneak.
+
+- **0014-kernel-tick-count-1ms** (`src/kernel/kernel_hal.c`,
+  `xbox_memory_layout.c`). `KeTickCount` counts milliseconds from the
+  performance counter instead of copying `GetTickCount`, which moves in
+  15.6 ms steps. Pirates! ends each frame at sea and in battle by sleeping
+  until the tick is 31 ms past the frame's start; with 15.6 ms steps every
+  frame took exactly 31.25 ms (32 fps).
+
+- **0015-flip-gate-lend-any-divisor** (`src/kernel/xbox_memory_layout.c`).
+  The flip gate lends its wait to frame interpolation at any vblank divisor,
+  not only at one Swap a vblank, and tells it which vblank will release the
+  frame. A title held to 30 can then show the frames between. Pirates! uses
+  it with `frame_interp = 2` in `pirates.ini` (`src/recomp_manual.c`,
+  `sub_001A958A`): at sea and in battles the game keeps its 30 and the
+  screen shows 60.
 
 ## Running a build of your own
 

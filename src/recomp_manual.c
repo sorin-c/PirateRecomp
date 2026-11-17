@@ -260,6 +260,73 @@ void sub_001A9220(void)   /* XAPI ResetEvent(HANDLE), stdcall */
     sub_001A9220_gen();
 }
 
+/* The frame limiter at sea and in battles, and frame interpolation.
+ *
+ * Those scenes end each frame by sleeping, two milliseconds at a time, until
+ * the tick count (GetTickCount, this function) is 31 ms past the frame's
+ * start (sea: 0x00091DC2-0x00091DF5 in sub_00091170 and a second copy at
+ * 0x000A4AE9; ship battles: 0x000C3B30, which waits 100 ms instead while
+ * bit 0x20 of 0x0049C298 is set, left alone here); on the console the Swap then
+ * waits for the next vblank, so they run at 30. Their logic steps once a
+ * frame: without the limiter the ship sails several times too fast.
+ *
+ * So the frame rate cannot be raised there; what can be raised is what is
+ * shown. With frame interpolation on (frame_interp = 2 or more in
+ * pirates.ini, RECOMP_FRAME_INTERP), the limiter's wait is moved into the
+ * flip gate: the comparison after the tick read is told the 31 ms have passed, and
+ * the gate holds those scenes to one Swap every two vblanks, the console's
+ * 30, lending the wait to the interpolation, which shows the frames between
+ * (toolkit patch 0015). The menus and the towns, which never reach the
+ * limiter, go back to one Swap a vblank 200 ms after it was last reached.
+ * Without frame interpolation nothing changes. */
+extern void sub_001A958A_gen(void);
+extern int recomp_config_int(const char *env_name, const char *key, int fallback);
+extern void xbox_Nv2aFlipGateSetTitleInterval(uint32_t interval);
+#define PIRATES_LIMITER_SEA  0x00091DE1u     /* after the limiters' tick reads: */
+#define PIRATES_LIMITER_SEA2 0x000A4AEEu     /* the sea (two loops), */
+#define PIRATES_LIMITER_BTL  0x000C3B4Eu     /* ship battles */
+#define PIRATES_SLOW_FLAGS   0x0049C298u     /* bit 0x20: battles wait 100 ms */
+#define PIRATES_FRAME_START  0x005061F8u     /* the limiter's time base */
+void sub_001A958A(void)
+{
+    static int smooth = -1, at30;
+    static uint32_t last_hit;
+    uint32_t ra = *(volatile uint32_t *)((uintptr_t)g_esp + g_xbox_mem_offset);
+    uint32_t now;
+
+    sub_001A958A_gen();
+    if (smooth < 0) {
+        smooth = recomp_config_int("RECOMP_FRAME_INTERP", "frame_interp", 0) >= 2;
+        if (smooth) {
+            /* The gate honours the title's interval only when told to. */
+#ifdef _WIN32
+            _putenv("RECOMP_TITLE_INTERVAL=1");
+#else
+            setenv("RECOMP_TITLE_INTERVAL", "1", 1);
+#endif
+            fprintf(stderr, "[PIRATES] frame interpolation: the 30 fps scenes are paced "
+                            "by the flip gate\n");
+        }
+    }
+    if (!smooth)
+        return;
+    now = g_eax;
+    if (ra == PIRATES_LIMITER_SEA || ra == PIRATES_LIMITER_SEA2 ||
+        (ra == PIRATES_LIMITER_BTL &&
+         !(*(volatile uint8_t *)((uintptr_t)PIRATES_SLOW_FLAGS + g_xbox_mem_offset) & 0x20))) {
+        g_eax = *(volatile uint32_t *)((uintptr_t)PIRATES_FRAME_START + g_xbox_mem_offset)
+                + 0x40000000u;                   /* "31 ms have passed" */
+        last_hit = now;
+        if (!at30) {
+            at30 = 1;
+            xbox_Nv2aFlipGateSetTitleInterval(2);  /* D3DPRESENT_INTERVAL_TWO */
+        }
+    } else if (at30 && now - last_hit > 200u) {
+        at30 = 0;
+        xbox_Nv2aFlipGateSetTitleInterval(1);
+    }
+}
+
 /* ── Manual function overrides ─────────────────────────────── */
 
 /*
