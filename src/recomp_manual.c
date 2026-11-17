@@ -142,6 +142,7 @@ int xbox_EnvSwitch(const char *name, int default_on);
  * variable named, which wins. xboxrecomp/src/config/recomp_config.h. */
 const char *recomp_config_lookup(const char *env_name, const char *key);
 int recomp_config_bool(const char *env_name, const char *key, int fallback);
+int recomp_config_int(const char *env_name, const char *key, int fallback);
 extern void sub_000DB7A0_gen(void);
 #if !defined(_MSC_VER)
 #  include <strings.h>
@@ -215,6 +216,71 @@ void sub_00126BC0(void)
         }
     }
     sub_00126BC0_gen();
+}
+
+/* ── Sid Meier's Pirates!: a treasure map on demand (debug) ────
+ *
+ * RECOMP_PIRATES_TREASURE_MAP=n (treasure_map = n) buys up to n pieces of a
+ * buried-treasure map from the mysterious traveller, free, when a town menu
+ * opens and no hunt is in progress, so a treasure hunt can be tested without
+ * waiting for the traveller (a random town event) or for a beaten pirate to
+ * drop a map. 2 makes a whole map on the default difficulty. Off (0) by
+ * default; a player never needs it.
+ *
+ * How: sub_00021D70 is the town menu; the town is the 32-byte entry
+ * 0x004A1968 + 32 * MEM32(0x00424828) (+0 x, +4 y). The traveller's "yes"
+ * (0x0001923C, in the town events of sub_00016C70) takes the gold and calls
+ * sub_000AA3C0(0, x, y, 1, 0, 0, 0): hunt slot 0, the town it was bought in,
+ * one purchase. That picks the nearest top-ten pirate's treasure (0x0049C4BC),
+ * starts the hunt in slot 0 (0x0049C3A8, the treasure's x, nonzero while one
+ * runs; 0x0049C4B8 holds the missing pieces in bits 8-11) and shows the map.
+ * The same call is made here, before the town menu opens, once per piece. */
+extern void sub_00021D70_gen(void);
+extern void sub_000AA3C0(void);
+
+#define PIRATES_TOWN_INDEX 0x00424828u
+#define PIRATES_TOWNS      0x004A1968u
+#define PIRATES_HUNT0      0x0049C3A8u
+
+void sub_00021D70(void)
+{
+    static int pieces = -1;
+    if (pieces < 0) {
+        pieces = recomp_config_int("RECOMP_PIRATES_TREASURE_MAP", "treasure_map", 0);
+        if (pieces > 4) pieces = 4;
+        if (pieces > 0) {
+            fprintf(stderr, "[PIRATES] treasure map: %d piece(s) on a town visit with no hunt (RECOMP_PIRATES_TREASURE_MAP)\n", pieces);
+            fflush(stderr);
+        }
+    }
+    if (pieces > 0 && *(volatile uint32_t *)((uintptr_t)PIRATES_HUNT0 + g_xbox_mem_offset) == 0) {
+        uint32_t town = *(volatile uint32_t *)((uintptr_t)PIRATES_TOWN_INDEX + g_xbox_mem_offset);
+        uint32_t e = PIRATES_TOWNS + town * 32u;
+        uint32_t x = *(volatile uint32_t *)((uintptr_t)e + g_xbox_mem_offset);
+        uint32_t y = *(volatile uint32_t *)((uintptr_t)(e + 4u) + g_xbox_mem_offset);
+        uint32_t args[7] = { 0, x, y, 1, 0, 0, 0 };
+        uint32_t sp = g_esp, ebp = g_ebp, seh = g_seh_ebp;
+        int i, n;
+        for (n = 0; n < pieces; n++) {   /* one purchase each: the map shows each time */
+            for (i = 6; i >= 0; i--) {
+                g_esp -= 4;
+                *(volatile uint32_t *)((uintptr_t)g_esp + g_xbox_mem_offset) = args[i];
+            }
+            g_esp -= 4;   /* the return address; sub_000AA3C0's ret pops it */
+            *(volatile uint32_t *)((uintptr_t)g_esp + g_xbox_mem_offset) = 0x00021D70u;
+            sub_000AA3C0();
+            g_esp = sp; g_ebp = ebp; g_seh_ebp = seh;
+            fprintf(stderr, "[PIRATES] treasure map: town %u (%d,%d) -> pirate %d, hunt %08X state %08X\n",
+                    town, (int)x, (int)y,
+                    (int)*(volatile uint32_t *)((uintptr_t)0x0049C4BCu + g_xbox_mem_offset),
+                    *(volatile uint32_t *)((uintptr_t)PIRATES_HUNT0 + g_xbox_mem_offset),
+                    *(volatile uint32_t *)((uintptr_t)0x0049C4B8u + g_xbox_mem_offset));
+            fflush(stderr);
+            if (!(*(volatile uint32_t *)((uintptr_t)0x0049C4B8u + g_xbox_mem_offset) & 0xF00u))
+                break;   /* the map is whole */
+        }
+    }
+    sub_00021D70_gen();
 }
 
 /* ── Sid Meier's Pirates!: keep the disc-to-cache copy running ─
