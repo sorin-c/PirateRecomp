@@ -7,7 +7,7 @@ You bring your own copy of the game, and it is built from that copy on your
 computer. This repository contains no game code or data.
 
 **Status: bring-up, partly playable.** It builds and runs on Windows, with
-twelve toolkit patches (below).
+seventeen toolkit patches (below).
 
 - Works: the logo movies, title screen and main menu with music; a new game
   through crew sign-up to the first town; the governor, tavern, merchant,
@@ -15,9 +15,11 @@ twelve toolkit patches (below).
   loading after a restart; a VS MODE ship battle; the game's own 16:9 mode
   (`RECOMP_WIDESCREEN=1`) and a higher internal resolution
   (`RECOMP_RES_SCALE`).
-- Broken: one of the governor's guests is
-  drawn without a head; the game holds itself to 30 fps at sea and in
-  battle.
+- The game holds itself to 30 fps at sea, in battles and in the town
+  sneak (`frame_interp = 2` shows 60).
+- Fixed 17 Nov (patch 0017): characters' heads and hands (the town-sneak
+  hero, a governor's guest) were missing or drawn huge in front of the
+  camera.
 - Fixed since the first status: the governor's welcome freeze and a crash
   during the town load (game threads ran in parallel; `RECOMP_GUEST_LOCK`
   below), and slow loading screens (the log was unbuffered;
@@ -26,10 +28,8 @@ twelve toolkit patches (below).
   defeat, prison and release) works. The game's own debug menu
   (`RECOMP_PIRATES_MINIGAMES` below) starts dancing, dueling, land battles
   and town sneaking, and all of them load and play (the garden duel's
-  green skin is fixed by patch 0011). Open: the town-sneak hero was drawn
-  without head or hands (not re-checked since 0011), and opening the pause
-  menu in town sneak crashed twice in two runs (a corrupt heap block in
-  sub_00141190; logs in `NOTES-for-Sorin.md`).
+  green skin is fixed by patch 0011, the town-sneak hero's head and hands
+  by 0017, the pause-menu crash by 0013).
 - Fixed 16 Nov: the first load on a fresh save folder froze on the loading
   screen. The game copies its archives to the cache only while a movie or
   loading screen is up, and with the movies skipped the copy stopped
@@ -99,6 +99,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0014-kernel-tick-count-1ms.patch
    git -C xboxrecomp apply ..\patches\0015-flip-gate-lend-any-divisor.patch
    git -C xboxrecomp apply ..\patches\0016-flip-gate-vblanks-per-swap.patch
+   git -C xboxrecomp apply ..\patches\0017-hle-push-buffer-draws-ff-and-timing.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -159,6 +160,7 @@ git -C xboxrecomp apply ..\patches\0013-kernel-contiguous-protect.patch
 git -C xboxrecomp apply ..\patches\0014-kernel-tick-count-1ms.patch
 git -C xboxrecomp apply ..\patches\0015-flip-gate-lend-any-divisor.patch
 git -C xboxrecomp apply ..\patches\0016-flip-gate-vblanks-per-swap.patch
+git -C xboxrecomp apply ..\patches\0017-hle-push-buffer-draws-ff-and-timing.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -299,6 +301,21 @@ git -C xboxrecomp apply ..\patches\0016-flip-gate-vblanks-per-swap.patch
   interval, so Pirates! checks it before handing its 30 fps wait to the
   gate: with `frame_cap = 60` the gate ran those scenes at 60 and the game
   at twice its speed. Now the game then keeps its own wait.
+
+- **0017-hle-push-buffer-draws-ff-and-timing** (`src/hle/hle_d3d8_vertex.c`,
+  `hle_d3d8.c`). Gamebryo draws each character's head and hands (one skin
+  partition of 1,200+ triangles) through `D3DDevice_RunPushBuffer`, a
+  prebuilt push buffer, and the rest of the body through
+  `DrawIndexedVertices`. Two gaps lost them: the walk drew a push buffer
+  only at the next replaced call, with the next object's transforms (the
+  head came out huge in front of the camera), and it could not lay out a
+  pushed draw under a fixed-function FVF at all (it needs a program
+  object), so the head and hands were dropped. `RunPushBuffer` is now
+  replaced and brings the walk up to date after its body, and pushed
+  fixed-function draws are gathered in the FVF's layout from the registers
+  the XDK feeds (v0 position, v1 weights, v2 normal, v3/v4 colours, v9-v12
+  texture coordinates). `RECOMP_HLE_D3D8_PB_RUN_SYNC=0` restores the late
+  draw. Needs a re-lift (`--from lift`): it adds an `HLE_ORIGINAL`.
 
 ## Running a build of your own
 
