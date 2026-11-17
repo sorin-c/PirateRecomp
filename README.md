@@ -98,6 +98,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0013-kernel-contiguous-protect.patch
    git -C xboxrecomp apply ..\patches\0014-kernel-tick-count-1ms.patch
    git -C xboxrecomp apply ..\patches\0015-flip-gate-lend-any-divisor.patch
+   git -C xboxrecomp apply ..\patches\0016-flip-gate-vblanks-per-swap.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -157,6 +158,7 @@ git -C xboxrecomp apply ..\patches\0012-config-title-settings-file.patch
 git -C xboxrecomp apply ..\patches\0013-kernel-contiguous-protect.patch
 git -C xboxrecomp apply ..\patches\0014-kernel-tick-count-1ms.patch
 git -C xboxrecomp apply ..\patches\0015-flip-gate-lend-any-divisor.patch
+git -C xboxrecomp apply ..\patches\0016-flip-gate-vblanks-per-swap.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -290,6 +292,13 @@ git -C xboxrecomp apply ..\patches\0015-flip-gate-lend-any-divisor.patch
   it with `frame_interp = 2` in `pirates.ini` (`src/recomp_manual.c`,
   `sub_001A958A`): at sea and in battles the game keeps its 30 and the
   screen shows 60.
+
+- **0016-flip-gate-vblanks-per-swap** (`src/kernel/xbox_memory_layout.c`).
+  `xbox_Nv2aFlipGateVblanksPerSwap()` says how many vblanks each Swap waits
+  for now. The player's frame cap outranks the title's presentation
+  interval, so Pirates! checks it before handing its 30 fps wait to the
+  gate: with `frame_cap = 60` the gate ran those scenes at 60 and the game
+  at twice its speed. Now the game then keeps its own wait.
 
 ## Running a build of your own
 

@@ -278,10 +278,14 @@ void sub_001A9220(void)   /* XAPI ResetEvent(HANDLE), stdcall */
  * 30, lending the wait to the interpolation, which shows the frames between
  * (toolkit patch 0015). The menus and the towns, which never reach the
  * limiter, go back to one Swap a vblank 200 ms after it was last reached.
- * Without frame interpolation nothing changes. */
+ * The player's frame cap outranks the title's interval in the gate, so with
+ * frame_cap other than adaptive or 30 the game keeps its own wait (normal
+ * speed, no frames in between there; patch 0016). Without frame
+ * interpolation nothing changes. */
 extern void sub_001A958A_gen(void);
 extern int recomp_config_int(const char *env_name, const char *key, int fallback);
 extern void xbox_Nv2aFlipGateSetTitleInterval(uint32_t interval);
+extern int xbox_Nv2aFlipGateVblanksPerSwap(void);
 #define PIRATES_LIMITER_SEA  0x00091DE1u     /* after the limiters' tick reads: */
 #define PIRATES_LIMITER_SEA2 0x000A4AEEu     /* the sea (two loops), */
 #define PIRATES_LIMITER_BTL  0x000C3B4Eu     /* ship battles */
@@ -314,13 +318,19 @@ void sub_001A958A(void)
     if (ra == PIRATES_LIMITER_SEA || ra == PIRATES_LIMITER_SEA2 ||
         (ra == PIRATES_LIMITER_BTL &&
          !(*(volatile uint8_t *)((uintptr_t)PIRATES_SLOW_FLAGS + g_xbox_mem_offset) & 0x20))) {
-        g_eax = *(volatile uint32_t *)((uintptr_t)PIRATES_FRAME_START + g_xbox_mem_offset)
-                + 0x40000000u;                   /* "31 ms have passed" */
         last_hit = now;
         if (!at30) {
             at30 = 1;
             xbox_Nv2aFlipGateSetTitleInterval(2);  /* D3DPRESENT_INTERVAL_TWO */
         }
+        /* Only while the gate really holds each Swap to two vblanks or more:
+         * a frame cap the player set (frame_cap = 60, say) or the F10 toggle
+         * decides instead of the title's interval, and then this wait is all
+         * that keeps these scenes at their speed -- skipping it with the gate
+         * at 60 ran the game twice too fast. */
+        if (xbox_Nv2aFlipGateVblanksPerSwap() >= 2)
+            g_eax = *(volatile uint32_t *)((uintptr_t)PIRATES_FRAME_START + g_xbox_mem_offset)
+                    + 0x40000000u;               /* "31 ms have passed" */
     } else if (at30 && now - last_hit > 200u) {
         at30 = 0;
         xbox_Nv2aFlipGateSetTitleInterval(1);
