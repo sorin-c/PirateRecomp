@@ -1,0 +1,54 @@
+diff --git a/src/d3d/d3d8_device.c b/src/d3d/d3d8_device.c
+index 0a5ddb4..e92ec1b 100644
+--- a/src/d3d/d3d8_device.c
++++ b/src/d3d/d3d8_device.c
+@@ -2216,17 +2216,35 @@ static HRESULT __stdcall dev_GetDepthStencilSurface(IDirect3DDevice8 *self, IDir
+  * than 0.53125: the 1/32 is the hardware's rounding bias, and at 0.5 a
+  * texel-for-pixel copy lands exactly. RECOMP_D3D8_PIXEL_OFFSET=<pixels>
+  * overrides it (0 for the old placement). */
+-static float pixel_offset(void)
++static float pixel_offset(float scale)
+ {
+     static float offset = -1.0f;
++    static int scaled = -1;
+ 
+     if (offset < 0.0f) {
+         const char *e = getenv("RECOMP_D3D8_PIXEL_OFFSET");
+-        offset = e && *e ? (float)atof(e) : 0.5f;
++#if defined(RECOMP_TITLE_PIXEL_OFFSET_SCALED)
++        scaled = 1;
++#else
++        scaled = 0;
++#endif
++        if (e && *e) {
++            scaled = strcmp(e, "scaled") == 0;
++            offset = scaled ? 0.5f : (float)atof(e);
++        } else {
++            offset = 0.5f;
++        }
+         if (offset < 0.0f || offset > 1.0f)
+             offset = 0.5f;
+     }
+-    return offset;
++    /* "scaled" (RECOMP_D3D8_PIXEL_OFFSET=scaled, or a title's
++     * RECOMP_TITLE_PIXEL_OFFSET_SCALED): half a host pixel rather than half
++     * a guest one. The same at 1x; above it, a full-screen quad a title wrote
++     * from 0 to 640 (not -0.5 to 639.5) still covers the first row and
++     * column. With half a guest pixel those were the clear colour, a line
++     * along the top and the left of the picture, two pixels wide at 4x
++     * (Pirates!' legal screen and menus). */
++    return scaled && scale > 1.0f ? offset / scale : offset;
+ }
+ 
+ static void apply_host_viewport(void)
+@@ -2239,8 +2257,8 @@ static void apply_host_viewport(void)
+     if (!rhi_device_ready())
+         return;
+ 
+-    hv.x         = ((FLOAT)vp->X + pixel_offset()) * sx;
+-    hv.y         = ((FLOAT)vp->Y + pixel_offset()) * sy;
++    hv.x         = ((FLOAT)vp->X + pixel_offset(sx)) * sx;
++    hv.y         = ((FLOAT)vp->Y + pixel_offset(sy)) * sy;
+     hv.width     = (FLOAT)vp->Width * sx;
+     hv.height    = (FLOAT)vp->Height * sy;
+     hv.min_depth = vp->MinZ;

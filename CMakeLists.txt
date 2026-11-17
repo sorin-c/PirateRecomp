@@ -212,6 +212,14 @@ if(TARGET xbox_config)
         RECOMP_TITLE_DEFAULT_FRAME_INTERP=2)
 endif()
 
+# Half a host pixel of screen-space offset, not half a game pixel (toolkit
+# patch 0021): the game draws its full-screen 2D from 0, and at a higher
+# resolution_scale the half-game-pixel offset left a line of the clear
+# colour along the top and left of the picture.
+if(TARGET xbox_d3d8)
+    target_compile_definitions(xbox_d3d8 PRIVATE RECOMP_TITLE_PIXEL_OFFSET_SCALED=1)
+endif()
+
 # The launcher (the toolkit's src/launcher): resolution, widescreen, frame
 # rate, fullscreen and the controls, written to the file the game reads,
 # then the game started. Beside the game's executable, as pirates_launcher.

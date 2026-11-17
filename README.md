@@ -7,7 +7,7 @@ You bring your own copy of the game, and it is built from that copy on your
 computer. This repository contains no game code or data.
 
 **Status: bring-up, partly playable.** It builds and runs on Windows, with
-twenty toolkit patches (below).
+twenty-one toolkit patches (below).
 
 - Works: the logo movies, title screen and main menu with music; a new game
   through crew sign-up to the first town; the governor, tavern, merchant,
@@ -106,6 +106,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0018-hle-interp-fixed-function.patch
    git -C xboxrecomp apply ..\patches\0019-config-title-default-frame-interp.patch
    git -C xboxrecomp apply ..\patches\0020-hle-interp-mirror-quaternion.patch
+   git -C xboxrecomp apply ..\patches\0021-d3d-pixel-offset-scaled.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -170,6 +171,7 @@ git -C xboxrecomp apply ..\patches\0017-hle-push-buffer-draws-ff-and-timing.patc
 git -C xboxrecomp apply ..\patches\0018-hle-interp-fixed-function.patch
 git -C xboxrecomp apply ..\patches\0019-config-title-default-frame-interp.patch
 git -C xboxrecomp apply ..\patches\0020-hle-interp-mirror-quaternion.patch
+git -C xboxrecomp apply ..\patches\0021-d3d-pixel-offset-scaled.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -357,6 +359,16 @@ git -C xboxrecomp apply ..\patches\0020-hle-interp-mirror-quaternion.patch
   are read back from the device at the draw, a world matrix's jump is
   judged in camera space, and only draws of the same bytes are blended.
   `RECOMP_INTERP_FF=0` draws fixed-function draws as the frame has them.
+
+- **0021-d3d-pixel-offset-scaled** (`src/d3d/d3d8_device.c`). At a
+  `resolution_scale` above 1, the toolkit's half-pixel screen-space offset
+  (half a game pixel, so the console's pixel centres land on integers)
+  left the first rows and columns of host pixels outside any full-screen
+  quad the game draws from 0: a blue line of the clear colour along the
+  top and left of the picture, two pixels wide at 4x. With
+  `RECOMP_D3D8_PIXEL_OFFSET=scaled` (this game's CMakeLists sets it through
+  `RECOMP_TITLE_PIXEL_OFFSET_SCALED`) the offset is half a host pixel: the
+  same at 1x, and the quad covers the edge above it.
 
 ## Running a build of your own
 
