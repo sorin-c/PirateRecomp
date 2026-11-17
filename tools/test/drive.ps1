@@ -3,6 +3,7 @@
 #                                                                 start the game, headless
 #   drive.ps1 press a dpad_down:300 ...                           append presses (one per arg)
 #   drive.ps1 shot [name]                                         screenshot -> runs\<tag>_<name>.png
+#   drive.ps1 screen [name]                                       the same, as presented (overlay, menu)
 #   drive.ps1 capture [name]                                      the same, plus a replayable .d3dcap (as F11)
 #   drive.ps1 wait <seconds>                                      sleep
 #   drive.ps1 log [pattern] [n]                                   tail / grep the run log
@@ -67,12 +68,12 @@ switch ($Cmd) {
     "pressed: $($Rest -join ' ')"
   }
   "wait" { Start-Sleep -Milliseconds ([int]([double]$Rest[0] * 1000)) }
-  { $_ -in "shot", "capture" } {
+  { $_ -in "shot", "capture", "screen" } {
     $s = Get-State
     $el = [int](([DateTime]::Now.Ticks - [long]$s.t0) / 1e7)
     $name = if ($Rest) { $Rest[0] } else { "t$el" }
     & (Join-Path $PSScriptRoot "shot.ps1") -ProcessId $s.pid -Out (Join-Path $runs "$($s.tag)_$name.png") `
-      -Request $s.req -Capture:($Cmd -eq "capture")
+      -Request $s.req -Capture:($Cmd -eq "capture") -Screen:($Cmd -eq "screen")
     "elapsed $el s"
   }
   "log" {

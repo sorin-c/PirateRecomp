@@ -1,0 +1,958 @@
+diff --git a/src/config/recomp_config.c b/src/config/recomp_config.c
+index 8d25f89..fac008d 100644
+--- a/src/config/recomp_config.c
++++ b/src/config/recomp_config.c
+@@ -879,6 +879,85 @@ const char *recomp_config_lookup(const char *env_name, const char *key)
+     return from_file(key);
+ }
+ 
++/* One setting changed while the title runs (the in-game settings menu):
++ * the value every later lookup returns, and the same line in the settings
++ * file rewritten in place, so the comments and every other line stay as
++ * they were. A key the file does not have yet is appended. Returns 1 when
++ * the file was written. */
++int recomp_config_set(const char *key, const char *value)
++{
++    FILE *f;
++    char *text = NULL, *out = NULL;
++    long size = 0;
++    size_t klen, cap, o = 0;
++    const char *p;
++    int found = 0;
++
++    if (!key || !*key || !value)
++        return 0;
++    if (!g_loaded)
++        load_and_report();
++    store(key, value);
++    if (!g_have_path)
++        return 0;
++    f = fopen(g_path, "rb");
++    if (f) {
++        fseek(f, 0, SEEK_END);
++        size = ftell(f);
++        fseek(f, 0, SEEK_SET);
++        if (size > 0 && (text = (char *)malloc((size_t)size + 1)) != NULL) {
++            size = (long)fread(text, 1, (size_t)size, f);
++            text[size] = '\0';
++        } else {
++            size = 0;
++        }
++        fclose(f);
++    }
++    klen = strlen(key);
++    cap = (size_t)size + klen + strlen(value) + 16;
++    if (!(out = (char *)malloc(cap))) {
++        free(text);
++        return 0;
++    }
++    for (p = text ? text : ""; *p; ) {
++        const char *eol = strchr(p, '\n'), *q = p;
++        size_t n = eol ? (size_t)(eol - p) + 1 : strlen(p);
++
++        while (q < p + n && (*q == ' ' || *q == '\t'))
++            q++;
++        if (!found && strncmp(q, key, klen) == 0) {
++            const char *r = q + klen;
++            while (*r == ' ' || *r == '\t')
++                r++;
++            if (*r == '=') {
++                int crlf = n >= 2 && p[n - 2] == '\r';
++                o += (size_t)sprintf(out + o, "%s = %s%s", key, value,
++                                     eol ? (crlf ? "\r\n" : "\n") : "");
++                found = 1;
++                p += n;
++                continue;
++            }
++        }
++        memcpy(out + o, p, n);
++        o += n;
++        p += n;
++    }
++    if (!found)
++        o += (size_t)sprintf(out + o, "%s%s = %s\n",
++                             o && out[o - 1] != '\n' ? "\n" : "", key, value);
++    free(text);
++    make_parents(g_path);
++    f = fopen(g_path, "wb");
++    if (!f) {
++        free(out);
++        return 0;
++    }
++    fwrite(out, 1, o, f);
++    fclose(f);
++    free(out);
++    return 1;
++}
++
+ const char *recomp_config_path(void)
+ {
+     if (!g_loaded)
+diff --git a/src/config/recomp_config.h b/src/config/recomp_config.h
+index c73581d..7ef9815 100644
+--- a/src/config/recomp_config.h
++++ b/src/config/recomp_config.h
+@@ -67,6 +67,10 @@ int recomp_make_dirs(const char *path);
+  * that source. The returned string is owned here and valid for the life
+  * of the process. */
+ const char *recomp_config_lookup(const char *env_name, const char *key);
++/* Change one setting while running: later lookups see `value`, and the
++ * settings file's line for `key` is rewritten (appended if missing).
++ * Returns 1 when the file was written. */
++int recomp_config_set(const char *key, const char *value);
+ 
+ /* The same, parsed, with a fallback for absent or unreadable values.
+  * Booleans accept 1/0, on/off, yes/no, true/false, and an empty
+diff --git a/src/d3d/d3d8_overlay.c b/src/d3d/d3d8_overlay.c
+index 2ac1340..bce8c0e 100644
+--- a/src/d3d/d3d8_overlay.c
++++ b/src/d3d/d3d8_overlay.c
+@@ -22,9 +22,13 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
+-#define OVERLAY_W    512
+-#define OVERLAY_H     28
++#define OVERLAY_W    720      /* the bitmap; a line uses what it measures */
++#define OVERLAY_H    480
++#define LINE_H        28      /* one line, padding included */
++#define LINE_STEP     24      /* line to line in a panel of several */
+ #define OVERLAY_PAD    8      /* from the picture's top-left corner, in 480-line pixels */
++#define MENU_ALPHA   0.80f    /* a centred panel's backing (the menu) */
++#define LINE_ALPHA   0.45f    /* the corner line's (the frame-rate counter) */
+ 
+ static struct {
+     int             tried;     /* creation attempted */
+@@ -44,7 +48,8 @@ static struct {
+ #endif
+     void           *bits;      /* the DIB's pixels, BGRA top-down */
+     int             text_w;    /* what the last render measured */
+-    char            text[128];
++    int             text_h;
++    char            text[2048];
+ } g;
+ 
+ /* b7 in both stages: the four texture stages a title can use are b0..b3 and
+@@ -70,11 +75,12 @@ static const char kShaderSource[] =
+     "Texture2D<float4> tex : register(t8);\n"
+     "float4 ps_main(VSOut i) : SV_Target {\n"
+     "    int2 p = int2(i.uv);\n"
+-    "    float a = tex.Load(int3(p, 0)).r;\n"
+-    /* The glyphs are white on black, so the red channel is coverage. A dark
+-     * panel under them keeps the text readable over a bright frame. */
+-    "    float3 rgb = lerp(float3(0, 0, 0), float3(1, 1, 1), a);\n"
+-    "    return float4(rgb, max(a, 0.45));\n"
++    "    float3 t = tex.Load(int3(p, 0)).rgb;\n"
++    /* The glyphs are drawn on black, so the brightest channel is coverage
++     * (a highlighted menu line is yellow, not white). A dark panel under
++     * them keeps the text readable over a bright frame: size.z deep. */
++    "    float a = max(t.r, max(t.g, t.b));\n"
++    "    return float4(t, max(a, size.z));\n"
+     "}\n";
+ 
+ #if !defined(_WIN32)
+@@ -180,26 +186,47 @@ static const uint8_t kGlyphs[94 * 8] = {
+ /* Fill the bitmap with `text`, white on black, each glyph at 2x: 14 pixels
+  * across (the glyphs leave their eighth column blank) and 16 down. Returns
+  * the width drawn, padding included. */
+-static int glyph_render(uint32_t *bits, const char *text, int len)
++static int glyph_render(uint32_t *bits, const char *text, int len, int *height)
+ {
+-    const int scale = 2, advance = 7 * scale, left = 6, top = (OVERLAY_H - 8 * scale) / 2;
+-    int i, row, col, x = left;
++    const int scale = 2, advance = 7 * scale, left = 6;
++    int i, row, col, x = left, widest = 0, line = 0, top = (LINE_H - 8 * scale) / 2;
++    uint32_t ink = 0xFFFFFFFFu;
+ 
+     for (i = 0; i < OVERLAY_W * OVERLAY_H; i++)
+         bits[i] = 0xFF000000u;                  /* opaque black, as ETO_OPAQUE */
+-    for (i = 0; i < len && x + advance <= OVERLAY_W; i++, x += advance) {
++    for (i = 0; i < len; i++) {
+         unsigned char c = (unsigned char)text[i];
+         const uint8_t *g;
+ 
+-        if (c < 33 || c > 126)
+-            continue;                           /* space, or nothing to draw */
+-        g = &kGlyphs[(c - 33) * 8];
+-        for (row = 0; row < 8 * scale; row++)
+-            for (col = 0; col < 8 * scale; col++)
+-                if (g[row / scale] & (1u << (col / scale)) && x + col < OVERLAY_W)
+-                    bits[(top + row) * OVERLAY_W + x + col] = 0xFFFFFFFFu;
++        if (c == '\n') {
++            if (x > widest) widest = x;
++            x = left;
++            line++;
++            top = (LINE_H - 8 * scale) / 2 + line * LINE_STEP;
++            ink = 0xFFFFFFFFu;
++            if (top + 8 * scale > OVERLAY_H)
++                break;
++            continue;
++        }
++        if (c == 1) {                           /* a highlighted line */
++            ink = 0xFF40DCFFu;                  /* yellow, BGRA */
++            continue;
++        }
++        if (x + advance > OVERLAY_W)
++            continue;
++        if (c >= 33 && c <= 126) {
++            g = &kGlyphs[(c - 33) * 8];
++            for (row = 0; row < 8 * scale; row++)
++                for (col = 0; col < 8 * scale; col++)
++                    if (g[row / scale] & (1u << (col / scale)) && x + col < OVERLAY_W)
++                        bits[(top + row) * OVERLAY_W + x + col] = ink;
++        }
++        x += advance;
+     }
+-    return x + left > OVERLAY_W ? OVERLAY_W : x + left;
++    if (x > widest) widest = x;
++    *height = line ? (line * LINE_STEP + LINE_H) : LINE_H;
++    if (*height > OVERLAY_H) *height = OVERLAY_H;
++    return widest + left > OVERLAY_W ? OVERLAY_W : widest + left;
+ }
+ #endif
+ 
+@@ -331,10 +358,10 @@ static int overlay_create(void)
+ static int overlay_set_text(const char *text)
+ {
+ #if defined(_WIN32)
+-    wchar_t wide[128];
++    wchar_t wide[256];
+     RECT rect;
+     SIZE extent;
+-    int i;
++    int i, start, line, n;
+ #endif
+     int len;
+ 
+@@ -346,20 +373,41 @@ static int overlay_set_text(const char *text)
+     memcpy(g.text, text, (size_t)len);
+     g.text[len] = '\0';
+ #if defined(_WIN32)
+-    for (i = 0; i < len; i++)
+-        wide[i] = (wchar_t)(unsigned char)g.text[i];
+-
++    /* One line, or several separated by '\n' (the settings menu); a line
++     * that starts with '\x01' is drawn highlighted. */
+     rect.left = rect.top = 0;
+     rect.right = OVERLAY_W;
+     rect.bottom = OVERLAY_H;
+     memset(g.bits, 0, (size_t)OVERLAY_W * OVERLAY_H * 4);
+-    if (!GetTextExtentPoint32W(g.dc, wide, len, &extent))
+-        extent.cx = OVERLAY_W;
+-    g.text_w = extent.cx + 12 > OVERLAY_W ? OVERLAY_W : (int)extent.cx + 12;
+-    ExtTextOutW(g.dc, 6, 4, ETO_OPAQUE, &rect, wide, (UINT)len, NULL);
++    ExtTextOutW(g.dc, 0, 0, ETO_OPAQUE, &rect, L"", 0, NULL);
++    g.text_w = 0;
++    for (start = 0, line = 0; start <= len && 4 + line * LINE_STEP + LINE_STEP <= OVERLAY_H; line++) {
++        int end = start, hi = 0;
++        while (end < len && g.text[end] != '\n')
++            end++;
++        if (start < end && g.text[start] == 1) {
++            hi = 1;
++            start++;
++        }
++        n = end - start;
++        if (n > (int)(sizeof wide / sizeof wide[0])) n = (int)(sizeof wide / sizeof wide[0]);
++        for (i = 0; i < n; i++)
++            wide[i] = (wchar_t)(unsigned char)g.text[start + i];
++        SetTextColor(g.dc, hi ? RGB(255, 220, 64) : RGB(255, 255, 255));
++        if (n && GetTextExtentPoint32W(g.dc, wide, n, &extent) &&
++            (int)extent.cx + 12 > g.text_w)
++            g.text_w = (int)extent.cx + 12;
++        if (n)
++            ExtTextOutW(g.dc, 6, 4 + line * LINE_STEP, 0, NULL, wide, (UINT)n, NULL);
++        start = end + 1;
++    }
++    SetTextColor(g.dc, RGB(255, 255, 255));
++    if (g.text_w > OVERLAY_W) g.text_w = OVERLAY_W;
++    g.text_h = line > 1 ? (line - 1) * LINE_STEP + LINE_H : LINE_H;
++    if (g.text_h > OVERLAY_H) g.text_h = OVERLAY_H;
+     GdiFlush();
+ #else
+-    g.text_w = glyph_render((uint32_t *)g.bits, g.text, len);
++    g.text_w = glyph_render((uint32_t *)g.bits, g.text, len, &g.text_h);
+ #endif
+ 
+     rhi_image_update(g.texture, 0, NULL, g.bits, OVERLAY_W * 4, 0);
+@@ -367,12 +415,18 @@ static int overlay_set_text(const char *text)
+ }
+ 
+ static char g_want[128];       /* the line asked for, drawn by each present */
++static char g_want_menu[2048]; /* a centred panel, drawn instead while set */
+ 
+ void d3d8_overlay_set_text(const char *text)
+ {
+     snprintf(g_want, sizeof g_want, "%s", text ? text : "");
+ }
+ 
++void d3d8_overlay_set_menu(const char *text)
++{
++    snprintf(g_want_menu, sizeof g_want_menu, "%s", text ? text : "");
++}
++
+ void d3d8_overlay_present(RhiView *out, unsigned width, unsigned height,
+                           unsigned pic_x, unsigned pic_y, unsigned pic_h)
+ {
+@@ -384,7 +438,8 @@ void d3d8_overlay_present(RhiView *out, unsigned width, unsigned height,
+     /* The size it had drawn into a 480-line frame and scaled with it, in
+      * whole steps so the glyphs stay sharp. */
+     unsigned scale = (pic_h + 240) / 480;
+-    const char *text = g_want;
++    const char *text = g_want_menu[0] ? g_want_menu : g_want;
++    int centred = g_want_menu[0] != '\0';
+ 
+     if (scale < 1) scale = 1;
+     if (!text[0] || !out || !width || !height)
+@@ -396,13 +451,23 @@ void d3d8_overlay_present(RhiView *out, unsigned width, unsigned height,
+ 
+     if (!(mapped = rhi_buffer_map(g.cb, RHI_MAP_WRITE_DISCARD)))
+         goto restore;
+-    c.x = -1.0f + 2.0f * (float)(pic_x + OVERLAY_PAD * scale) / (float)width;
+-    c.y =  1.0f - 2.0f * (float)(pic_y + OVERLAY_PAD * scale) / (float)height;
++    if (centred) {
++        /* The menu: in the middle of the picture (pic_x, pic_y and pic_h
++         * frame it; its width is the picture's 4:3 or wider, so the middle
++         * of the window is the middle of the picture). */
++        float cx = (float)width * 0.5f, cy = (float)pic_y + (float)pic_h * 0.5f;
++        c.x = -1.0f + 2.0f * (cx - (float)(g.text_w * scale) * 0.5f) / (float)width;
++        c.y =  1.0f - 2.0f * (cy - (float)(g.text_h * scale) * 0.5f) / (float)height;
++    } else {
++        c.x = -1.0f + 2.0f * (float)(pic_x + OVERLAY_PAD * scale) / (float)width;
++        c.y =  1.0f - 2.0f * (float)(pic_y + OVERLAY_PAD * scale) / (float)height;
++    }
+     c.w =  2.0f * (float)(g.text_w * scale) / (float)width;
+-    c.h =  2.0f * (float)(OVERLAY_H * scale) / (float)height;
++    c.h =  2.0f * (float)(g.text_h * scale) / (float)height;
+     c.tex_w = (float)g.text_w;
+-    c.tex_h = (float)OVERLAY_H;
+-    c.pad0 = c.pad1 = 0.0f;
++    c.tex_h = (float)g.text_h;
++    c.pad0 = centred ? MENU_ALPHA : LINE_ALPHA;
++    c.pad1 = 0.0f;
+     memcpy(mapped, &c, sizeof c);
+     rhi_buffer_unmap(g.cb);
+ 
+@@ -449,5 +514,6 @@ void d3d8_overlay_shutdown(void)
+     g.bits = NULL;
+     g.text[0] = '\0';
+     g.text_w = 0;
++    g.text_h = 0;
+     g.tried = 0;
+ }
+diff --git a/src/d3d/d3d8_overlay.h b/src/d3d/d3d8_overlay.h
+index e9cbcbf..4bf86d0 100644
+--- a/src/d3d/d3d8_overlay.h
++++ b/src/d3d/d3d8_overlay.h
+@@ -38,6 +38,12 @@ extern "C" {
+  * menu -- carries the line as it is now. Called on the presenting thread. */
+ void d3d8_overlay_set_text(const char *text);
+ 
++/* A panel of several lines ('
++' between them; a line that starts with
++ * '' is highlighted), drawn in the middle of the picture instead of the
++ * line while it is set: the in-game settings menu. NULL or "" for none. */
++void d3d8_overlay_set_menu(const char *text);
++
+ /* Draws the line over `out` (the swap chain, w x h pixels) at the top-left
+  * of the picture, which the display put at (pic_x, pic_y), pic_h pixels
+  * tall; the glyphs are scaled with the picture, as they were when the line
+diff --git a/src/hle/CMakeLists.txt b/src/hle/CMakeLists.txt
+index 2ef9e1f..4b28487 100644
+--- a/src/hle/CMakeLists.txt
++++ b/src/hle/CMakeLists.txt
+@@ -20,6 +20,7 @@ add_library(xbox_hle STATIC
+     hle_d3d8_vertex.c
+     hle_d3d8_record.c
+     hle_d3d8_interp.c
++    hle_settings_menu.c
+     d3d8_capture.c
+     hle_dsound.c
+     hle_dsound_3d.c
+diff --git a/src/hle/hle_d3d8.c b/src/hle/hle_d3d8.c
+index 7a7e737..561ebe8 100644
+--- a/src/hle/hle_d3d8.c
++++ b/src/hle/hle_d3d8.c
+@@ -166,6 +166,7 @@ static unsigned long g_shadow_swaps;
+ 
+ #ifdef _WIN32
+ #define SHADOW_WM_DESTROY (WM_APP + 1)
++#define SHADOW_WM_FULLSCREEN (WM_APP + 2)   /* the settings menu: wp = on */
+ #else
+ #include "host.h"
+ #endif
+@@ -512,6 +513,9 @@ static LRESULT CALLBACK shadow_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
+         fflush(stderr);
+         xbox_HostExit("window closed");
+         return 0;
++    case SHADOW_WM_FULLSCREEN:           /* the settings menu, from another thread */
++        shadow_set_fullscreen(hwnd, wp != 0);
++        return 0;
+     case SHADOW_WM_DESTROY:              /* DestroyWindow only works on this thread */
+         DestroyWindow(hwnd);
+         return 0;
+@@ -732,6 +736,19 @@ static int shadow_key_down(int vk)
+ #define SHADOW_KEY_F9   VK_F9
+ #define SHADOW_KEY_F10  VK_F10
+ #define SHADOW_KEY_F11  VK_F11
++#define SHADOW_KEY_F2   VK_F2
++#define SHADOW_KEY_ESC  VK_ESCAPE
++
++int hle_fullscreen(void)
++{
++    return g_shadow_fullscreen;
++}
++
++void hle_set_fullscreen(int on)
++{
++    if (g_shadow_hwnd)
++        PostMessageA(g_shadow_hwnd, SHADOW_WM_FULLSCREEN, on ? 1 : 0, 0);
++}
+ 
+ #else
+ /* ------------------------------------------- the window, everywhere else
+@@ -856,6 +873,20 @@ static int shadow_key_down(int key)
+ #define SHADOW_KEY_F9   HOST_KEY_F9
+ #define SHADOW_KEY_F10  HOST_KEY_F10
+ #define SHADOW_KEY_F11  HOST_KEY_F11
++/* The shell reports no F2 or Esc yet: the settings menu opens from a pad
++ * (Start+Back) there. */
++#define SHADOW_KEY_F2   (-1)
++#define SHADOW_KEY_ESC  (-1)
++
++int hle_fullscreen(void)
++{
++    return g_shadow_fullscreen;
++}
++
++void hle_set_fullscreen(int on)
++{
++    (void)on;                            /* the shell's Option/Cmd+Enter only, for now */
++}
+ #endif
+ 
+ /* The surfaces the XDK sets as target and depth inside CreateDevice -- the
+@@ -2322,6 +2353,55 @@ static void ram_dump_at_swap(void)
+  * is complete. Checked every 50 ms at a swap; nothing is read when the
+  * variable is unset. */
+ static char g_shot_path[1024];
++/* "screen <file>": the window as the last present left it, the overlay and
++ * the settings menu included (xbox_D3D8KeepPresented), written a frame later
++ * by screen_shot_poll. */
++static char g_screen_path[1024];
++static int  g_screen_wait;
++
++static void screen_shot_poll(void)
++{
++    const uint8_t *px;
++    UINT w = 0, h = 0, x, y, pad;
++    char tmp[1100];
++    uint8_t hdr[54];
++    uint32_t filesz;
++    FILE *f;
++
++    if (!g_screen_path[0] || --g_screen_wait > 0)
++        return;
++    px = xbox_D3D8Presented(&w, &h);
++    if (!px || !w || !h)
++        return;                          /* nothing kept yet: next frame */
++    snprintf(tmp, sizeof tmp, "%s.tmp", g_screen_path);
++    pad = (4 - ((w * 3) & 3)) & 3;
++    filesz = 54 + (w * 3 + pad) * h;
++    f = fopen(tmp, "wb");
++    if (f) {
++        memset(hdr, 0, sizeof hdr);
++        hdr[0] = 'B'; hdr[1] = 'M';
++        memcpy(hdr + 2, &filesz, 4);
++        hdr[10] = 54; hdr[14] = 40;
++        memcpy(hdr + 18, &w, 4);
++        memcpy(hdr + 22, &h, 4);
++        hdr[26] = 1; hdr[28] = 24;
++        fwrite(hdr, 1, 54, f);
++        for (y = h; y-- > 0; ) {         /* bottom-up, BGR */
++            const uint8_t *row = px + (size_t)y * w * 4u;
++            uint8_t zero[3] = { 0, 0, 0 };
++            for (x = 0; x < w; x++) {
++                uint8_t bgr[3] = { row[x * 4 + 2], row[x * 4 + 1], row[x * 4 + 0] };
++                fwrite(bgr, 1, 3, f);
++            }
++            fwrite(zero, 1, pad, f);
++        }
++        fclose(f);
++        remove(g_screen_path);
++        rename(tmp, g_screen_path);
++    }
++    xbox_D3D8KeepPresented(FALSE);
++    g_screen_path[0] = 0;
++}
+ 
+ static void shot_request_poll(void)
+ {
+@@ -2344,7 +2424,7 @@ static void shot_request_poll(void)
+             fflush(stderr);
+         }
+     }
+-    if (!req || g_shot_path[0])
++    if (!req || g_shot_path[0] || g_screen_path[0])
+         return;
+     now = GetTickCount64();
+     if (now < next)
+@@ -2363,6 +2443,15 @@ static void shot_request_poll(void)
+     p = buf;
+     while (*p == ' ' || *p == '\t')
+         p++;
++    if (strncmp(p, "screen ", 7) == 0) {
++        p += 7;
++        while (*p == ' ')
++            p++;
++        snprintf(g_screen_path, sizeof g_screen_path, "%s", p);
++        g_screen_wait = 2;
++        xbox_D3D8KeepPresented(TRUE);
++        return;
++    }
+     if (strncmp(p, "capture ", 8) == 0) {
+         p += 8;
+         while (*p == ' ')
+@@ -2380,6 +2469,7 @@ static void shot_request_poll(void)
+ static void shadow_dump_frame(void)
+ {
+     ram_dump_at_swap();
++    screen_shot_poll();
+     shot_request_poll();
+     static const char *prefix;
+     static int configured, every = 300, written, keep_last, max_files = 24;
+@@ -3085,6 +3175,7 @@ static void held_redraw(void)
+         g_overlay_set = -1;
+     }
+     d3d8_overlay_set_text(g_overlay_shown ? g_overlay_line : NULL);
++    d3d8_overlay_set_menu(hle_settings_menu_text());
+     xbox_D3D8Represent();
+ }
+ 
+@@ -3123,6 +3214,20 @@ static void overlay_frame(void)
+         fflush(stderr);
+     }
+ 
++    {
++        /* The settings menu (hle_settings_menu.c): F2 opens and closes it,
++         * Esc closes it; a pad's Start+Back reaches it through the input. */
++        static int f2_was_down, esc_was_down;
++        int f2 = SHADOW_KEY_F2 >= 0 && shadow_key_down(SHADOW_KEY_F2);
++        int esc = SHADOW_KEY_ESC >= 0 && shadow_key_down(SHADOW_KEY_ESC);
++        if (f2 && !f2_was_down)
++            hle_settings_menu_toggle();
++        else if (esc && !esc_was_down && hle_settings_menu_open())
++            hle_settings_menu_toggle();
++        f2_was_down = f2;
++        esc_was_down = esc;
++        d3d8_overlay_set_menu(hle_settings_menu_text());
++    }
+     f9  = shadow_key_down(SHADOW_KEY_F9);
+     f10 = shadow_key_down(SHADOW_KEY_F10);
+     f11 = shadow_key_down(SHADOW_KEY_F11);
+diff --git a/src/hle/hle_d3d8_interp.c b/src/hle/hle_d3d8_interp.c
+index 581d828..6260377 100644
+--- a/src/hle/hle_d3d8_interp.c
++++ b/src/hle/hle_d3d8_interp.c
+@@ -760,9 +760,15 @@ static int prepare_frame(void)
+ 
+         if (d->key.ff_worlds) {
+             prims3d += d->key.prims;
+-            if (d->match < 0 || d->tier != 1 || !prev->draws[d->match].key.ff_worlds)
++            if (d->match < 0 || !prev->draws[d->match].key.ff_worlds)
+                 continue;
+             matched += d->key.prims;
++            /* A looser match (tier 2 or 3: the same shape and textures, not
++             * the same bytes) counts as matched, so it does not hold the
++             * frame, but is drawn as N has it (set_draw_transforms): at sea
++             * those were different towns' pieces. */
++            if (d->tier != 1)
++                continue;
+             prepare_ff(i, ff_of(prev, d->match), ff_of(cur, i), d->key.ff_worlds, &d->cut);
+             if (d->cut)
+                 cut += d->key.prims;
+@@ -1140,6 +1146,36 @@ void hle_d3d8_interp_init(void)
+     fflush(stderr);
+ }
+ 
++/* The in-game settings menu (hle_settings.h): frames shown for each the
++ * title draws, now. 1 turns interpolation off at the next frame (the kept
++ * frames are let go there); 2 or more turns it on, setting it up if the run
++ * started with it off. */
++int hle_frame_interp(void)
++{
++    return g_on ? g_multiple : 1;
++}
++
++void hle_set_frame_interp(int n)
++{
++    if (n < 2) {
++        g_on = 0;
++        return;
++    }
++    if (n > INTERP_MAX_MULTIPLE)
++        n = INTERP_MAX_MULTIPLE;
++    if (hle_d3d8_defer_on())
++        return;
++    if (!g_qpf) {
++        LARGE_INTEGER f;
++        QueryPerformanceFrequency(&f);
++        g_qpf = f.QuadPart;
++        g_redraw_est = g_qpf / 500;
++        xbox_Nv2aFlipGateSetIdle(gate_idle);
++    }
++    g_multiple = n;
++    g_on = 1;
++}
++
+ void hle_d3d8_interp_frame_end(void)
+ {
+     LARGE_INTEGER now;
+diff --git a/src/hle/hle_settings.h b/src/hle/hle_settings.h
+index 3b941f3..2cd92b5 100644
+--- a/src/hle/hle_settings.h
++++ b/src/hle/hle_settings.h
+@@ -20,6 +20,32 @@ void hle_set_fps_overlay(int on);
+ const char *hle_frame_cap(void);
+ void        hle_set_frame_cap(const char *name);
+ 
++/* Frame interpolation (frame_interp): 1 off, 2-4 frames shown for each the
++ * title draws (hle_d3d8_interp.c). */
++int  hle_frame_interp(void);
++void hle_set_frame_interp(int n);
++
++/* Borderless fullscreen (Alt+Enter on Windows). */
++int  hle_fullscreen(void);
++void hle_set_fullscreen(int on);
++
++/* The desktop's in-game settings menu (F2, or Start+Back on a pad):
++ * hle_settings_menu.c. Open or closed; the input hook below eats the pad
++ * while it is open. */
++int  hle_settings_menu_open(void);
++void hle_settings_menu_toggle(void);
++/* What to draw: the menu's lines, or NULL while it is closed. */
++const char *hle_settings_menu_text(void);
++/* Called with every sample of a port (src/hle/input_host.c), after the
++ * person and any script: Start+Back on port 1 opens or closes the menu, and
++ * while it is open (or the combination is still held) the sample is the
++ * menu's and the game reads nothing. */
++struct RecompInputGamepad;
++void hle_settings_menu_input(unsigned port, struct RecompInputGamepad *g);
++/* Keyboard navigation while open, from the window's own key reads:
++ * dx/dy -1, 0, 1; ok and back as presses. */
++void hle_settings_menu_keys(int dy, int dx, int ok, int back);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+new file mode 100644
+index 0000000..59cca8d
+--- /dev/null
++++ b/src/hle/hle_settings_menu.c
+@@ -0,0 +1,284 @@
++/*
++ * hle_settings_menu.c -- the desktop's in-game settings menu.
++ *
++ * F2 on the keyboard, or Start+Back together on a pad, opens a panel over
++ * the game (drawn by the renderer's overlay, d3d8_overlay_set_menu) with the
++ * settings a player changes most: the frame-rate cap, frame interpolation,
++ * the frame-rate counter and fullscreen apply at once; the rest (internal
++ * resolution, widescreen, texture filtering, variable refresh, and the
++ * title's own lines such as the movies) are written to the settings file and
++ * take effect at the next start, which the panel says.
++ *
++ * Every change is written to the settings file as it is made
++ * (recomp_config_set), so the launcher and the next run see it.
++ *
++ * Input. The menu reads port 1 through the same path the game does
++ * (src/hle/input_host.c calls hle_settings_menu_input with every sample), so
++ * a pad and the keyboard's default bindings both drive it: D-pad or arrows
++ * choose, left/right change, A (Z) changes too, B (X), Back (Backspace), F2
++ * or Esc close. While it is open every port reads as untouched, so nothing
++ * reaches the game, and the Start+Back that opened or closed it is held back
++ * from the game until both are released.
++ */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <time.h>
++
++#include "hle_settings.h"
++#include "input_model.h"
++#include "input_host.h"
++#include "recomp_config.h"
++
++enum {
++    PAD_UP = 0x0001u, PAD_DOWN = 0x0002u, PAD_LEFT = 0x0004u, PAD_RIGHT = 0x0008u,
++    PAD_START = 0x0010u, PAD_BACK = 0x0020u,
++};
++
++enum { LIVE_NONE, LIVE_CAP, LIVE_INTERP, LIVE_FPS, LIVE_FULLSCREEN };
++
++typedef struct {
++    const char *label;
++    const char *key;                     /* the settings file's key */
++    const char *env;                     /* the variable that overrides it */
++    int live;                            /* how it applies now, or LIVE_NONE */
++    int n;
++    const char *vals[8];                 /* as written to the file */
++    const char *names[8];                /* as shown */
++} Item;
++
++static const Item ITEMS[] = {
++    { "Frame rate cap",      "frame_cap",        "RECOMP_FPS_CAP",       LIVE_CAP, 4,
++      { "adaptive", "60", "30", "0" }, { "adaptive", "60", "30", "off" } },
++    { "Frame interpolation", "frame_interp",     "RECOMP_FRAME_INTERP",  LIVE_INTERP, 4,
++      { "1", "2", "3", "4" }, { "off", "2x", "3x", "4x" } },
++    { "Frame-rate counter",  "fps_overlay",      "RECOMP_FPS_OVERLAY",   LIVE_FPS, 2,
++      { "0", "1" }, { "off", "on" } },
++    { "Fullscreen",          "fullscreen",       "RECOMP_FULLSCREEN",    LIVE_FULLSCREEN, 2,
++      { "0", "1" }, { "off", "on" } },
++    { "Internal resolution", "resolution_scale", "RECOMP_RES_SCALE",     LIVE_NONE, 8,
++      { "1", "2", "3", "4", "5", "6", "7", "8" }, { "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x" } },
++    { "Widescreen (16:9)",   "widescreen",       "RECOMP_WIDESCREEN",    LIVE_NONE, 2,
++      { "0", "1" }, { "off", "on" } },
++    { "Texture filtering",   "anisotropy",       "RECOMP_ANISO",         LIVE_NONE, 5,
++      { "1", "2", "4", "8", "16" }, { "off", "2x", "4x", "8x", "16x" } },
++    { "Variable refresh",    "vrr",              "RECOMP_VRR",           LIVE_NONE, 2,
++      { "0", "1" }, { "off", "on" } },
++};
++#define ITEM_COUNT ((int)(sizeof ITEMS / sizeof ITEMS[0]))
++
++/* The title's own lines, if its settings header has them: movies and sound.
++ * Shown only when the file (or the defaults) know the key. */
++static const Item TITLE_ITEMS[] = {
++    { "Movies",              "skip_intro",       NULL,                   LIVE_NONE, 3,
++      { "1", "intro", "0" }, { "skip all", "skip intro", "play all" } },
++    { "Sound",               "mute",             "RECOMP_MUTE",          LIVE_NONE, 2,
++      { "0", "1" }, { "on", "off" } },
++};
++#define TITLE_ITEM_COUNT ((int)(sizeof TITLE_ITEMS / sizeof TITLE_ITEMS[0]))
++
++static volatile int g_open;
++static int  g_sel;
++static int  g_restart_needed;
++static int  g_swallow;                   /* Start+Back still down after a toggle */
++static unsigned g_prev_buttons;
++static int  g_prev_a, g_prev_b;
++static const Item *g_items[ITEM_COUNT + TITLE_ITEM_COUNT];
++static int  g_count;
++static char g_text[2048];
++
++static void build_list(void)
++{
++    int i;
++
++    if (g_count)
++        return;
++    for (i = 0; i < ITEM_COUNT; i++)
++        g_items[g_count++] = &ITEMS[i];
++    for (i = 0; i < TITLE_ITEM_COUNT; i++)
++        if (recomp_config_lookup(NULL, TITLE_ITEMS[i].key))
++            g_items[g_count++] = &TITLE_ITEMS[i];
++}
++
++/* The value shown: what is in effect for a live setting, the file's (or the
++ * default) for the rest. */
++static int current_index(const Item *it)
++{
++    char buf[16];
++    const char *v;
++    int i;
++
++    switch (it->live) {
++    case LIVE_CAP:
++        v = hle_frame_cap();
++        for (i = 0; i < it->n; i++)
++            if (strcmp(v, it->names[i]) == 0)
++                return i;
++        return 0;
++    case LIVE_INTERP:
++        snprintf(buf, sizeof buf, "%d", hle_frame_interp());
++        v = buf;
++        break;
++    case LIVE_FPS:
++        v = hle_fps_overlay() ? "1" : "0";
++        break;
++    case LIVE_FULLSCREEN:
++        v = hle_fullscreen() ? "1" : "0";
++        break;
++    default:
++        v = recomp_config_lookup(it->env, it->key);
++        if (!v || !*v)
++            v = strcmp(it->key, "resolution_scale") == 0 || strcmp(it->key, "anisotropy") == 0
++                    ? "1" : it->vals[0];
++        break;
++    }
++    for (i = 0; i < it->n; i++)
++        if (strcmp(v, it->vals[i]) == 0)
++            return i;
++    return 0;
++}
++
++static void change(int dir)
++{
++    const Item *it;
++    int i;
++
++    if (g_sel >= g_count)                /* "Close" */
++        return;
++    it = g_items[g_sel];
++    i = (current_index(it) + dir + it->n) % it->n;
++    recomp_config_set(it->key, it->vals[i]);
++    switch (it->live) {
++    case LIVE_CAP:        hle_set_frame_cap(it->names[i]); break;
++    case LIVE_INTERP:     hle_set_frame_interp(atoi(it->vals[i])); break;
++    case LIVE_FPS:        hle_set_fps_overlay(i); break;
++    case LIVE_FULLSCREEN: hle_set_fullscreen(i); break;
++    default:              g_restart_needed = 1; break;
++    }
++    fprintf(stderr, "[MENU] %s = %s%s\n", it->key, it->vals[i],
++            it->live == LIVE_NONE ? " (at the next start)" : "");
++    fflush(stderr);
++}
++
++int hle_settings_menu_open(void)
++{
++    return g_open;
++}
++
++void hle_settings_menu_toggle(void)
++{
++    build_list();
++    g_open = !g_open;
++    fprintf(stderr, "[MENU] settings menu %s\n", g_open ? "opened" : "closed");
++    fflush(stderr);
++}
++
++const char *hle_settings_menu_text(void)
++{
++    int i, o = 0;
++
++    if (!g_open)
++        return NULL;
++    build_list();
++#define ADD(...) do { if (o < (int)sizeof g_text) \
++        o += snprintf(g_text + o, sizeof g_text - (size_t)o, __VA_ARGS__); } while (0)
++    ADD("            SETTINGS\n\n");
++    for (i = 0; i < g_count; i++) {
++        const Item *it = g_items[i];
++        int env = it->env && getenv(it->env) && *getenv(it->env) && it->live == LIVE_NONE;
++        ADD("%s%s %-20s < %-10s >%s\n", i == g_sel ? "\x01" : "", i == g_sel ? ">" : " ",
++            it->label, it->names[current_index(it)],
++            it->live == LIVE_NONE ? (env ? " *env" : " *") : "");
++    }
++    ADD("%s%s Close\n\n", g_sel == g_count ? "\x01" : "", g_sel == g_count ? ">" : " ");
++    ADD("  * at the next start%s\n", g_restart_needed ? ": restart to apply" : "");
++    ADD("  Up/Down choose   Left/Right/A change   B/F2 close");
++#undef ADD
++    return g_text;
++}
++
++void hle_settings_menu_keys(int dy, int dx, int ok, int back)
++{
++    if (!g_open)
++        return;
++    if (back) {
++        hle_settings_menu_toggle();
++        return;
++    }
++    if (dy)
++        g_sel = (g_sel + dy + g_count + 1) % (g_count + 1);
++    if (dx)
++        change(dx);
++    if (ok) {
++        if (g_sel == g_count)
++            hle_settings_menu_toggle();
++        else
++            change(1);
++    }
++}
++
++static long now_ms(void)
++{
++    return (long)((double)clock() * 1000.0 / CLOCKS_PER_SEC);
++}
++
++void hle_settings_menu_input(unsigned port, RecompInputGamepad *g)
++{
++    /* Start and Back are held back from the game for a moment when one is
++     * pressed alone, so that pressing them together (never quite at once)
++     * does not first pause the game with the one that landed first. */
++    static unsigned held_bits;
++    static long held_since;
++
++    if (!g)
++        return;
++    if (port == 0) {
++        unsigned b = g->buttons, pressed = b & ~g_prev_buttons;
++        int a = g->analog_buttons[HOST_ANALOG_A] > 30, bb = g->analog_buttons[HOST_ANALOG_B] > 30;
++        int stick_y = g->thumb_ly > 16000 ? -1 : g->thumb_ly < -16000 ? 1 : 0;
++        int stick_x = g->thumb_lx > 16000 ? 1 : g->thumb_lx < -16000 ? -1 : 0;
++        static int prev_sy, prev_sx;
++        const unsigned combo = PAD_START | PAD_BACK;
++
++        build_list();
++        if ((b & combo) == combo && (pressed & combo) && !g_swallow) {
++            hle_settings_menu_toggle();
++            g_swallow = 1;
++            held_bits = 0;
++        } else if (g_open && !g_swallow) {
++            int dy = (pressed & PAD_UP) ? -1 : (pressed & PAD_DOWN) ? 1 : 0;
++            int dx = (pressed & PAD_LEFT) ? -1 : (pressed & PAD_RIGHT) ? 1 : 0;
++            int back = (bb && !g_prev_b) || (pressed & PAD_BACK) != 0;
++
++            if (!dy && stick_y != prev_sy) dy = stick_y;
++            if (!dx && stick_x != prev_sx) dx = stick_x;
++            hle_settings_menu_keys(dy, dx, a && !g_prev_a, back);
++            if (back)
++                g_swallow = 1;           /* Back (or Start) still down: not the game's */
++        } else if (!g_open && !g_swallow && (pressed & combo)) {
++            held_bits = pressed & combo;
++            held_since = now_ms();
++        }
++        if (g_swallow && !(b & combo))
++            g_swallow = 0;
++        if (held_bits) {
++            if (!(b & held_bits)) {
++                /* A tap shorter than the wait: the game still gets it, for
++                 * this sample, and the release with the next. */
++                g->buttons |= (uint16_t)held_bits;
++                held_bits = 0;
++            } else if (now_ms() - held_since > 150) {
++                held_bits = 0;           /* held long enough: the game's from now on */
++            } else {
++                g->buttons &= (uint16_t)~held_bits;
++            }
++        }
++        g_prev_buttons = b;
++        g_prev_a = a;
++        g_prev_b = bb;
++        prev_sy = stick_y;
++        prev_sx = stick_x;
++    }
++    if (g_open || g_swallow)
++        memset(g, 0, sizeof *g);         /* the game sees nothing pressed */
++}
+diff --git a/src/hle/input_host.c b/src/hle/input_host.c
+index 5c78e69..0812d71 100644
+--- a/src/hle/input_host.c
++++ b/src/hle/input_host.c
+@@ -23,6 +23,7 @@
+ #include "input_host.h"
+ #include "input_bindings.h"
+ #include "recomp_config.h"   /* recomp_headless */
++#include "hle_settings.h"    /* the in-game settings menu */
+ 
+ /* <windows.h> on Windows, the POSIX shim (GetTickCount64) elsewhere. */
+ #include "platform/xbox_winnt.h"
+@@ -536,6 +537,9 @@ bool recomp_input_host_sample_port(unsigned port, RecompInputGamepad *gamepad)
+         seq_input(gamepad);
+         live_input(gamepad);
+     }
++    /* The in-game settings menu (hle_settings_menu.c): Start+Back opens it,
++     * and while it is open the game reads nothing. */
++    hle_settings_menu_input(port, gamepad);
+     return true;
+ }
+ 

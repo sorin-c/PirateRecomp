@@ -441,6 +441,7 @@ found with RECOMP_PIRATES_TICK_SITES=1); on the console the Swap then
 extern void sub_001A958A_gen(void);
 extern int recomp_config_int(const char *env_name, const char *key, int fallback);
 extern int recomp_settings_default_frame_interp(void);
+extern int hle_frame_interp(void);   /* toolkit: frames shown per frame drawn, now */
 extern void xbox_Nv2aFlipGateSetTitleInterval(uint32_t interval);
 extern int xbox_Nv2aFlipGateVblanksPerSwap(void);
 #define PIRATES_LIMITER_SEA  0x00091DE1u     /* after the limiters' tick reads: */
@@ -452,7 +453,8 @@ extern int xbox_Nv2aFlipGateVblanksPerSwap(void);
 #define PIRATES_FRAME_START  0x005061F8u     /* the limiter's time base */
 void sub_001A958A(void)
 {
-    static int smooth = -1, at30;
+    static int env_set, at30;
+    int smooth;
     static uint32_t last_hit;
     uint32_t ra = *(volatile uint32_t *)((uintptr_t)g_esp + g_xbox_mem_offset);
     uint32_t now;
@@ -476,22 +478,27 @@ void sub_001A958A(void)
             }
         }
     }
-    if (smooth < 0) {
-        smooth = recomp_config_int("RECOMP_FRAME_INTERP", "frame_interp",
-                                   recomp_settings_default_frame_interp()) >= 2;
-        if (smooth) {
-            /* The gate honours the title's interval only when told to. */
+    if (!env_set) {
+        /* The gate honours the title's interval only when told to. Told
+         * always: the interval stays 1 unless interpolation is on and a 30
+         * fps scene asks below, and interpolation can be turned on in the
+         * settings menu while the game runs. */
+        env_set = 1;
 #ifdef _WIN32
-            _putenv("RECOMP_TITLE_INTERVAL=1");
+        _putenv("RECOMP_TITLE_INTERVAL=1");
 #else
-            setenv("RECOMP_TITLE_INTERVAL", "1", 1);
+        setenv("RECOMP_TITLE_INTERVAL", "1", 1);
 #endif
-            fprintf(stderr, "[PIRATES] frame interpolation: the 30 fps scenes are paced "
-                            "by the flip gate\n");
-        }
     }
-    if (!smooth)
+    /* What is in effect now (frame_interp, or the settings menu since). */
+    smooth = hle_frame_interp() >= 2;
+    if (!smooth) {
+        if (at30) {                       /* turned off in a 30 fps scene */
+            at30 = 0;
+            xbox_Nv2aFlipGateSetTitleInterval(1);
+        }
         return;
+    }
     now = g_eax;
     if (ra == PIRATES_LIMITER_SEA || ra == PIRATES_LIMITER_SEA2 || ra == PIRATES_LIMITER_30MS ||
         ((ra == PIRATES_LIMITER_BTL || ra == PIRATES_LIMITER_DUEL) &&
