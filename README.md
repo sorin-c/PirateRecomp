@@ -7,7 +7,7 @@ You bring your own copy of the game, and it is built from that copy on your
 computer. This repository contains no game code or data.
 
 **Status: bring-up, partly playable.** It builds and runs on Windows, with
-nineteen toolkit patches (below).
+twenty toolkit patches (below).
 
 - Works: the logo movies, title screen and main menu with music; a new game
   through crew sign-up to the first town; the governor, tavern, merchant,
@@ -105,6 +105,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0017-hle-push-buffer-draws-ff-and-timing.patch
    git -C xboxrecomp apply ..\patches\0018-hle-interp-fixed-function.patch
    git -C xboxrecomp apply ..\patches\0019-config-title-default-frame-interp.patch
+   git -C xboxrecomp apply ..\patches\0020-hle-interp-mirror-quaternion.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -168,6 +169,7 @@ git -C xboxrecomp apply ..\patches\0016-flip-gate-vblanks-per-swap.patch
 git -C xboxrecomp apply ..\patches\0017-hle-push-buffer-draws-ff-and-timing.patch
 git -C xboxrecomp apply ..\patches\0018-hle-interp-fixed-function.patch
 git -C xboxrecomp apply ..\patches\0019-config-title-default-frame-interp.patch
+git -C xboxrecomp apply ..\patches\0020-hle-interp-mirror-quaternion.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -344,6 +346,17 @@ git -C xboxrecomp apply ..\patches\0019-config-title-default-frame-interp.patch
   drawn only between title frames two vblanks or more apart: between two
   a vblank apart it cost the title a vblank, and the menus and sea dialogs
   ran at 40-50 instead of 60.
+
+- **0020-hle-interp-mirror-quaternion** (`src/hle/hle_d3d8_interp.c`).
+  The flicker at sea with frame interpolation: every in-between frame lost
+  the towns, the ships' sails and the cloud shadows. The sea camera's view
+  matrix is a mirror whose proper part turns half a turn, and the
+  quaternion taken from it lost the relative sign of its axes at 180
+  degrees, so even an unblended rebuild flipped two axes. The quaternion is
+  now taken by Shepperd's method. Also: a fixed-function draw's matrices
+  are read back from the device at the draw, a world matrix's jump is
+  judged in camera space, and only draws of the same bytes are blended.
+  `RECOMP_INTERP_FF=0` draws fixed-function draws as the frame has them.
 
 ## Running a build of your own
 
