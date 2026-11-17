@@ -7,7 +7,7 @@ You bring your own copy of the game, and it is built from that copy on your
 computer. This repository contains no game code or data.
 
 **Status: bring-up, partly playable.** It builds and runs on Windows, with
-twenty-one toolkit patches (below).
+twenty-two toolkit patches (below).
 
 - Works: the logo movies, title screen and main menu with music; a new game
   through crew sign-up to the first town; the governor, tavern, merchant,
@@ -107,6 +107,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0019-config-title-default-frame-interp.patch
    git -C xboxrecomp apply ..\patches\0020-hle-interp-mirror-quaternion.patch
    git -C xboxrecomp apply ..\patches\0021-d3d-pixel-offset-scaled.patch
+   git -C xboxrecomp apply ..\patches\0022-headless-test-runs.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -172,6 +173,7 @@ git -C xboxrecomp apply ..\patches\0018-hle-interp-fixed-function.patch
 git -C xboxrecomp apply ..\patches\0019-config-title-default-frame-interp.patch
 git -C xboxrecomp apply ..\patches\0020-hle-interp-mirror-quaternion.patch
 git -C xboxrecomp apply ..\patches\0021-d3d-pixel-offset-scaled.patch
+git -C xboxrecomp apply ..\patches\0022-headless-test-runs.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -370,6 +372,22 @@ git -C xboxrecomp apply ..\patches\0021-d3d-pixel-offset-scaled.patch
   `RECOMP_TITLE_PIXEL_OFFSET_SCALED`) the offset is half a host pixel: the
   same at 1x, and the quad covers the edge above it.
 
+- **0022-headless-test-runs** (`src/config/recomp_config.c`,
+  `src/hle/hle_d3d8.c`, `src/hle/input_host.c`, `src/input/input_bindings.c`).
+  Test scripts ran the game on the same desk as the player: its window came
+  up in front, took the focus, and the player's own keyboard and pad (one in
+  slot 2 included) reached the game alongside the script. `RECOMP_HEADLESS=1`
+  (or `headless = 1` in `pirates.ini`) opens the window off every monitor,
+  off the taskbar and Alt+Tab, never active; no real keyboard, pad or mouse
+  is read on any port, the game is shown one controller (the script's), and
+  nothing rumbles. The window is still shown, not hidden or minimised, so
+  frames are drawn, presented and paced exactly as in play (measured: 60 a
+  second in the menus, 30 in a VS MODE battle with `frame_interp = 2`, as
+  without it). `RECOMP_SHOT_REQUEST=<file>` lets a script ask the game for
+  its next frame as a BMP (and a replayable capture, as F11), since nothing
+  on the desktop can photograph a window that is off it. Off by default;
+  a player's game is unchanged.
+
 ## Running a build of your own
 
 ```
@@ -389,6 +407,14 @@ The save folder also holds the emulated console's identity (`console.ini`,
 its MAC address, part of what XAPI signs settings and saves with), so
 deleting it or pointing `RECOMP_SAVE_DIR` somewhere new makes existing
 settings and console-bound saves read as damaged: keep one folder per player.
+
+**Test runs stay off your desk.** The scripts in `tools/test` start the game
+headless (`RECOMP_HEADLESS=1`, toolkit patch 0022): its window opens off the
+screen and off the taskbar and never takes the focus, your keyboard and pads
+are not read (only the script presses anything), and screenshots come from
+the game itself. `drive.ps1 start -Visible` shows a run's window again,
+behind the others, for watching one. A game you start yourself is not
+affected.
 
 **Settings: `pirates.ini`.** The settings live in `pirates.ini`, beside
 `pirates_launcher.exe` and `pirates_recomp.exe` (`build\Release\pirates.ini`

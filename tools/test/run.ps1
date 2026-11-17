@@ -1,6 +1,7 @@
 # Run pirates_recomp.exe from build\Release for a bounded time, stderr to run.log.
-# Usage: run.ps1 [-Seconds 60] [-Tag name] [-Sound] [-Env @{K='V'}]
-param([int]$Seconds = 60, [string]$Tag = "run", [switch]$Sound, [hashtable]$Env = @{}, [int[]]$ShotAt = @(), [switch]$KeepData, [string]$SaveDir = "")
+# Usage: run.ps1 [-Seconds 60] [-Tag name] [-Sound] [-Env @{K='V'}] [-Visible]
+# Headless unless -Visible: see drive.ps1. PIRATES_TEST_EXE picks another build.
+param([int]$Seconds = 60, [string]$Tag = "run", [switch]$Sound, [hashtable]$Env = @{}, [int[]]$ShotAt = @(), [switch]$KeepData, [string]$SaveDir = "", [switch]$Visible)
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
 $sp = $(if ($env:PIRATES_TEST_OUT) { $env:PIRATES_TEST_OUT } else { [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\..\..\testrun")) })
 $runs = Join-Path $sp "runs"; New-Item -ItemType Directory -Force $runs | Out-Null
@@ -15,20 +16,23 @@ if (-not $KeepData) {
     foreach ($d in "UDATA","TDATA","CACHE") { Remove-Item -Recurse -Force (Join-Path $env:RECOMP_GAME_DIR $d) -ErrorAction SilentlyContinue }
 }
 if (-not $Sound) { $env:RECOMP_MUTE = "1" } else { Remove-Item Env:RECOMP_MUTE -ErrorAction SilentlyContinue }
+$env:RECOMP_WINDOW_BACKGROUND = "1"
+if ($Visible) { Remove-Item Env:RECOMP_HEADLESS -ErrorAction SilentlyContinue } else { $env:RECOMP_HEADLESS = "1" }
+$req = Join-Path $sp "shot_$Tag.req"; Remove-Item $req -ErrorAction SilentlyContinue
+$env:RECOMP_SHOT_REQUEST = $req
 foreach ($k in $Env.Keys) { Set-Item "Env:$k" $Env[$k] }
-$log = Join-Path $root "run.log"
-$exe = Join-Path $root "build\Release\pirates_recomp.exe"
-$p = Start-Process -FilePath $exe -WorkingDirectory (Join-Path $root "build\Release") `
+$log = Join-Path $runs "$Tag.log"
+$exe = if ($env:PIRATES_TEST_EXE) { $env:PIRATES_TEST_EXE } else { Join-Path $root "build\Release\pirates_recomp.exe" }
+$p = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) `
     -RedirectStandardError $log -RedirectStandardOutput (Join-Path $runs "$Tag.stdout") -PassThru
 $elapsed = 0; $exited = $false
 foreach ($t in ($ShotAt | Sort-Object)) {
     if ($t -ge $Seconds) { break }
     if ($p.WaitForExit(($t - $elapsed) * 1000)) { $exited = $true; break }
     $elapsed = $t
-    & (Join-Path $PSScriptRoot "shot.ps1") -ProcessId $p.Id -Out (Join-Path $runs "$Tag`_t$t.png")
+    & (Join-Path $PSScriptRoot "shot.ps1") -ProcessId $p.Id -Out (Join-Path $runs "$Tag`_t$t.png") -Request $req
 }
 if (-not $exited) { $exited = $p.WaitForExit(($Seconds - $elapsed) * 1000) }
 if (-not $exited) { Stop-Process -Id $p.Id -Force; "killed after $Seconds s" } else { "exited code=$($p.ExitCode)" }
-Copy-Item $log (Join-Path $runs "$Tag.log") -Force
 $l = Get-Content $log
 "lines=$($l.Count)"

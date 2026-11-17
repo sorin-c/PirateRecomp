@@ -1,7 +1,38 @@
-# Capture the game's window(s) to PNG with PrintWindow (PW_RENDERFULLCONTENT).
-# usage: shot.ps1 -ProcessId <pid> -Out <file.png>
-param([int]$ProcessId, [string]$Out)
+# Capture the game's picture to PNG.
+# usage: shot.ps1 -ProcessId <pid> -Out <file.png> [-Request <file>] [-Capture]
+#
+# With -Request (the RECOMP_SHOT_REQUEST file the run was started with, as
+# drive.ps1 and run.ps1 do) the game writes its own next frame: that works for
+# a headless run, whose window is off the desktop, and for a background one
+# under other windows. -Capture also asks for a replayable .d3dcap, as F11.
+# Without it, or when the game does not answer (an old build, a suspended
+# process), the window is captured with PrintWindow (PW_RENDERFULLCONTENT).
+param([int]$ProcessId, [string]$Out, [string]$Request = "", [switch]$Capture, [int]$TimeoutMs = 5000)
 Add-Type -AssemblyName System.Drawing
+$Out = [IO.Path]::GetFullPath($Out)
+if ($Request) {
+  $bmp = [IO.Path]::ChangeExtension($Out, ".bmp")
+  Remove-Item $bmp -ErrorAction SilentlyContinue
+  # Written under another name and renamed, so the game never reads half a line.
+  $tmp = "$Request.tmp"
+  $line = $(if ($Capture) { "capture $bmp" } else { $bmp })
+  [IO.File]::WriteAllText($tmp, "$line`n")
+  Move-Item -Force $tmp $Request
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  while (-not (Test-Path $bmp) -and $sw.ElapsedMilliseconds -lt $TimeoutMs) {
+    if (-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { break }
+    Start-Sleep -Milliseconds 50
+  }
+  if (Test-Path $bmp) {
+    $img = [System.Drawing.Image]::FromFile($bmp)
+    $img.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png)
+    "saved $Out ($($img.Width) x $($img.Height)) from the game"
+    $img.Dispose(); Remove-Item $bmp
+    return
+  }
+  Remove-Item $Request -ErrorAction SilentlyContinue   # not taken: do not leave it for later
+  "the game did not answer the picture request in $TimeoutMs ms; trying PrintWindow"
+}
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;

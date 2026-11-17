@@ -1,0 +1,256 @@
+diff --git a/src/config/recomp_config.c b/src/config/recomp_config.c
+index 0e271ea..8d25f89 100644
+--- a/src/config/recomp_config.c
++++ b/src/config/recomp_config.c
+@@ -900,6 +900,44 @@ int recomp_config_int(const char *env_name, const char *key, int fallback)
+     return (int)n;
+ }
+ 
++/* RECOMP_HEADLESS=1, or `headless = 1` in the title's settings file: a run
++ * driven by a test script on a desk where someone is working.
++ *
++ * RECOMP_WINDOW_BACKGROUND=1 keeps the focus where it is, but its window is
++ * still on the screen, on the taskbar, and the person's own keyboard and pads
++ * still reach the game -- a script's presses and theirs mixed, and a pad
++ * resting in another slot steering the test. Headless is that switch and
++ * more: the window opens off every monitor and off the taskbar and Alt+Tab
++ * (it is still a shown window, so the device presents and frames are drawn
++ * and timed exactly as in play), no real device is read on any port and
++ * nothing is sent to one (rumble), and the only input is the script's
++ * (RECOMP_INPUT_SEQ, RECOMP_INPUT_LIVE, RECOMP_FAKE_INPUT). Pictures come
++ * from inside the game (RECOMP_SHOT_REQUEST, src/hle/hle_d3d8.c), because
++ * nothing on the desktop can be photographed. It implies the background
++ * switch, which is set here so every place that reads that one agrees. */
++int recomp_headless(void)
++{
++    static int v = -1;
++
++    if (v < 0) {
++        v = recomp_config_bool("RECOMP_HEADLESS", "headless", 0);
++        if (v) {
++            const char *bg = getenv("RECOMP_WINDOW_BACKGROUND");
++            if (!bg || !*bg || strcmp(bg, "0") == 0) {
++#if defined(_WIN32)
++                _putenv("RECOMP_WINDOW_BACKGROUND=1");
++#else
++                setenv("RECOMP_WINDOW_BACKGROUND", "1", 1);
++#endif
++            }
++            fprintf(stderr, "[CONFIG] headless: the window is off-screen, real input "
++                    "devices are ignored, only scripted input is read\n");
++            fflush(stderr);
++        }
++    }
++    return v;
++}
++
+ double recomp_config_float(const char *env_name, const char *key, double fallback)
+ {
+     const char *v = recomp_config_lookup(env_name, key);
+diff --git a/src/config/recomp_config.h b/src/config/recomp_config.h
+index 3251795..c73581d 100644
+--- a/src/config/recomp_config.h
++++ b/src/config/recomp_config.h
+@@ -76,6 +76,11 @@ int    recomp_config_int(const char *env_name, const char *key, int fallback);
+ int    recomp_config_bool(const char *env_name, const char *key, int fallback);
+ double recomp_config_float(const char *env_name, const char *key, double fallback);
+ 
++/* RECOMP_HEADLESS / `headless`: a scripted test run that must leave the
++ * desk alone -- window off-screen and never active, no real input device
++ * read or written. Implies RECOMP_WINDOW_BACKGROUND. See recomp_config.c. */
++int    recomp_headless(void);
++
+ /* The file the lookups read, for a log line or a launcher; NULL when no
+  * file was found. */
+ const char *recomp_config_path(void);
+diff --git a/src/hle/hle_d3d8.c b/src/hle/hle_d3d8.c
+index 935201f..7a7e737 100644
+--- a/src/hle/hle_d3d8.c
++++ b/src/hle/hle_d3d8.c
+@@ -623,7 +623,20 @@ static DWORD WINAPI shadow_window_thread(LPVOID param)
+      * WS_EX_NOACTIVATE keeps the focus where it is however the window is
+      * shown. WS_EX_APPWINDOW keeps it on the taskbar, which NOACTIVATE
+      * would otherwise take it off. */
+-    {
++    int x = CW_USEDEFAULT, y = CW_USEDEFAULT;
++
++    if (recomp_headless()) {
++        /* Headless (recomp_headless): off every monitor, off the taskbar and
++         * Alt+Tab (a tool window), never activated. It is still a shown,
++         * unminimised window, so the device presents to it and the frame
++         * rate is what it would be on screen: a minimised or hidden window
++         * is one DXGI calls occluded, and a test of timing would measure
++         * that instead. Left of the whole virtual desktop, where no monitor
++         * can be. */
++        ex_style = WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
++        x = GetSystemMetrics(SM_XVIRTUALSCREEN) - (r.right - r.left) - 256;
++        y = GetSystemMetrics(SM_YVIRTUALSCREEN);
++    } else {
+         const char *bg = getenv("RECOMP_WINDOW_BACKGROUND");
+ 
+         if (bg && *bg && strcmp(bg, "0") != 0)
+@@ -632,7 +645,7 @@ static DWORD WINAPI shadow_window_thread(LPVOID param)
+     req->hwnd = CreateWindowExA(ex_style, wc.lpszClassName,
+                               "xboxrecomp - D3D8 replacement (shadow)",
+                               WS_OVERLAPPEDWINDOW,
+-                              CW_USEDEFAULT, CW_USEDEFAULT,
++                              x, y,
+                               r.right - r.left, r.bottom - r.top,
+                               NULL, NULL, wc.hInstance, NULL);
+     /* RECOMP_WINDOW_BACKGROUND=1: open behind the other windows and without
+@@ -2291,9 +2304,83 @@ static void ram_dump_at_swap(void)
+     }
+ }
+ 
++/* RECOMP_SHOT_REQUEST=<file>: pictures for a script, from inside the game.
++ *
++ * A headless run's window is off the desktop (recomp_headless), and a
++ * background one sits under whatever the person is using, so a screenshot
++ * of the window is either impossible or a picture of something else. The
++ * script writes a request file instead and the next finished frame is
++ * written where it asks. The file holds one line, the BMP to write:
++ *
++ *     K:/runs/sea_01.bmp            the frame
++ *     capture K:/runs/sea_01.bmp    the frame, and a replayable capture
++ *                                    as F11 makes one (beside the executable)
++ *
++ * Write the request to another name and rename it into place, so it is
++ * never read half-written. The game deletes it when it takes it, and writes
++ * the picture under a temporary name first, so the BMP appearing means it
++ * is complete. Checked every 50 ms at a swap; nothing is read when the
++ * variable is unset. */
++static char g_shot_path[1024];
++
++static void shot_request_poll(void)
++{
++    static int configured;
++    static const char *req;
++    static ULONGLONG next;
++    char buf[1100];
++    size_t n;
++    char *p;
++    FILE *f;
++    ULONGLONG now;
++
++    if (!configured) {
++        configured = 1;
++        req = getenv("RECOMP_SHOT_REQUEST");
++        if (req && !*req)
++            req = NULL;
++        if (req) {
++            fprintf(stderr, "[HLE-D3D8] pictures on request: %s\n", req);
++            fflush(stderr);
++        }
++    }
++    if (!req || g_shot_path[0])
++        return;
++    now = GetTickCount64();
++    if (now < next)
++        return;
++    next = now + 50;
++    f = fopen(req, "rb");
++    if (!f)
++        return;
++    n = fread(buf, 1, sizeof buf - 1, f);
++    fclose(f);
++    buf[n] = 0;
++    remove(req);
++    while (n && (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == ' ' ||
++                 buf[n - 1] == '\t'))
++        buf[--n] = 0;
++    p = buf;
++    while (*p == ' ' || *p == '\t')
++        p++;
++    if (strncmp(p, "capture ", 8) == 0) {
++        p += 8;
++        while (*p == ' ')
++            p++;
++        hle_d3d8_capture_next_frame();
++    }
++    if (!*p) {
++        fprintf(stderr, "[HLE-D3D8] picture request without a file name, ignored\n");
++        return;
++    }
++    snprintf(g_shot_path, sizeof g_shot_path, "%s", p);
++    g_dump_requested = 1;
++}
++
+ static void shadow_dump_frame(void)
+ {
+     ram_dump_at_swap();
++    shot_request_poll();
+     static const char *prefix;
+     static int configured, every = 300, written, keep_last, max_files = 24;
+     static unsigned long min_draws, last_dump, from_swap;
+@@ -2349,6 +2436,22 @@ static void shadow_dump_frame(void)
+      * no prefix was given -- so pressing the key is the whole procedure. */
+     asked = g_dump_requested;
+     g_dump_requested = 0;
++    if (asked && g_shot_path[0]) {
++        /* A script's picture (RECOMP_SHOT_REQUEST): its own name, written
++         * whole before it appears under it. */
++        char tmp[1100];
++
++        snprintf(tmp, sizeof tmp, "%s.part", g_shot_path);
++        remove(tmp);
++        if (dump_back_buffer(tmp) == 0) {
++            remove(g_shot_path);
++            if (rename(tmp, g_shot_path) == 0)
++                fprintf(stderr, "[HLE-D3D8] shadow frame %lu -> %s (requested)\n",
++                        g_shadow_swaps, g_shot_path);
++        }
++        g_shot_path[0] = 0;
++        return;
++    }
+     if (asked && (!prefix || !*prefix)) {
+         hle_d3d8_beside_exe(asked_prefix, sizeof asked_prefix, "frame");
+         prefix = asked_prefix;
+diff --git a/src/hle/input_host.c b/src/hle/input_host.c
+index 893db0f..5c78e69 100644
+--- a/src/hle/input_host.c
++++ b/src/hle/input_host.c
+@@ -22,6 +22,7 @@
+  */
+ #include "input_host.h"
+ #include "input_bindings.h"
++#include "recomp_config.h"   /* recomp_headless */
+ 
+ /* <windows.h> on Windows, the POSIX shim (GetTickCount64) elsewhere. */
+ #include "platform/xbox_winnt.h"
+@@ -517,7 +518,10 @@ bool recomp_input_host_sample_port(unsigned port, RecompInputGamepad *gamepad)
+     if (gamepad == NULL)
+         return false;
+     memset(gamepad, 0, sizeof *gamepad);
+-    if (!(port == 0 && seq_owns_pad()) && recomp_bindings_sample(port, &pad)) {
++    /* Headless: no real device on any port, the script's presses below are
++     * the only input (recomp_headless). */
++    if (!(port == 0 && seq_owns_pad()) && !recomp_headless() &&
++        recomp_bindings_sample(port, &pad)) {
+         gamepad->buttons = (uint16_t)pad.wButtons;
+         for (i = 0; i < RECOMP_INPUT_ANALOG_BUTTON_COUNT; i++)
+             gamepad->analog_buttons[i] = pad.bAnalogButtons[i];
+diff --git a/src/input/input_bindings.c b/src/input/input_bindings.c
+index d72aba9..aaf8b5f 100644
+--- a/src/input/input_bindings.c
++++ b/src/input/input_bindings.c
+@@ -1190,6 +1190,11 @@ unsigned recomp_bindings_present_mask(void)
+     unsigned long long now;
+     int i;
+ 
++    /* Headless (recomp_headless): controller 1 is the script, and it is the
++     * only controller there is. A pad someone has in another slot is not
++     * shown to the title at all, so it cannot join or steer the test. */
++    if (recomp_headless())
++        return 1u;
+     recomp_bindings_init();
+     now = now_ms();
+     if (mask && now < next)
+@@ -1212,6 +1217,8 @@ unsigned recomp_bindings_present_mask(void)
+ 
+ void recomp_bindings_rumble(unsigned port, unsigned short low, unsigned short high)
+ {
++    if (recomp_headless())
++        return;                     /* nobody's pad shakes for a test */
+     recomp_bindings_init();
+     if (port < PORTS && g_ctl[port].device == DEV_PAD)
+         recomp_pad_rumble(g_ctl[port].pad, low, high);
