@@ -206,7 +206,10 @@ endif()
 if(TARGET xbox_config)
     target_compile_definitions(xbox_config PRIVATE
         RECOMP_TITLE_SETTINGS_FILE="pirates.ini"
-        RECOMP_TITLE_SETTINGS_HEADER="${CMAKE_CURRENT_SOURCE_DIR}/src/settings_title.h")
+        RECOMP_TITLE_SETTINGS_HEADER="${CMAKE_CURRENT_SOURCE_DIR}/src/settings_title.h"
+        # 60 on screen where the game runs at 30 (sea, battles, duels, town
+        # sneak), 120 in menus: frame_interp = 2 unless pirates.ini says else
+        RECOMP_TITLE_DEFAULT_FRAME_INTERP=2)
 endif()
 
 # The launcher (the toolkit's src/launcher): resolution, widescreen, frame

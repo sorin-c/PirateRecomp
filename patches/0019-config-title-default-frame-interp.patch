@@ -1,0 +1,71 @@
+diff --git a/src/config/recomp_config.c b/src/config/recomp_config.c
+index cef72d2..0e271ea 100644
+--- a/src/config/recomp_config.c
++++ b/src/config/recomp_config.c
+@@ -353,6 +353,18 @@ static int readable(const char *path)
+ 
+ /* ------------------------------------------------------------ settings */
+ 
++/* The frame interpolation a title starts with: 1 (off) unless its
++ * CMakeLists says otherwise (RECOMP_TITLE_DEFAULT_FRAME_INTERP on
++ * xbox_config). Also the fallback where nothing sets frame_interp. */
++int recomp_settings_default_frame_interp(void)
++{
++#if defined(RECOMP_TITLE_DEFAULT_FRAME_INTERP)
++    return RECOMP_TITLE_DEFAULT_FRAME_INTERP;
++#else
++    return 1;
++#endif
++}
++
+ void recomp_settings_defaults(RecompSettings *s)
+ {
+     if (!s)
+@@ -367,7 +379,7 @@ void recomp_settings_defaults(RecompSettings *s)
+     s->fps_overlay       = 0;
+     s->fullscreen        = 0;
+     s->vrr               = 1;
+-    s->frame_interp      = 1;
++    s->frame_interp      = recomp_settings_default_frame_interp();
+     s->mouse_look        = 0;
+     s->mouse_sensitivity = RECOMP_MOUSE_SENSITIVITY_DEFAULT;
+ #if defined(__ANDROID__)
+diff --git a/src/config/recomp_config.h b/src/config/recomp_config.h
+index 99ce003..3251795 100644
+--- a/src/config/recomp_config.h
++++ b/src/config/recomp_config.h
+@@ -275,6 +275,7 @@ typedef struct RecompSettings {
+ #define RECOMP_MOUSE_SENSITIVITY_MAX     100
+ 
+ void recomp_settings_defaults(RecompSettings *s);
++int  recomp_settings_default_frame_interp(void);
+ 
+ /* Read the file at `path` into `s`, starting from the defaults. Absent
+  * keys keep their default, so an older file gains new settings rather
+diff --git a/src/hle/hle_d3d8_interp.c b/src/hle/hle_d3d8_interp.c
+index d5ed687..cf349f2 100644
+--- a/src/hle/hle_d3d8_interp.c
++++ b/src/hle/hle_d3d8_interp.c
+@@ -930,6 +930,12 @@ static long long gate_idle(long long now, long long release)
+     }
+     if (!g_frame_ok || span <= g_qpf / 1000 || span > g_qpf / 10)
+         return 0;
++    /* A strict 60 (frame_cap = 60): each present waits for a vblank, so
++     * an in-between frame between two the title draws a vblank apart costs
++     * the title a vblank -- Pirates!' menus ran at 40-50. Only a title
++     * frame two vblanks or more apart (a game at 30) has room for one. */
++    if (span < g_qpf / 40 && strcmp(xbox_Nv2aFlipGateModeName(), "60") == 0)
++        return 0;
+     while (g_slot < g_multiple) {
+         LONGLONG due = g_last_present + span * g_slot / g_multiple;
+         LONGLONG start = due - g_redraw_est;
+@@ -1028,7 +1034,8 @@ void hle_d3d8_interp_init(void)
+     if (done)
+         return;
+     done = 1;
+-    n = recomp_config_int("RECOMP_FRAME_INTERP", "frame_interp", 0);
++    n = recomp_config_int("RECOMP_FRAME_INTERP", "frame_interp",
++                          recomp_settings_default_frame_interp());
+     if (n < 2)
+         return;
+     if (n > INTERP_MAX_MULTIPLE)

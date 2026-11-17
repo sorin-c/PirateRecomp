@@ -7,7 +7,7 @@ You bring your own copy of the game, and it is built from that copy on your
 computer. This repository contains no game code or data.
 
 **Status: bring-up, partly playable.** It builds and runs on Windows, with
-eighteen toolkit patches (below).
+nineteen toolkit patches (below).
 
 - Works: the logo movies, title screen and main menu with music; a new game
   through crew sign-up to the first town; the governor, tavern, merchant,
@@ -16,8 +16,9 @@ eighteen toolkit patches (below).
   (`RECOMP_WIDESCREEN=1`) and a higher internal resolution
   (`RECOMP_RES_SCALE`).
 - The game holds itself to 30 fps at sea, in battles, sword duels and the
-  town sneak; `frame_interp = 2` shows 60 there, characters included
-  (patch 0018). Menus, towns and the governor's rooms run at 60 (120
+  town sneak; frame interpolation (`frame_interp = 2`, the default since
+  17 Nov) shows 60 there, characters included (patches 0018, 0019). The
+  game itself stays at 30 there with any `frame_cap` (measured). Menus, towns and the governor's rooms run at 60 (120
   shown with interpolation); dancing paces itself to its music at ~50.
 - Fixed 17 Nov (patch 0017): characters' heads and hands (the town-sneak
   hero, a governor's guest) were missing or drawn huge in front of the
@@ -103,6 +104,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0016-flip-gate-vblanks-per-swap.patch
    git -C xboxrecomp apply ..\patches\0017-hle-push-buffer-draws-ff-and-timing.patch
    git -C xboxrecomp apply ..\patches\0018-hle-interp-fixed-function.patch
+   git -C xboxrecomp apply ..\patches\0019-config-title-default-frame-interp.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -165,6 +167,7 @@ git -C xboxrecomp apply ..\patches\0015-flip-gate-lend-any-divisor.patch
 git -C xboxrecomp apply ..\patches\0016-flip-gate-vblanks-per-swap.patch
 git -C xboxrecomp apply ..\patches\0017-hle-push-buffer-draws-ff-and-timing.patch
 git -C xboxrecomp apply ..\patches\0018-hle-interp-fixed-function.patch
+git -C xboxrecomp apply ..\patches\0019-config-title-default-frame-interp.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -332,6 +335,15 @@ git -C xboxrecomp apply ..\patches\0018-hle-interp-fixed-function.patch
   them blended like a program's: rotation as a quaternion, scale and
   translation linearly, the projection term by term. Screen-space
   (XYZRHW) draws are left as they are.
+
+- **0019-config-title-default-frame-interp** (`src/config/recomp_config.c`,
+  `.h`, `src/hle/hle_d3d8_interp.c`). A title can set the frame
+  interpolation it starts with (`RECOMP_TITLE_DEFAULT_FRAME_INTERP` on
+  `xbox_config`); this game's CMakeLists sets 2. And with `frame_cap = 60`
+  (a strict 60: every present waits for a vblank) an in-between frame is
+  drawn only between title frames two vblanks or more apart: between two
+  a vblank apart it cost the title a vblank, and the menus and sea dialogs
+  ran at 40-50 instead of 60.
 
 ## Running a build of your own
 

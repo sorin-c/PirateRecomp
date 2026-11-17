@@ -352,6 +352,7 @@ found with RECOMP_PIRATES_TICK_SITES=1); on the console the Swap then
  * interpolation nothing changes. */
 extern void sub_001A958A_gen(void);
 extern int recomp_config_int(const char *env_name, const char *key, int fallback);
+extern int recomp_settings_default_frame_interp(void);
 extern void xbox_Nv2aFlipGateSetTitleInterval(uint32_t interval);
 extern int xbox_Nv2aFlipGateVblanksPerSwap(void);
 #define PIRATES_LIMITER_SEA  0x00091DE1u     /* after the limiters' tick reads: */
@@ -387,7 +388,8 @@ void sub_001A958A(void)
         }
     }
     if (smooth < 0) {
-        smooth = recomp_config_int("RECOMP_FRAME_INTERP", "frame_interp", 0) >= 2;
+        smooth = recomp_config_int("RECOMP_FRAME_INTERP", "frame_interp",
+                                   recomp_settings_default_frame_interp()) >= 2;
         if (smooth) {
             /* The gate honours the title's interval only when told to. */
 #ifdef _WIN32
