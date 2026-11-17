@@ -1,0 +1,103 @@
+diff --git a/src/d3d/d3d8_combiners.c b/src/d3d/d3d8_combiners.c
+index b395bb0..884e589 100644
+--- a/src/d3d/d3d8_combiners.c
++++ b/src/d3d/d3d8_combiners.c
+@@ -417,6 +417,7 @@ void d3d8_combiners_from_render_states(const DWORD *rs,
+         state->xmode[i] = NV2A_XMODE_UNKNOWN;
+         state->dot_map[i] = 0;
+         state->input_tex[i] = 0;
++        state->compare_mode[i] = 0;
+     }
+     if (state->tex_mode[0] == 0 && state->tex_mode[1] == 0 &&
+         state->tex_mode[2] == 0 && state->tex_mode[3] == 0) {
+@@ -435,6 +436,8 @@ void d3d8_combiners_from_render_states(const DWORD *rs,
+             state->dot_map[1] = (uint8_t)(dm & 0xF);
+             state->dot_map[2] = (uint8_t)((dm >> 4) & 0xF);
+             state->dot_map[3] = (uint8_t)((dm >> 8) & 0xF);
++            for (i = 0; i < NV2A_MAX_TEXTURES; i++)
++                state->compare_mode[i] = (uint8_t)((rs[D3DRS_PSCOMPAREMODE] >> (4 * i)) & 0xF);
+             state->input_tex[2] = (uint8_t)((it >> 16) & 0xF);
+             state->input_tex[3] = (uint8_t)((it >> 20) & 0xF);
+             for (i = 2; i < NV2A_MAX_TEXTURES; i++)
+@@ -714,8 +717,8 @@ static int emit_shadow_compare(char *buf, int bufsize, int *poff, int i)
+  * order (a dependent stage reads an earlier one). Each mode as xemu's
+  * psh.c has it, with these differences: BUMPENVMAP and BUMPENVMAP_LUM look
+  * up their own coordinates without the bump offset (the bump-environment
+- * matrix is a texture stage state not forwarded yet), CLIPPLANE kills
+- * nothing (PSCOMPAREMODE is not forwarded), DOT_ZW does not replace depth.
++ * matrix is a texture stage state not forwarded yet), DOT_ZW does not
++ * replace depth.
+  * A mode at a stage the hardware does not allow it at reads zero. */
+ static int emit_xbox_textures(const NV2ACombinerState *state, char *buf,
+                               int bufsize, int *poff)
+@@ -827,7 +830,21 @@ static int emit_xbox_textures(const NV2ACombinerState *state, char *buf,
+             EMIT("    r_t%d = tex%d.Sample(samp%d, r_t%d.%s * tex_scale[%d].xy);\n",
+                  i, i, i, in, m == XTM_DPNDNT_AR ? "ar" : "gb", i);
+             break;
+-        default:            /* CLIPPLANE, BRDF, DOT_RFLCT_SPEC_CONST: zero */
++        case XTM_CLIPPLANE: {
++            /* The pixel is killed when any of s, t, r, q fails its test
++             * (PSCOMPAREMODE: bit clear, below zero kills; set, zero or
++             * above), as xemu's psh.c has it; the register reads zero.
++             * Pirates! thins its world-map forests this way: each tree's
++             * stage-0 coordinate is the cell's tree density less a half, so
++             * without it every forest tile was drawn whole, a square block. */
++            static const char comp[4] = { 'x', 'y', 'z', 'w' };
++            int j;
++            for (j = 0; j < 4; j++)
++                EMIT("    if (input.tc%d.%c %s 0.0) discard;\n", i, comp[j],
++                     (state->compare_mode[i] >> j) & 1 ? ">=" : "<");
++            break;
++        }
++        default:            /* BRDF, DOT_RFLCT_SPEC_CONST: zero */
+             break;
+         }
+         if (state->tex_mode[i] != NV2A_TEXMODE_NONE)
+diff --git a/src/d3d/d3d8_combiners.h b/src/d3d/d3d8_combiners.h
+index c294a4f..b796518 100644
+--- a/src/d3d/d3d8_combiners.h
++++ b/src/d3d/d3d8_combiners.h
+@@ -248,6 +248,7 @@ typedef struct NV2ACombinerState {
+     uint8_t xmode[NV2A_MAX_TEXTURES];
+     uint8_t dot_map[NV2A_MAX_TEXTURES];
+     uint8_t input_tex[NV2A_MAX_TEXTURES];
++    uint8_t compare_mode[NV2A_MAX_TEXTURES];   /* PSCOMPAREMODE, a CLIPPLANE stage's */
+ 
+     /* --- Flags --- */
+     DWORD flags;     /* Dot mapping and other flags from token bits 24-31 */
+diff --git a/src/d3d/d3d8_xbox.h b/src/d3d/d3d8_xbox.h
+index 742965a..a8b2fb2 100644
+--- a/src/d3d/d3d8_xbox.h
++++ b/src/d3d/d3d8_xbox.h
+@@ -415,6 +415,10 @@ typedef enum D3DRENDERSTATETYPE {
+      * with the texture coordinate's r/q (a shadow map). A D3DCMPFUNC; 0
+      * while the title has not set it. */
+     D3DRS_SHADOWFUNC               = 254,
++    /* Xbox D3DRS_PSCOMPAREMODE: for a CLIPPLANE texture stage, 4 bits a
++     * stage (s, t, r, q; stage i at bit 4*i): 0 kills the pixel when that
++     * coordinate is below zero, 1 when it is zero or above. */
++    D3DRS_PSCOMPAREMODE            = 255,
+ } D3DRENDERSTATETYPE;
+ 
+ #define D3D8_PSTEXTUREMODES_XBOX 0x80000000u
+diff --git a/src/hle/hle_d3d8_state.c b/src/hle/hle_d3d8_state.c
+index 809c4ca..ff82447 100644
+--- a/src/hle/hle_d3d8_state.c
++++ b/src/hle/hle_d3d8_state.c
+@@ -603,7 +603,7 @@ static DWORD ts_to_host(uint8_t kind, uint32_t v)
+  * which is what Burnout 2's road does.
+  *
+  * The two numberings run in different orders, hence the groups. Xbox
+- * PSCOMPAREMODE (42) has no host state and is not forwarded;
++ * PSCOMPAREMODE (42) goes to the host's 255 (CLIPPLANE stages);
+  * PSFINALCOMBINERCONSTANT0/1 (43, 44) go to the host's 198/199, which the
+  * final combiner's C0 and C1 read. */
+ static const struct { uint8_t xbox; uint8_t host; uint8_t count; } g_ps_map[] = {
+@@ -617,6 +617,7 @@ static const struct { uint8_t xbox; uint8_t host; uint8_t count; } g_ps_map[] =
+     { 53, 234, 1 },      /* PSCOMBINERCOUNT                    */
+     { 43, 198, 2 },      /* PSFINALCOMBINERCONSTANT0, 1        */
+     { 55, 252, 2 },      /* PSDOTMAPPING, PSINPUTTEXTURE       */
++    { 42, 255, 1 },      /* PSCOMPAREMODE (CLIPPLANE stages)   */
+ };
+ 
+ /* PSTextureModes holds one mode per texture stage, 5 bits each over 4 stages
