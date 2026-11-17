@@ -266,7 +266,9 @@ void sub_001A9220(void)   /* XAPI ResetEvent(HANDLE), stdcall */
  * the tick count (GetTickCount, this function) is 31 ms past the frame's
  * start (sea: 0x00091DC2-0x00091DF5 in sub_00091170 and a second copy at
  * 0x000A4AE9; ship battles: 0x000C3B30, which waits 100 ms instead while
- * bit 0x20 of 0x0049C298 is set, left alone here); on the console the Swap then
+ * bit 0x20 of 0x0049C298 is set, left alone here; sword duels: 0x00036C41,
+the same wait with the same slow flag; and a 30 ms copy at 0x0004DF70,
+found with RECOMP_PIRATES_TICK_SITES=1); on the console the Swap then
  * waits for the next vblank, so they run at 30. Their logic steps once a
  * frame: without the limiter the ship sails several times too fast.
  *
@@ -289,6 +291,8 @@ extern int xbox_Nv2aFlipGateVblanksPerSwap(void);
 #define PIRATES_LIMITER_SEA  0x00091DE1u     /* after the limiters' tick reads: */
 #define PIRATES_LIMITER_SEA2 0x000A4AEEu     /* the sea (two loops), */
 #define PIRATES_LIMITER_BTL  0x000C3B4Eu     /* ship battles */
+#define PIRATES_LIMITER_DUEL 0x00036C60u     /* sword duels (120 ms when slowed) */
+#define PIRATES_LIMITER_30MS 0x0004DF8Fu     /* a 30 ms copy (sub_0004DE..) */
 #define PIRATES_SLOW_FLAGS   0x0049C298u     /* bit 0x20: battles wait 100 ms */
 #define PIRATES_FRAME_START  0x005061F8u     /* the limiter's time base */
 void sub_001A958A(void)
@@ -299,6 +303,23 @@ void sub_001A958A(void)
     uint32_t now;
 
     sub_001A958A_gen();
+    {   /* RECOMP_PIRATES_TICK_SITES=1: name each new caller once (which
+         * limiter a scene uses) */
+        static int sites = -1;
+        static uint32_t seen[256];
+        static unsigned nseen;
+        if (sites < 0)
+            sites = getenv("RECOMP_PIRATES_TICK_SITES") != NULL;
+        if (sites) {
+            unsigned i;
+            for (i = 0; i < nseen && seen[i] != ra; i++)
+                ;
+            if (i == nseen && nseen < 256u) {
+                seen[nseen++] = ra;
+                fprintf(stderr, "[PIRATES] tick read from 0x%08X\n", ra);
+            }
+        }
+    }
     if (smooth < 0) {
         smooth = recomp_config_int("RECOMP_FRAME_INTERP", "frame_interp", 0) >= 2;
         if (smooth) {
@@ -315,8 +336,8 @@ void sub_001A958A(void)
     if (!smooth)
         return;
     now = g_eax;
-    if (ra == PIRATES_LIMITER_SEA || ra == PIRATES_LIMITER_SEA2 ||
-        (ra == PIRATES_LIMITER_BTL &&
+    if (ra == PIRATES_LIMITER_SEA || ra == PIRATES_LIMITER_SEA2 || ra == PIRATES_LIMITER_30MS ||
+        ((ra == PIRATES_LIMITER_BTL || ra == PIRATES_LIMITER_DUEL) &&
          !(*(volatile uint8_t *)((uintptr_t)PIRATES_SLOW_FLAGS + g_xbox_mem_offset) & 0x20))) {
         last_hit = now;
         if (!at30) {
