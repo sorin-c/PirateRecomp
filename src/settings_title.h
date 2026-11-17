@@ -28,6 +28,11 @@ static const struct {
       "# sword duel, dancing, the town sneak, a land battle and the rest\n"
       "# directly. 0 hides it, as the retail game does.\n"
       "#                                          [RECOMP_PIRATES_MINIGAMES]\n" },
+    { "treasure_map", "0",
+      "# Debug: give a buried-treasure map, as the mysterious traveller sells\n"
+      "# one, when a town menu opens and no treasure hunt is under way. The\n"
+      "# number is how many pieces to buy (2 makes a whole map); 0 is off.\n"
+      "#                                       [RECOMP_PIRATES_TREASURE_MAP]\n" },
     { "mute", "0",
       "# Play with no sound (the game still runs its audio).  [RECOMP_MUTE]\n" },
     { "guest_lock", "1",
