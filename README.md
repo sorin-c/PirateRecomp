@@ -7,7 +7,7 @@ You bring your own copy of the game, and it is built from that copy on your
 computer. This repository contains no game code or data.
 
 **Status: bring-up, partly playable.** It builds and runs on Windows, with
-twenty-two toolkit patches (below).
+twenty-three toolkit patches (below).
 
 - Works: the logo movies, title screen and main menu with music; a new game
   through crew sign-up to the first town; the governor, tavern, merchant,
@@ -108,6 +108,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0020-hle-interp-mirror-quaternion.patch
    git -C xboxrecomp apply ..\patches\0021-d3d-pixel-offset-scaled.patch
    git -C xboxrecomp apply ..\patches\0022-headless-test-runs.patch
+   git -C xboxrecomp apply ..\patches\0023-d3d-clipplane-texture-mode.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -174,6 +175,7 @@ git -C xboxrecomp apply ..\patches\0019-config-title-default-frame-interp.patch
 git -C xboxrecomp apply ..\patches\0020-hle-interp-mirror-quaternion.patch
 git -C xboxrecomp apply ..\patches\0021-d3d-pixel-offset-scaled.patch
 git -C xboxrecomp apply ..\patches\0022-headless-test-runs.patch
+git -C xboxrecomp apply ..\patches\0023-d3d-clipplane-texture-mode.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -387,6 +389,16 @@ git -C xboxrecomp apply ..\patches\0022-headless-test-runs.patch
   its next frame as a BMP (and a replayable capture, as F11), since nothing
   on the desktop can photograph a window that is off it. Off by default;
   a player's game is unchanged.
+
+- **0023-d3d-clipplane-texture-mode** (`src/d3d/d3d8_combiners.c`, `.h`,
+  `d3d8_xbox.h`, `src/hle/hle_d3d8_state.c`). The CLIPPLANE texture mode
+  killed nothing, and PSCOMPAREMODE was not forwarded. The world map's
+  forests use it: each tree's stage-0 coordinate is its map cell's tree
+  density less a half, and the hardware kills the pixels where it is below
+  zero, so a forest tile is thinned into natural clumps. Without it every
+  tile was drawn whole, as a square block of trees (compared against xemu).
+  PSCOMPAREMODE now goes to host render state 255, and a CLIPPLANE stage
+  discards a pixel when any of s, t, r, q fails its test, as xemu does.
 
 ## Running a build of your own
 
