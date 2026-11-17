@@ -390,7 +390,6 @@ git -C xboxrecomp apply ..\patches\0023-d3d-clipplane-texture-mode.patch
   on the desktop can photograph a window that is off it. Off by default;
   a player's game is unchanged.
 
-
 - **0023-d3d-clipplane-texture-mode** (`src/d3d/d3d8_combiners.c`, `.h`,
   `d3d8_xbox.h`, `src/hle/hle_d3d8_state.c`). The CLIPPLANE texture mode
   killed nothing, and PSCOMPAREMODE was not forwarded. The world map's
@@ -400,6 +399,7 @@ git -C xboxrecomp apply ..\patches\0023-d3d-clipplane-texture-mode.patch
   tile was drawn whole, as a square block of trees (compared against xemu).
   PSCOMPAREMODE now goes to host render state 255, and a CLIPPLANE stage
   discards a pixel when any of s, t, r, q fails its test, as xemu does.
+
 ## Running a build of your own
 
 ```
