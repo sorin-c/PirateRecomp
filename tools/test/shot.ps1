@@ -7,7 +7,7 @@
 # under other windows. -Capture also asks for a replayable .d3dcap, as F11.
 # Without it, or when the game does not answer (an old build, a suspended
 # process), the window is captured with PrintWindow (PW_RENDERFULLCONTENT).
-param([int]$ProcessId, [string]$Out, [string]$Request = "", [switch]$Capture, [int]$TimeoutMs = 5000)
+param([int]$ProcessId, [string]$Out, [string]$Request = "", [switch]$Capture, [switch]$Screen, [int]$TimeoutMs = 5000)
 Add-Type -AssemblyName System.Drawing
 $Out = [IO.Path]::GetFullPath($Out)
 if ($Request) {
@@ -15,7 +15,8 @@ if ($Request) {
   Remove-Item $bmp -ErrorAction SilentlyContinue
   # Written under another name and renamed, so the game never reads half a line.
   $tmp = "$Request.tmp"
-  $line = $(if ($Capture) { "capture $bmp" } else { $bmp })
+  # -Screen: the window as presented, the overlay and settings menu included.
+  $line = $(if ($Capture) { "capture $bmp" } elseif ($Screen) { "screen $bmp" } else { $bmp })
   [IO.File]::WriteAllText($tmp, "$line`n")
   Move-Item -Force $tmp $Request
   $sw = [Diagnostics.Stopwatch]::StartNew()

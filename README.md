@@ -7,7 +7,7 @@ You bring your own copy of the game, and it is built from that copy on your
 computer. This repository contains no game code or data.
 
 **Status: bring-up, partly playable.** It builds and runs on Windows, with
-twenty-three toolkit patches (below).
+twenty-four toolkit patches (below).
 
 - Works: the logo movies, title screen and main menu with music; a new game
   through crew sign-up to the first town; the governor, tavern, merchant,
@@ -109,6 +109,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0021-d3d-pixel-offset-scaled.patch
    git -C xboxrecomp apply ..\patches\0022-headless-test-runs.patch
    git -C xboxrecomp apply ..\patches\0023-d3d-clipplane-texture-mode.patch
+   git -C xboxrecomp apply ..\patches\0024-in-game-settings-menu.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -176,6 +177,7 @@ git -C xboxrecomp apply ..\patches\0020-hle-interp-mirror-quaternion.patch
 git -C xboxrecomp apply ..\patches\0021-d3d-pixel-offset-scaled.patch
 git -C xboxrecomp apply ..\patches\0022-headless-test-runs.patch
 git -C xboxrecomp apply ..\patches\0023-d3d-clipplane-texture-mode.patch
+git -C xboxrecomp apply ..\patches\0024-in-game-settings-menu.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -399,6 +401,23 @@ git -C xboxrecomp apply ..\patches\0023-d3d-clipplane-texture-mode.patch
   tile was drawn whole, as a square block of trees (compared against xemu).
   PSCOMPAREMODE now goes to host render state 255, and a CLIPPLANE stage
   discards a pixel when any of s, t, r, q fails its test, as xemu does.
+
+- **0024-in-game-settings-menu** (`src/hle/hle_settings_menu.c` new,
+  `hle_d3d8.c`, `hle_d3d8_interp.c`, `hle_settings.h`, `input_host.c`,
+  `src/d3d/d3d8_overlay.c`, `.h`, `src/config/recomp_config.c`, `.h`). F2,
+  or Start+Back on a pad, opens a settings panel over the game: frame-rate
+  cap, frame interpolation, the frame-rate counter and fullscreen apply at
+  once; internal resolution, widescreen, texture filtering, variable
+  refresh, movies and sound are written for the next start (marked *).
+  Every change is written to `pirates.ini` in place (`recomp_config_set`,
+  comments kept). While it is open the game reads no input; Start or Back
+  pressed alone is held back up to 150 ms, so the pair never pauses the game
+  first, and a short tap still reaches it. The overlay can draw a centred
+  panel of several lines. Also: frame interpolation can be changed while
+  running (`hle_set_frame_interp`; the title's 30 fps pacing follows it),
+  a loose fixed-function match no longer holds a frame back, and
+  `RECOMP_SHOT_REQUEST` takes `screen <file>` (the window as presented,
+  overlay and menu included; `drive.ps1 screen`).
 
 ## Running a build of your own
 
