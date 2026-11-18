@@ -111,6 +111,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0023-d3d-clipplane-texture-mode.patch
    git -C xboxrecomp apply ..\patches\0024-in-game-settings-menu.patch
    git -C xboxrecomp apply ..\patches\0025-display-crop-and-interval-ceiling.patch
+   git -C xboxrecomp apply ..\patches\0026-startup-window-black.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -180,6 +181,7 @@ git -C xboxrecomp apply ..\patches\0022-headless-test-runs.patch
 git -C xboxrecomp apply ..\patches\0023-d3d-clipplane-texture-mode.patch
 git -C xboxrecomp apply ..\patches\0024-in-game-settings-menu.patch
 git -C xboxrecomp apply ..\patches\0025-display-crop-and-interval-ceiling.patch
+git -C xboxrecomp apply ..\patches\0026-startup-window-black.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -434,6 +436,13 @@ git -C xboxrecomp apply ..\patches\0025-display-crop-and-interval-ceiling.patch
   60 or off, sailing presented every vblank or as fast as it could and
   frame interpolation never had a gap to fill (the sea stayed at 30). Now
   the sea presents at 30 and interpolation shows 60, at the same game speed.
+
+- **0026-startup-window-black** (`src/hle/hle_d3d8.c`). The game window is
+  black until its first frame (it had no background brush, so a fullscreen
+  start showed a white box in the corner while the game loaded), and the
+  log says when the window opened and when Swaps 1, 10 and 100 came
+  (`[STARTUP] <seconds since the process started>`), to find where a slow
+  start goes.
 
 ## Running a build of your own
 
