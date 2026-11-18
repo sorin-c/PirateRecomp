@@ -371,3 +371,15 @@ Each one, with the reason it exists:
   new-career nation choice and town taverns); xemu draws them with set 0
   for both textures, and taken literally the lightmap was read with the
   wrong coordinates and the tables came out as a black-patched mosaic.
+
+- **0037-frame-fill-backdrop** (`src/d3d/d3d8_device.c`, `d3d8_xbox.h`).
+  Fill frames (`xbox_D3D8SetFrameFill`), for a 4:3 screen over a backdrop
+  in a title with its own 16:9 mode: every draw is squeezed to 4:3 about the
+  middle except those the title's test (`xbox_D3D8SetBackdropTest`, given
+  the draw's vertex shader handle and stage 0's texture) calls backdrop,
+  which are drawn taller by the same factor so they keep their proportions
+  and fill the 16:9 picture. The game's main menu uses it: the map, its
+  coastline and the clouds fill the screen, and the logo, the menu and the
+  swordfighter stay where the 4:3 menu has them. `recomp_manual.c` also
+  shows the Load Game screen and the loading screens at 16:9, as the game's
+  own save screen at sea is.
