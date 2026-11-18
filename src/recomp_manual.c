@@ -203,9 +203,21 @@ void sub_000DB7A0(void)
  * produces. sub_0012A1D0, which acts on the choice, reads the same byte, so
  * setting it before the menu runs is all it takes. */
 extern void sub_00126BC0_gen(void);
+extern void xbox_D3D8SetWideFrames(int wide);
+/* The front end in widescreen: the game draws its 4:3 menu into the 16:9
+ * buffer with more background either side, so stretched to 16:9 it looks
+ * wide. While the main menu runs the frames are called 4:3 (the toolkit
+ * shows the buffer's centre between bars); sub_001A958A calls them 16:9
+ * again once it has not run for 300 ms of game time. */
+static volatile int g_pirates_menu_seen, g_pirates_menu_narrow;
 
 void sub_00126BC0(void)
 {
+    g_pirates_menu_seen = 1;
+    if (!g_pirates_menu_narrow) {
+        g_pirates_menu_narrow = 1;
+        xbox_D3D8SetWideFrames(0);
+    }
     static int on = -1;
     if (on < 0) {
         on = recomp_config_bool("RECOMP_PIRATES_MINIGAMES", "minigames", 0);
@@ -461,6 +473,16 @@ void sub_001A958A(void)
 
     sub_001A958A_gen();
     pirates_test_probe(g_eax);
+    {   /* the main menu's 4:3 frames end when it stops running */
+        static uint32_t menu_at;
+        if (g_pirates_menu_seen) {
+            g_pirates_menu_seen = 0;
+            menu_at = g_eax;
+        } else if (g_pirates_menu_narrow && g_eax - menu_at > 300u) {
+            g_pirates_menu_narrow = 0;
+            xbox_D3D8SetWideFrames(1);
+        }
+    }
     {   /* RECOMP_PIRATES_TICK_SITES=1: name each new caller once (which
          * limiter a scene uses) */
         static int sites = -1;

@@ -114,6 +114,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0026-startup-window-black.patch
    git -C xboxrecomp apply ..\patches\0027-pad-start-in-background.patch
    git -C xboxrecomp apply ..\patches\0028-crop-left-widescreen.patch
+   git -C xboxrecomp apply ..\patches\0029-front-end-4x3-and-pad-hotplug.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -186,6 +187,7 @@ git -C xboxrecomp apply ..\patches\0025-display-crop-and-interval-ceiling.patch
 git -C xboxrecomp apply ..\patches\0026-startup-window-black.patch
 git -C xboxrecomp apply ..\patches\0027-pad-start-in-background.patch
 git -C xboxrecomp apply ..\patches\0028-crop-left-widescreen.patch
+git -C xboxrecomp apply ..\patches\0029-front-end-4x3-and-pad-hotplug.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -464,6 +466,18 @@ git -C xboxrecomp apply ..\patches\0028-crop-left-widescreen.patch
   the left edge, a light blue bar of clear colour; this game defaults to 4
   columns in its 16:9 mode only (`RECOMP_TITLE_CROP_LEFT_WIDE` on
   `xbox_d3d8`). "Hide left band" in the F2 menu switches it live.
+
+- **0029-front-end-4x3-and-pad-hotplug** (`src/d3d/d3d8_display.c`,
+  `src/input/recomp_pad.c`). A frame the title calls 4:3
+  (`xbox_D3D8SetWideFrames(FALSE)`) from a buffer wider than 4:3 is shown
+  as its centre at 4:3, between bars: this game's widescreen front end is
+  its 4:3 menu with more background either side, and stretched to 16:9 it
+  looked wide (`recomp_manual.c` calls the main menu's frames 4:3 while
+  sub_00126BC0 runs). And SDL pads live on a thread of their own, which
+  starts SDL, pumps the messages of the hidden windows SDL learns of new
+  devices through, and updates and rescans the pads every 2 ms: polled
+  from the title's threads, a pad plugged in after start-up was never
+  seen.
 
 ## Running a build of your own
 
