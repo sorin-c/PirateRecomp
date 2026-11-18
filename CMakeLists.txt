@@ -207,9 +207,9 @@ if(TARGET xbox_config)
     target_compile_definitions(xbox_config PRIVATE
         RECOMP_TITLE_SETTINGS_FILE="pirates.ini"
         RECOMP_TITLE_SETTINGS_HEADER="${CMAKE_CURRENT_SOURCE_DIR}/src/settings_title.h"
-        # 60 on screen where the game runs at 30 (sea, battles, duels, town
-        # sneak), 120 in menus: frame_interp = 2 unless pirates.ini says else
-        RECOMP_TITLE_DEFAULT_FRAME_INTERP=2
+        # Frame interpolation off unless pirates.ini or the F2 menu turns it
+        # on (frame_interp = 2 shows 60 where the game runs at 30)
+        RECOMP_TITLE_DEFAULT_FRAME_INTERP=1
         # Half a host pixel of screen-space offset, not half a game pixel
         # (toolkit patch 0021): the game draws its full-screen 2D from 0, and
         # at a higher resolution_scale the half-game-pixel offset left a line

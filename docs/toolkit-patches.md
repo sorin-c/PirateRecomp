@@ -356,3 +356,10 @@ Each one, with the reason it exists:
   `OSError: [Errno 22]`. The first build of the v0.1.0 download failed this
   way on a player's PC. The builder now decodes each line leniently, and
   runs every Python tool with `PYTHONUTF8=1` and `PYTHONIOENCODING=utf-8`.
+
+- **0035-texture-sharpness-off-and-levels** (`src/launcher/launcher.c`,
+  `src/config/recomp_config.c`, `src/d3d/d3d8_display.c`, `d3d8_states.c`,
+  `src/hle/hle_settings_menu.c`). Texture sharpness (`anisotropy`) offers
+  off, 1, 2, 4, 8 and 16 in the launcher and the F2 menu. `0` (the new
+  default) leaves the game's own filtering; `1` and up force anisotropic
+  filtering at that level where the game filters linearly.
