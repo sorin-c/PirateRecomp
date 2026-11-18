@@ -209,19 +209,19 @@ if(TARGET xbox_config)
         RECOMP_TITLE_SETTINGS_HEADER="${CMAKE_CURRENT_SOURCE_DIR}/src/settings_title.h"
         # 60 on screen where the game runs at 30 (sea, battles, duels, town
         # sneak), 120 in menus: frame_interp = 2 unless pirates.ini says else
-        RECOMP_TITLE_DEFAULT_FRAME_INTERP=2)
-endif()
-
-# Half a host pixel of screen-space offset, not half a game pixel (toolkit
-# patch 0021): the game draws its full-screen 2D from 0, and at a higher
-# resolution_scale the half-game-pixel offset left a line of the clear
-# colour along the top and left of the picture.
-if(TARGET xbox_d3d8)
-    # And the last eight game rows left off the screen (toolkit patch 0025):
-    # the game paints its sea a grey-lavender there, on the console too.
-    target_compile_definitions(xbox_d3d8 PRIVATE RECOMP_TITLE_PIXEL_OFFSET_SCALED=1
-                               RECOMP_TITLE_CROP_BOTTOM=8
-                               RECOMP_TITLE_CROP_LEFT_WIDE=4)
+        RECOMP_TITLE_DEFAULT_FRAME_INTERP=2
+        # Half a host pixel of screen-space offset, not half a game pixel
+        # (toolkit patch 0021): the game draws its full-screen 2D from 0, and
+        # at a higher resolution_scale the half-game-pixel offset left a line
+        # of the clear colour along the top and left of the picture.
+        RECOMP_TITLE_PIXEL_OFFSET_SCALED=1
+        # And the last eight game rows left off the screen (toolkit patch
+        # 0025): the game paints its sea a grey-lavender there, on the
+        # console too. In widescreen, the main menu's first four columns
+        # (patch 0028). On xbox_config, not xbox_d3d8, so a release's
+        # prebuilt renderer reads them too (patch 0032).
+        RECOMP_TITLE_CROP_BOTTOM=8
+        RECOMP_TITLE_CROP_LEFT_WIDE=4)
 endif()
 
 # The launcher (the toolkit's src/launcher): resolution, widescreen, frame

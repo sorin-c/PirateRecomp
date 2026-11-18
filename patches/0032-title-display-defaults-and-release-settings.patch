@@ -1,0 +1,186 @@
+diff --git a/src/config/recomp_config.c b/src/config/recomp_config.c
+index fac008d..b9f0c8f 100644
+--- a/src/config/recomp_config.c
++++ b/src/config/recomp_config.c
+@@ -300,6 +300,18 @@ static void title_file(char *out, size_t n, const char *dir)
+         snprintf(out, n, "%s%ctitles%cdefault.conf", dir, sep, sep);
+ }
+ 
++/* The folder the title's settings file is in when it is not the running
++ * executable's: a self-building release's launcher is in the release, and
++ * the game it starts in the player's build folder, so the launcher points
++ * this at the game's folder and both read and write one file. Empty: the
++ * executable's own folder. */
++static char g_title_settings_dir[1024];
++
++void recomp_settings_set_title_dir(const char *dir)
++{
++    snprintf(g_title_settings_dir, sizeof g_title_settings_dir, "%s", dir ? dir : "");
++}
++
+ /* The title's settings file in the running executable's folder, or 0. */
+ static int beside_exe_file(char *out, size_t n)
+ {
+@@ -308,6 +320,14 @@ static int beside_exe_file(char *out, size_t n)
+     char *slash;
+     size_t len;
+ 
++    if (g_title_settings_dir[0]) {
++        size_t dl = strlen(g_title_settings_dir);
++        char last = g_title_settings_dir[dl - 1];
++        snprintf(out, n, "%s%s%s", g_title_settings_dir,
++                 (last == '/' || last == '\\') ? "" : "/", RECOMP_TITLE_SETTINGS_FILE);
++        return 1;
++    }
++
+ #  if defined(_WIN32)
+     len = (size_t)GetModuleFileNameA(NULL, exe, (DWORD)sizeof exe);
+     if (!len || len >= sizeof exe)
+@@ -365,6 +385,41 @@ int recomp_settings_default_frame_interp(void)
+ #endif
+ }
+ 
++/* A title's display defaults, said in its CMakeLists on xbox_config like
++ * its widescreen mode, so that a prebuilt engine (a self-building release)
++ * honours them too: the renderer is built once for every title, xbox_config
++ * per title. 0 when the title says nothing.
++ *
++ *   RECOMP_TITLE_CROP_BOTTOM=<rows>        guest rows left off the bottom
++ *   RECOMP_TITLE_CROP_LEFT_WIDE=<columns>  guest columns off the left, 16:9 only
++ *   RECOMP_TITLE_PIXEL_OFFSET_SCALED=1     half a host pixel of offset */
++int recomp_title_crop_bottom(void)
++{
++#if defined(RECOMP_TITLE_CROP_BOTTOM)
++    return RECOMP_TITLE_CROP_BOTTOM;
++#else
++    return 0;
++#endif
++}
++
++int recomp_title_crop_left_wide(void)
++{
++#if defined(RECOMP_TITLE_CROP_LEFT_WIDE)
++    return RECOMP_TITLE_CROP_LEFT_WIDE;
++#else
++    return 0;
++#endif
++}
++
++int recomp_title_pixel_offset_scaled(void)
++{
++#if defined(RECOMP_TITLE_PIXEL_OFFSET_SCALED)
++    return 1;
++#else
++    return 0;
++#endif
++}
++
+ void recomp_settings_defaults(RecompSettings *s)
+ {
+     if (!s)
+diff --git a/src/config/recomp_config.h b/src/config/recomp_config.h
+index 7ef9815..590b6e4 100644
+--- a/src/config/recomp_config.h
++++ b/src/config/recomp_config.h
+@@ -286,6 +286,17 @@ typedef struct RecompSettings {
+ void recomp_settings_defaults(RecompSettings *s);
+ int  recomp_settings_default_frame_interp(void);
+ 
++/* A title's display defaults (recomp_config.c), compiled into xbox_config
++ * from its CMakeLists: 0 when it says nothing. */
++int  recomp_title_crop_bottom(void);
++int  recomp_title_crop_left_wide(void);
++int  recomp_title_pixel_offset_scaled(void);
++
++/* Where the title's own settings file (RECOMP_TITLE_SETTINGS_FILE) is, when
++ * not beside the running executable: a release's launcher names the game's
++ * build folder. Call before anything reads a setting. */
++void recomp_settings_set_title_dir(const char *dir);
++
+ /* Read the file at `path` into `s`, starting from the defaults. Absent
+  * keys keep their default, so an older file gains new settings rather
+  * than losing them. Returns 0 if the file could not be read at all. */
+diff --git a/src/d3d/d3d8_device.c b/src/d3d/d3d8_device.c
+index e92ec1b..89e9075 100644
+--- a/src/d3d/d3d8_device.c
++++ b/src/d3d/d3d8_device.c
+@@ -2223,11 +2223,7 @@ static float pixel_offset(float scale)
+ 
+     if (offset < 0.0f) {
+         const char *e = getenv("RECOMP_D3D8_PIXEL_OFFSET");
+-#if defined(RECOMP_TITLE_PIXEL_OFFSET_SCALED)
+-        scaled = 1;
+-#else
+-        scaled = 0;
+-#endif
++        scaled = recomp_title_pixel_offset_scaled();
+         if (e && *e) {
+             scaled = strcmp(e, "scaled") == 0;
+             offset = scaled ? 0.5f : (float)atof(e);
+diff --git a/src/d3d/d3d8_display.c b/src/d3d/d3d8_display.c
+index 01caebb..e63887b 100644
+--- a/src/d3d/d3d8_display.c
++++ b/src/d3d/d3d8_display.c
+@@ -483,7 +483,7 @@ static int create(UINT taps)
+ 
+ /* The game's bottom rows left off the screen (crop_bottom, guest rows,
+  * RECOMP_CROP_BOTTOM; a title's default from RECOMP_TITLE_CROP_BOTTOM on
+- * xbox_d3d8), the rest stretched to fill the picture. Pirates! draws its sea
++ * xbox_config), the rest stretched to fill the picture. Pirates! draws its sea
+  * a grey-lavender for the last eight rows of the frame, on the console too;
+  * eight of 480 is a 1.7% stretch nobody sees. A title's default is fixed:
+  * no setting turns it off. -1 until read. */
+@@ -492,11 +492,9 @@ static int g_crop_bottom = -1;
+ int xbox_D3D8CropBottom(void)
+ {
+     if (g_crop_bottom < 0) {
+-#if defined(RECOMP_TITLE_CROP_BOTTOM)
+-        g_crop_bottom = RECOMP_TITLE_CROP_BOTTOM;
+-#else
+-        g_crop_bottom = recomp_config_int("RECOMP_CROP_BOTTOM", "crop_bottom", 0);
+-#endif
++        int def = recomp_title_crop_bottom();
++        g_crop_bottom = def ? def
++                            : recomp_config_int("RECOMP_CROP_BOTTOM", "crop_bottom", 0);
+         if (g_crop_bottom < 0 || g_crop_bottom > 64)
+             g_crop_bottom = 0;
+     }
+@@ -515,14 +513,15 @@ static int g_crop_left = -1;
+ int xbox_D3D8CropLeft(void)
+ {
+     if (g_crop_left < 0) {
+-#if defined(RECOMP_TITLE_CROP_LEFT_WIDE)
+-        UINT gw = d3d8_GetGuestWidth(), gh = d3d8_GetGuestHeight();
+-        if (!gw || !gh)
+-            return 0;                       /* not known yet: ask again */
+-        g_crop_left = gw * 3u > gh * 4u + gh / 4u ? RECOMP_TITLE_CROP_LEFT_WIDE : 0;
+-#else
+-        g_crop_left = recomp_config_int("RECOMP_CROP_LEFT", "crop_left", 0);
+-#endif
++        int wide = recomp_title_crop_left_wide();
++        if (wide) {
++            UINT gw = d3d8_GetGuestWidth(), gh = d3d8_GetGuestHeight();
++            if (!gw || !gh)
++                return 0;                   /* not known yet: ask again */
++            g_crop_left = gw * 3u > gh * 4u + gh / 4u ? wide : 0;
++        } else {
++            g_crop_left = recomp_config_int("RECOMP_CROP_LEFT", "crop_left", 0);
++        }
+         if (g_crop_left < 0 || g_crop_left > 64)
+             g_crop_left = 0;
+     }
+diff --git a/src/launcher/launcher.c b/src/launcher/launcher.c
+index b7ef3b5..2111451 100644
+--- a/src/launcher/launcher.c
++++ b/src/launcher/launcher.c
+@@ -770,6 +770,10 @@ static void release_init(void)
+                  "There is no home folder to build the game in (HOME is not set).");
+         return;
+     }
++    /* The game reads its settings file beside itself, in the player's
++     * build folder; so read and write that one here as well, or the
++     * launcher's settings would never reach it. */
++    recomp_settings_set_title_dir(g_user_dir);
+     release_status();
+ #if defined(__APPLE__)
+     release_unquarantine();

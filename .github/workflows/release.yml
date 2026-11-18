@@ -1,0 +1,116 @@
+# The self-building Windows release (xboxrecomp's
+# docs/technical/self-build-release.md): a zip with the launcher, the
+# compiler, CMake, Ninja, Python, the toolkit's pipeline, a prebuilt runtime
+# with this project's patches, and this project's sources. No game code or
+# data: the launcher asks the player for their own disc and builds the game
+# from it on their PC.
+#
+# A pull request that touches the build makes the zip as a check and keeps it
+# for a few days as a workflow artifact. A version tag (v0.1.0) makes it and
+# attaches it to a *draft* GitHub release, which a maintainer reviews and
+# publishes by hand. Nothing here ever starts the game.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "release/**"
+      - "patches/**"
+      - "src/**"
+      - "config/**"
+      - "CMakeLists.txt"
+      - "xboxrecomp"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Self-building release (Windows)
+    runs-on: windows-2022
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # Only the toolkit submodules the release builds: not xemu and its
+      # firmware trees, which fail on Windows with "Filename too long".
+      - name: Fetch the toolkit and its submodules
+        run: |
+          git submodule update --init --depth 50 xboxrecomp
+          cd xboxrecomp
+          git submodule update --init --depth 1 \
+            third_party/SDL third_party/Vulkan-Headers \
+            third_party/volk third_party/VulkanMemoryAllocator \
+            third_party/libsamplerate third_party/miniupnp
+          git submodule update --init --recursive --depth 1 third_party/XbSymbolDatabase
+
+      # The release copies only what git tracks in the toolkit, so new files
+      # a patch adds are staged too.
+      - name: Apply this project's toolkit patches
+        run: |
+          for p in patches/*.patch; do
+            echo "applying $p"
+            git -C xboxrecomp apply "$PWD/$p"
+          done
+          git -C xboxrecomp add -A
+
+      - name: Version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=ci-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/downloads
+          key: release-downloads-windows-${{ hashFiles('xboxrecomp/tools/release/fetch_toolchain.py', 'xboxrecomp/tools/release/zigwrap.c') }}
+
+      # zig builds MinGW's runtime and compiler-rt the first time it links:
+      # about 12 minutes of a cold run. Content-addressed, so never stale.
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/work/zig-cache
+          key: release-zig-cache-windows-${{ hashFiles('xboxrecomp/tools/release/fetch_toolchain.py', 'xboxrecomp/tools/release/zigwrap.c') }}
+
+      # Defender scans every file the compilers write and every process
+      # they start. The runner is thrown away after the job.
+      - name: Turn off real-time scanning
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
+      - name: Make the release
+        working-directory: xboxrecomp
+        run: |
+          python -m tools.release.make_release ../release/pirates.json \
+            --out "$RUNNER_TEMP/release/PirateRecomp" --work "$RUNNER_TEMP/work" \
+            --cache "$RUNNER_TEMP/downloads" --version "${{ steps.version.outputs.version }}" \
+            --archive
+          ls -l "$RUNNER_TEMP"/release/*.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PirateRecomp-windows-x86_64
+          path: ${{ runner.temp }}/release/*.zip
+          retention-days: 7
+
+      # A draft only: it is not public until someone publishes it on GitHub.
+      - name: Attach to a draft release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: ${{ runner.temp }}/release/*.zip

@@ -321,3 +321,28 @@ Each one, with the reason it exists:
   (`RECOMP_TITLE_CROP_BOTTOM`, `RECOMP_TITLE_CROP_LEFT_WIDE`) are fixed: no
   F2 menu item and no settings key turns them off. `crop_bottom` and
   `crop_left` remain for a title without a default.
+
+- **0032-title-display-defaults-and-release-settings**
+  (`src/config/recomp_config.c`, `recomp_config.h`, `src/d3d/d3d8_display.c`,
+  `d3d8_device.c`, `src/launcher/launcher.c`). For the self-building release,
+  where the runtime is built once, before any title, and only `xbox_config`
+  is built with the title. The title's display defaults
+  (`RECOMP_TITLE_CROP_BOTTOM`, `RECOMP_TITLE_CROP_LEFT_WIDE`,
+  `RECOMP_TITLE_PIXEL_OFFSET_SCALED`) move from `xbox_d3d8` to
+  `xbox_config`, which the renderer asks (`recomp_title_crop_bottom()` and
+  the like); set on `xbox_d3d8`, a prebuilt engine never saw them and the
+  title's CMakeLists failed to configure against it. And a release's
+  launcher sits in the release folder while the game it starts is built in
+  the player's folder: `recomp_settings_set_title_dir` points the title's
+  settings file (`pirates.ini`) at the game's folder, so the launcher and
+  the game read and write one file.
+
+- **0033-mmio-shared-decoder-fallback** (`src/apu/apu_mmio_hook.c`,
+  `src/nv2a/nv2a_mmio_hook.c`). The Windows APU and NV2A fault handlers
+  decode the faulting instruction by hand, and knew only the forms MSVC
+  emits. A release is built with zig's clang, which reads a volatile
+  `if (reg & 0x18)` as `test dword [mem], 0x18` (F7 /0): the release build
+  crashed as Miles Sound System started (`[APU] MMIO decode fail ... F7 84`).
+  Both now fall back to the shared decoder (`platform/mmio_decode.h`,
+  already used on Linux and for AC'97 stores), which covers TEST and group 1
+  with an immediate, the ALU forms and the SSE scalar moves.
