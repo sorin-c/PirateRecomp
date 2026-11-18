@@ -1,0 +1,20 @@
+diff --git a/src/d3d/d3d8_shaders.c b/src/d3d/d3d8_shaders.c
+index 790ace1..13e15e4 100644
+--- a/src/d3d/d3d8_shaders.c
++++ b/src/d3d/d3d8_shaders.c
+@@ -1245,6 +1245,15 @@ static void ff_vs_prepare_draw(DWORD fvf)
+                 cb->tex_mat[i][0] = cb->tex_mat[i][5] = cb->tex_mat[i][10] = cb->tex_mat[i][15] = 1.0f;
+             }
+             cb->texcoord_index[i] = ts ? ts[D3DTSS_TEXCOORDINDEX] : (UINT)i;
++            /* A stage reads a coordinate set no higher than its own number:
++             * one that names a later set gets its own. Sid Meier's Pirates!
++             * leaves stage 0 at set 1 while it draws the tavern tables, set 0
++             * for both of their textures in xemu (as on the console); taken
++             * at its word, the lightmap was read with the wood's other
++             * coordinates and the tables came out a mosaic of the atlas. */
++            if ((cb->texcoord_index[i] & 0xFFFF0000u) == 0 &&
++                (cb->texcoord_index[i] & 0xFFFFu) > i)
++                cb->texcoord_index[i] = (UINT)i;
+         }
+ 
+         rhi_buffer_unmap(g_vs_cb);
