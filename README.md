@@ -1,570 +1,275 @@
-# Sid Meier's Pirates! (Xbox) — static recompilation
+# Sid Meier's Pirates! Recomp
 
-Firaxis' *Sid Meier's Pirates!* (Xbox, 2005) recompiled into a native Windows
-program, built against the
+An experimental Windows recompilation of the original Xbox release of
+**Sid Meier's Pirates! (2005)**, built with the
 [DirectXbox-Recomp](https://github.com/phobos665/DirectXbox-Recomp) toolkit.
-You bring your own copy of the game, and it is built from that copy on your
-computer. This repository contains no game code or data.
+The game's code is translated into C and compiled into a native PC program,
+with a Direct3D renderer, XInput and SDL controller support, keyboard
+controls, a settings launcher, an in-game settings menu, widescreen, higher
+internal resolutions and 60 fps through frame interpolation.
 
-**Status: bring-up, partly playable.** It builds and runs on Windows, with
-twenty-four toolkit patches (below).
+This repository contains no game code or data. You supply your own copy of the
+game, and the PC version is built from it on your computer.
 
-- Works: the logo movies, title screen and main menu with music; a new game
-  through crew sign-up to the first town; the governor, tavern, merchant,
-  shipwright and status screens; sailing the world map; saving at sea and
-  loading after a restart; a VS MODE ship battle; the game's own 16:9 mode
-  (`RECOMP_WIDESCREEN=1`) and a higher internal resolution
-  (`RECOMP_RES_SCALE`).
-- The game holds itself to 30 fps at sea, in battles, sword duels and the
-  town sneak; frame interpolation (`frame_interp = 2`, the default since
-  17 Nov) shows 60 there, characters included (patches 0018, 0019). The
-  game itself stays at 30 there with any `frame_cap` (measured). Menus, towns and the governor's rooms run at 60 (120
-  shown with interpolation); dancing paces itself to its music at ~50.
-- Fixed 17 Nov (patch 0017): characters' heads and hands (the town-sneak
-  hero, a governor's guest) were missing or drawn huge in front of the
-  camera.
-- Fixed since the first status: the governor's welcome freeze and a crash
-  during the town load (game threads ran in parallel; `RECOMP_GUEST_LOCK`
-  below), and slow loading screens (the log was unbuffered;
-  `RECOMP_PIRATES_LOG_BUFFER`).
-- Minigames (16 Nov): a career boarding (button matching, the sword duel,
-  defeat, prison and release) works. The game's own debug menu
-  (`RECOMP_PIRATES_MINIGAMES` below) starts dancing, dueling, land battles
-  and town sneaking, and all of them load and play (the garden duel's
-  green skin is fixed by patch 0011, the town-sneak hero's head and hands
-  by 0017, the pause-menu crash by 0013).
-- Fixed 16 Nov: the first load on a fresh save folder froze on the loading
-  screen. The game copies its archives to the cache only while a movie or
-  loading screen is up, and with the movies skipped the copy stopped
-  part-way through a file (`RECOMP_PIRATES_CACHE_PAUSE` below).
-- Untested: treasure hunts (there is no debug entry for them; the landing
-  party they start from works), a career ship battle to its end, and play
-  with a real pad or keyboard.
+> **Status: partly playable.** A new career runs from crew sign-up through
+> towns, sailing, ship battles, boarding duels and saving. Some parts are not
+> tested yet; see [Status](#status).
 
-The goals, in order:
+## Start here
 
-1. Playable on Windows.
-2. Widescreen, 4K internal resolution and an uncapped frame rate.
+There is no prebuilt download yet. You build the game yourself from your own
+disc, once, on Windows. It takes a few commands and several minutes.
 
-## Layout
+1. Install **Visual Studio 2022** with the *Desktop development with C++*
+   workload (it includes CMake), **Git**, and **Python 3.10+**, then:
+
+   ```
+   py -3 -m pip install capstone
+   ```
+
+2. Get the code and the toolkit, and apply this project's toolkit patches:
+
+   ```powershell
+   git clone https://github.com/sorin-c/PirateRecomp.git
+   cd PirateRecomp
+   git submodule update --init
+   git -C xboxrecomp submodule update --init
+   Get-ChildItem patches\*.patch | Sort-Object Name | ForEach-Object { git -C xboxrecomp apply $_.FullName }
+   ```
+
+   Do not use `--recursive`: it also pulls xemu and its firmware trees, which
+   the build does not need and which fail on Windows with "Filename too long".
+
+3. Put **your own** disc in `game\`, so that `game\default.xbe` sits beside the
+   rest of the disc. From an Xbox ISO (XISO or Redump):
+
+   ```powershell
+   cd xboxrecomp
+   py -3 -m tools.xiso unpack "<your disc>.iso" -o ..\game\
+   cd ..
+   ```
+
+   extract-xiso or xdvdfs work too. Only the retail disc listed under
+   [The disc](#the-disc) is supported.
+
+4. Name the XDK functions in your XBE (build the symbol tool once):
+
+   ```powershell
+   cmake -S xboxrecomp\third_party\XbSymbolDatabase -B xboxrecomp\third_party\XbSymbolDatabase\build
+   cmake --build xboxrecomp\third_party\XbSymbolDatabase\build --config Release
+   cd xboxrecomp
+   py -3 -m tools.xdk_symbols ..\game\default.xbe
+   cd ..
+   ```
+
+   This writes `game\default_xdk_symbols.json`. Without it the game runs with
+   no picture and no sound.
+
+5. Translate the game's code, then build:
+
+   ```powershell
+   scripts\recompile.ps1
+   cmake -S . -B build
+   cmake --build build --config Release --target pirates_recomp pirates_launcher
+   ```
+
+   `recompile.ps1` takes a minute or two and writes the generated C into
+   `src\recomp\gen\` (never committed).
+
+6. Start **`build\Release\pirates_launcher.exe`**, adjust the settings if you
+   like, and press **Play**.
+
+If a step fails, or the game misbehaves, open an
+[issue](https://github.com/sorin-c/PirateRecomp/issues) with the error, your
+Windows version and the end of the game's log.
+
+## The launcher
+
+`pirates_launcher.exe` is the toolkit's launcher, set up for this game. It
+sits beside `pirates_recomp.exe` and starts it with your settings.
+
+- **Video**: resolution, fullscreen, widescreen, frame rate cap, frame
+  interpolation, texture sharpness, variable refresh rate and the frame-rate
+  counter.
+- **Input**: keyboard and mouse bindings and the controllers.
+- **Play** starts the game. `pirates_recomp.exe` can also be started directly.
+
+The launcher and the game share one settings file, `pirates.ini`, so a change
+in either shows up in the other.
+
+## In-game settings menu
+
+Press **F2**, or **Start + Back** together on a controller, to open a settings
+panel over the game. While it is open, the game receives no input. Start or
+Back pressed alone still reaches the game as usual.
+
+| Setting | Applies |
+| --- | --- |
+| Frame rate cap (adaptive, 60, 30, off) | at once |
+| Frame interpolation (off, 2x, 3x, 4x) | at once |
+| Frame-rate counter | at once |
+| Fullscreen | at once |
+| Hide bottom band | at once |
+| Hide left band (widescreen) | at once |
+| Internal resolution (1x to 8x) | next start |
+| Widescreen (16:9) | next start |
+| Texture filtering (off to 16x) | next start |
+| Variable refresh | next start |
+| Movies (skip all, skip intro, play all) | next start |
+| Sound | next start |
+
+Every change is written to `pirates.ini` straight away, keeping its comments.
+
+## Display and frame rate
+
+- **60 fps.** The game runs its world at 30 fps at sea, in battles, duels and
+  the town sneak. Frame interpolation draws the frame in between, so you see
+  60 while the game keeps its original speed. This is on by default
+  (`frame_interp = 2`); menus, towns and the governor's rooms already run
+  at 60. Characters, ships and the camera are all interpolated.
+- **Widescreen.** `widescreen = 1` turns on the game's own 16:9 mode. The
+  front end (legal text, title, menus and the new-career pages) stays at 4:3
+  between bars, as it was drawn, and the game world fills the screen.
+- **Internal resolution.** `resolution_scale` renders 2 to 8 times larger
+  than the console.
+- **Hide bottom band / Hide left band.** The console leaves a grey-lavender
+  band along the bottom of the sea view, and in widescreen the main menu's
+  map stops short of the left edge. Both are cropped off by default and can
+  be switched in the F2 menu (`crop_bottom`, `crop_left`).
+
+## Controllers
+
+- Xbox controllers work through XInput; PlayStation and Switch pads through
+  SDL's HIDAPI support. A pad plugged in after the game starts is picked up.
+- **Controller 1 follows the pad you used last** (`pad_follow_input = 1`, the
+  default): press anything on any pad and it becomes controller 1. Set it to
+  `0` to keep each pad in its own slot, for several players.
+- **DirectInput is off** (`pad_directinput = 0`). Scanning DirectInput devices
+  delayed the first pad by 12 to 40 seconds on some PCs. Set it to `1` only
+  for an older pad that only speaks DirectInput.
+- The keyboard works throughout; bindings are in the launcher's Input tab.
+
+## Settings: `pirates.ini`
+
+`pirates.ini` lives beside the two executables (`build\Release\pirates.ini`).
+Either program writes it with the defaults and a comment on every line the
+first time it runs. Edit it in any text editor, or delete it to go back to the
+defaults. Every line names the environment variable that overrides it, so a
+`.bat` file or a command line still wins.
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `widescreen` | `0` | The game's own 16:9 mode. |
+| `resolution_scale` | `1` | Render 1 to 8 times the console's resolution. |
+| `frame_cap` | `adaptive` | `adaptive` (as the console), `60`, `30` or `0` (off). |
+| `frame_interp` | `2` | `1` off, `2` shows 60 where the game runs at 30. |
+| `fps_overlay` | `0` | Frame-rate counter. |
+| `fullscreen` | `0` | Fullscreen window. |
+| `anisotropy` | `1` | Texture filtering, `1` to `16`. |
+| `vrr` | `0` | Variable refresh rate. |
+| `crop_bottom` | `8` | Rows hidden at the bottom (the band). `0` shows them. |
+| `crop_left` | `4` (widescreen) | Columns hidden at the left in widescreen. |
+| `pad_follow_input` | `1` | Controller 1 is the pad used last. |
+| `pad_directinput` | `0` | SDL's DirectInput back end. |
+| `skip_intro` | `1` | `1` skips every movie, `intro` only the logos and title movie, `0` plays all. |
+| `mute` | `0` | No sound. |
+| `minigames` | `0` | Shows the developers' MINIGAMES (*DEBUG!*) menu entry. |
+| `headless` | `0` | Test runs only (see [Testing](#testing)). |
+
+<details>
+<summary>Debugging and test switches</summary>
+
+| Key, variable | Default | Effect |
+| --- | --- | --- |
+| `guest_lock`, `RECOMP_GUEST_LOCK` | `1` | One game thread runs at a time, as on the console's single CPU. Without it about half the runs through a new career's first governor visit froze or crashed. |
+| `log_buffer`, `RECOMP_PIRATES_LOG_BUFFER` | `1` | Buffers the log. Unbuffered, a new game's first town took 47 s or more to load instead of 10 to 16 s; `0` keeps every line before a crash. |
+| `cache_pause`, `RECOMP_PIRATES_CACHE_PAUSE` | `0` | The game copies its `.FPK` archives to the cache only while a movie or loading screen is up. With movies skipped the copy stopped part-way and a first load froze; `1` restores the console's behaviour. |
+| `treasure_map`, `RECOMP_PIRATES_TREASURE_MAP` | `0` | Gives `n` pieces of a buried-treasure map when a town menu opens (`2` is a whole map), for testing treasure hunts. |
+| `test_probe`, `RECOMP_PIRATES_TEST_PROBE` | (empty) | A folder where the game writes ship positions (`pos.txt`, `ships.txt`, `battle.txt`) and reads `teleport.txt`, for scripted test runs. |
+
+The toolkit's own variables are listed in `xboxrecomp/CLAUDE.md`.
+
+</details>
+
+## Saves
+
+The game keeps its saves on the Xbox's E: drive, which maps to the game
+folder: in your build they are written to `game\UDATA`. The save folder also
+holds the emulated console's identity (`console.ini`), which the game signs
+settings and saves with. Deleting it or pointing `RECOMP_SAVE_DIR` somewhere
+new makes existing saves read as damaged, so keep one save folder per player.
+
+## Status
+
+- **Works:** the logo movies, title screen and menu music; a new career from
+  crew sign-up to the first town; the governor, tavern, merchant, shipwright
+  and status screens; sailing the world map; a VS MODE ship battle; boarding with button matching and the sword duel, defeat, prison
+  and release; dancing, land battles and the town sneak (from the debug
+  minigames menu); saving at sea and loading after a restart.
+- **Display:** widescreen, internal resolution up to 8x, 60 fps through
+  interpolation at the original game speed.
+- **Not tested yet:** treasure hunts end to end, a career ship battle to its
+  end, and long play sessions.
+
+## Testing
+
+The scripts in [`tools/test`](tools/test/README.md) drive the game for
+automated checks. Every run is **headless** (`RECOMP_HEADLESS=1`, or
+`headless = 1`): the window opens off-screen, off the taskbar and never takes
+focus, your keyboard and pads are not read (only the script presses
+anything), and screenshots come from the game itself. Frames are still drawn
+and paced exactly as in play. `drive.ps1 start -Visible` shows a run's window
+behind the others, for watching one. A game you start yourself is not
+affected.
+
+## How it is built
 
 ```
 PirateRecomp/
   CMakeLists.txt          the project; pulls in the xboxrecomp/ submodule
   xboxrecomp/             the DirectXbox-Recomp toolkit (git submodule)
-  src/main.c              entry point, game folder lookup (from the toolkit's template)
-  src/recomp_manual.c     the title's own overrides, each with its reason
-  src/recomp/gen/         lifted code (generated, not committed)
+  patches/                toolkit changes this game needs (docs/toolkit-patches.md)
+  src/main.c              entry point, game folder lookup
+  src/recomp_manual.c     the game's own overrides, each with its reason
+  src/settings_title.h    the game's lines in pirates.ini
+  src/recomp/gen/         generated C (not committed)
   config/seeds/           functions the disassembler cannot find on its own
-  config/sections/        sections the XBE marks executable that are data
-  release/pirates.json    the recipe a self-building release is made from
-  scripts/recompile.ps1   runs the toolkit's lift pipeline for this game (Windows)
-  scripts/recompile.sh    the same, for macOS and Linux
+  config/sections/        sections the XBE marks executable that hold data
+  release/pirates.json    the recipe for a self-building release
+  scripts/recompile.*     runs the toolkit's translation pipeline for this game
+  tools/test/             headless test scripts
   game/                   your game files (not committed)
 ```
 
-## Building
-
-The toolkit's own requirements apply (its `docs/GETTING_STARTED.md`): on
-Windows, Visual Studio 2022 with the C/C++ desktop workload (which brings
-CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
-
-1. **Clone with the submodule.**
-
-   ```
-   git clone https://github.com/sorin-c/PirateRecomp.git
-   cd PirateRecomp
-   git submodule update --init
-   git -C xboxrecomp submodule update --init
-   ```
-
-   That is the toolkit and its direct dependencies only. A fully recursive
-   checkout also pulls xemu and its firmware trees, which the build does not
-   use and which fail on Windows with "Filename too long".
-
-   Then apply the toolkit patches (see [Toolkit patches](#toolkit-patches)),
-   before the lift:
-
-   ```
-   git -C xboxrecomp apply ..\patches\0001-lifter-xadd-flags-snapshot.patch
-   git -C xboxrecomp apply ..\patches\0002-kernel-empty-directory-pattern.patch
-   git -C xboxrecomp apply ..\patches\0003-input-live-file.patch
-   git -C xboxrecomp apply ..\patches\0004-d3d-bump-env-map.patch
-   git -C xboxrecomp apply ..\patches\0005-hle-walk-draw-simple-states.patch
-   git -C xboxrecomp apply ..\patches\0006-d3d-spot-falloff-nan.patch
-   git -C xboxrecomp apply ..\patches\0007-d3d-light-indices.patch
-   git -C xboxrecomp apply ..\patches\0008-d3d-vertex-blending.patch
-   git -C xboxrecomp apply ..\patches\0009-d3d-lighting-without-normals.patch
-   git -C xboxrecomp apply ..\patches\0010-hle-declaration-blend-weights.patch
-   git -C xboxrecomp apply ..\patches\0011-d3d-normal-matrix.patch
-   git -C xboxrecomp apply ..\patches\0012-config-title-settings-file.patch
-   git -C xboxrecomp apply ..\patches\0013-kernel-contiguous-protect.patch
-   git -C xboxrecomp apply ..\patches\0014-kernel-tick-count-1ms.patch
-   git -C xboxrecomp apply ..\patches\0015-flip-gate-lend-any-divisor.patch
-   git -C xboxrecomp apply ..\patches\0016-flip-gate-vblanks-per-swap.patch
-   git -C xboxrecomp apply ..\patches\0017-hle-push-buffer-draws-ff-and-timing.patch
-   git -C xboxrecomp apply ..\patches\0018-hle-interp-fixed-function.patch
-   git -C xboxrecomp apply ..\patches\0019-config-title-default-frame-interp.patch
-   git -C xboxrecomp apply ..\patches\0020-hle-interp-mirror-quaternion.patch
-   git -C xboxrecomp apply ..\patches\0021-d3d-pixel-offset-scaled.patch
-   git -C xboxrecomp apply ..\patches\0022-headless-test-runs.patch
-   git -C xboxrecomp apply ..\patches\0023-d3d-clipplane-texture-mode.patch
-   git -C xboxrecomp apply ..\patches\0024-in-game-settings-menu.patch
-   git -C xboxrecomp apply ..\patches\0025-display-crop-and-interval-ceiling.patch
-   git -C xboxrecomp apply ..\patches\0026-startup-window-black.patch
-   git -C xboxrecomp apply ..\patches\0027-pad-start-in-background.patch
-   git -C xboxrecomp apply ..\patches\0028-crop-left-widescreen.patch
-   git -C xboxrecomp apply ..\patches\0029-front-end-4x3-and-pad-hotplug.patch
-   git -C xboxrecomp apply ..\patches\0030-pads-no-directinput-follow-input.patch
-   ```
-
-2. **Game files.** Extract your disc image into `game/`, so that
-   `game/default.xbe` exists beside the rest of the disc. The toolkit can do
-   it:
-
-   ```
-   py -3 -m tools.xiso unpack "<your disc>.iso" -o ..\game\
-   ```
-
-   (run from `xboxrecomp/`), or use extract-xiso / xdvdfs.
-
-3. **XDK symbols.** Build the toolkit's `third_party/XbSymbolDatabase` CLI
-   once, then name the XDK functions in your XBE:
-
-   ```
-   cmake -S xboxrecomp\third_party\XbSymbolDatabase -B xboxrecomp\third_party\XbSymbolDatabase\build
-   cmake --build xboxrecomp\third_party\XbSymbolDatabase\build --config Release
-   cd xboxrecomp
-   py -3 -m tools.xdk_symbols ..\game\default.xbe
-   ```
-
-   That writes `game/default_xdk_symbols.json`. Without it nothing is
-   replaced by name, and the game runs with no picture and no sound.
-
-4. **Lift.** `scripts\recompile.ps1` (a minute or two). It writes the lifted C
-   into `src/recomp/gen/`.
-
-5. **Build.**
-
-   ```
-   cmake -S . -B build
-   cmake --build build --config Release --target pirates_recomp pirates_launcher
-   ```
-
-## Toolkit patches
-
-`patches/` holds changes to the toolkit that this game needs and that are not
-in the pinned `xboxrecomp` commit yet. They are applied to the submodule's
-working tree, never committed inside it, so the submodule still points at an
-upstream commit. Apply them in number order, after the submodule init and
-before the lift, from the repository root:
-
-```
-git -C xboxrecomp apply ..\patches\0001-lifter-xadd-flags-snapshot.patch
-git -C xboxrecomp apply ..\patches\0002-kernel-empty-directory-pattern.patch
-git -C xboxrecomp apply ..\patches\0003-input-live-file.patch
-git -C xboxrecomp apply ..\patches\0004-d3d-bump-env-map.patch
-git -C xboxrecomp apply ..\patches\0005-hle-walk-draw-simple-states.patch
-git -C xboxrecomp apply ..\patches\0006-d3d-spot-falloff-nan.patch
-git -C xboxrecomp apply ..\patches\0007-d3d-light-indices.patch
-git -C xboxrecomp apply ..\patches\0008-d3d-vertex-blending.patch
-git -C xboxrecomp apply ..\patches\0009-d3d-lighting-without-normals.patch
-git -C xboxrecomp apply ..\patches\0010-hle-declaration-blend-weights.patch
-git -C xboxrecomp apply ..\patches\0011-d3d-normal-matrix.patch
-git -C xboxrecomp apply ..\patches\0012-config-title-settings-file.patch
-git -C xboxrecomp apply ..\patches\0013-kernel-contiguous-protect.patch
-git -C xboxrecomp apply ..\patches\0014-kernel-tick-count-1ms.patch
-git -C xboxrecomp apply ..\patches\0015-flip-gate-lend-any-divisor.patch
-git -C xboxrecomp apply ..\patches\0016-flip-gate-vblanks-per-swap.patch
-git -C xboxrecomp apply ..\patches\0017-hle-push-buffer-draws-ff-and-timing.patch
-git -C xboxrecomp apply ..\patches\0018-hle-interp-fixed-function.patch
-git -C xboxrecomp apply ..\patches\0019-config-title-default-frame-interp.patch
-git -C xboxrecomp apply ..\patches\0020-hle-interp-mirror-quaternion.patch
-git -C xboxrecomp apply ..\patches\0021-d3d-pixel-offset-scaled.patch
-git -C xboxrecomp apply ..\patches\0022-headless-test-runs.patch
-git -C xboxrecomp apply ..\patches\0023-d3d-clipplane-texture-mode.patch
-git -C xboxrecomp apply ..\patches\0024-in-game-settings-menu.patch
-git -C xboxrecomp apply ..\patches\0025-display-crop-and-interval-ceiling.patch
-git -C xboxrecomp apply ..\patches\0026-startup-window-black.patch
-git -C xboxrecomp apply ..\patches\0027-pad-start-in-background.patch
-git -C xboxrecomp apply ..\patches\0028-crop-left-widescreen.patch
-git -C xboxrecomp apply ..\patches\0029-front-end-4x3-and-pad-hotplug.patch
-git -C xboxrecomp apply ..\patches\0030-pads-no-directinput-follow-input.patch
-```
-
-- **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
-  `translator.py`, and a regression test in `test_lifter_lock_flags.py`).
-  The jcc after `xadd` / `lock xadd` was lifted as a re-read of the
-  destination (`MEM32(edi) != 0`) at the branch instead of the sum the
-  instruction produced. This game releases a reference with
-  `lock xadd [edi], eax / pop edi / jne` (0x0020AD80), so the branch tested
-  whatever the popped edi pointed at, and every child added to a UI node was
-  destroyed on the spot. The game then made virtual calls into freed memory
-  and crashed about a second after `CreateDevice`. The re-read was also racy
-  across guest threads. The lift now snapshots the sum into `_fa`/`_fas`,
-  as it already did for `cmpxchg`. Without it the build boots and crashes;
-  with it the game reaches its main menu.
-
-- **0002-kernel-empty-directory-pattern** (`src/kernel/kernel_file.c`).
-  On Windows, `NtQueryDirectoryFile` with a zero-length file name built
-  the search path `<dir>\` and `FindFirstFileW` failed. XAPI's
-  `FindFirstFile` passes exactly that for `*.*`, and the game indexes its
-  loose files by scanning `d:\Assets\*.*` recursively, so it found none of
-  `assets\Bink\*.bik` or `assets\sounds\*.wav`: no logo movies and no
-  music, with no error anywhere. An empty name now means every entry, as the
-  POSIX backend already read it. With it the 2K and Firaxis movies play
-  with sound and the title and menu music plays.
-
-- **0003-input-live-file** (`src/hle/input_host.c`). Test tooling, not a
-  game fix: `RECOMP_INPUT_LIVE=<file>` presses each line appended to the
-  file (`a`, `dpad_down:300`, `lstick_left+a:800`), one after another.
-  Fixed `RECOMP_INPUT_SEQ` timelines drift by tens of seconds over this
-  game's long loading screens; this lets a test look at a screenshot first
-  and press second (`tools/test/drive.ps1`). Does nothing unless the
-  variable is set.
-
-- **0004-d3d-bump-env-map** (`src/d3d/d3d8_combiners.c`, `.h`). The pixel
-  shader translator sampled `BUMPENVMAP` and `BUMPENVMAP_LUM` stages as
-  plain 2D textures and ignored the bump matrix, which the HLE layer
-  already forwards. The stage's coordinates are now offset by the source
-  stage's (du, dv) through `BUMPENVMAT00..11`, reading an unsigned colour's
-  bytes as two's complement as the NV2A does. The game's
-  `PSDistortReflections_XB` pass uses it to ripple the reflection the sea
-  samples. `_LUM`'s luminance scale is still not applied (`BUMPENVLSCALE`
-  and `LOFFSET` are not forwarded).
-
-- **0005-hle-walk-draw-simple-states** (`src/hle/hle_d3d8_state.c`,
-  `hle_d3d8_vertex.c`). The game pushes its terrain draws into the push
-  buffer itself, and the toolkit's push-buffer walk only draws them at the
-  next replaced call. By then the game's SetRenderState has already stored
-  the states for what comes next in the state array: blending, alpha test
-  and depth write put back after the third terrain pass. Drawn with those,
-  that pass painted its faded-out deep-water vertices over the sea as opaque
-  black tiles, in seven frames out of eight. The walk now keeps the simple
-  render states (depth, blend, alpha test, colour mask, stencil) in buffer
-  order, and the draws it makes use them. The array itself is unchanged.
-  `RECOMP_HLE_D3D8_WALK_RS=0` turns it off. Cull mode is not covered.
-
-- **0006-d3d-spot-falloff-nan** (`src/d3d/d3d8_shaders.c`). The
-  fixed-function lighting shader raised a spot light's cone ratio to its
-  falloff everywhere, so a light with falloff 0 gave pow(0, 0), NaN on the
-  GPU, at every vertex outside the cone, and the NaN made the whole lit
-  colour black. The main menu is lit by two such spots, and the sea chart
-  behind it came out black. The spot term now follows D3D: 0 outside the
-  outer cone, 1 inside the inner one, and the falloff curve only between.
-
-- **0007-d3d-light-indices** (`src/d3d/d3d8_device.c`). The host device
-  kept 8 light slots and dropped `SetLight` and `LightEnable` for any index
-  above 7. D3D8 allows any index and limits only how many lights are
-  enabled at once. The game lights its rooms with lights 39-43, so
-  characters in the governor's mansion, the shipwright's and the merchant's
-  were lit by nothing and drew as black silhouettes. 256 slots now; the
-  shader still packs the first 8 enabled.
-
-- **0008-d3d-vertex-blending** (`src/d3d/d3d8_shaders.c`,
-  `src/hle/hle_d3d8_state.c`). `D3DRS_VERTEXBLEND` was not forwarded, and
-  the fixed-function vertex shader skipped the blend weights in XYZB1-5
-  vertices. Every skinned vertex was drawn with world matrix 0 alone, so
-  the game's characters came apart: torsos torn, limbs and coats out of
-  place. The Xbox values (n WEIGHTS = 2n-1, n WEIGHTS n MATRICES = 2n)
-  are forwarded, and the shader blends position and normal over up to
-  four world matrices.
-
-- **0009-d3d-lighting-without-normals** (`src/d3d/d3d8_shaders.c`). With
-  lighting on, a vertex without a normal was left unlit, with a white
-  diffuse colour. D3D lights it with a zero normal, so only the emissive
-  and ambient terms count. The game darkens its stencil shadows with a lit,
-  position-only quad whose colour comes from the material (black,
-  translucent), and every character's shadow came out white.
-
-- **0010-hle-declaration-blend-weights** (`src/hle/hle_d3d8.c`). A
-  fixed-function draw described by a vertex declaration (no program) is
-  drawn through an equivalent FVF, and the blend weights (v1) were
-  dropped on the way, so 0008's blending never saw them: the dancers'
-  dresses in the governor's ball came apart into strips. The weights now
-  follow the position as XYZB1-4.
-
-- **0011-d3d-normal-matrix** (`src/d3d/d3d8_shaders.c`). The fixed-function
-  vertex shader's normal matrices (WorldInvTranspose, WorldViewInvTranspose)
-  were uploaded transposed once too often, so the shader got inverse(world)
-  instead of its transpose and turned every lit normal by the inverse of the
-  world rotation. Objects whose world matrix rotates were lit from the wrong
-  side: in the sword duel, the duellists' skin and shirts were lit only by
-  the garden's teal fill lights behind them and came out green.
-
-- **0012-config-title-settings-file** (`src/config/recomp_config.c`). A
-  title can keep its settings in one file beside its executables
-  (`RECOMP_TITLE_SETTINGS_FILE`), which the game and the launcher both
-  read and write, instead of the per-user file under `%APPDATA%`. It can
-  also add its own commented lines to that file
-  (`RECOMP_TITLE_SETTINGS_HEADER`), which a save from the launcher keeps.
-  Pirates! uses both: `pirates.ini`, with `src/settings_title.h`.
-
-- **0013-kernel-contiguous-protect** (`src/kernel/kernel_memory.c`,
-  `kernel_bridge.c`). `MmQueryAddressProtect` reports the protection a
-  contiguous allocation was made with (write-combine and no-cache
-  included), not the host's, which has no such bits. Pirates! builds its two
-  contiguous heaps with write-combine and checks for it when one is full:
-  without it, the overflow went to malloc, and those low addresses, freed
-  through the D3D free hook (which sets bit 31), were freed into the other
-  heap and corrupted it. That was the crash on quitting the town sneak.
-
-- **0014-kernel-tick-count-1ms** (`src/kernel/kernel_hal.c`,
-  `xbox_memory_layout.c`). `KeTickCount` counts milliseconds from the
-  performance counter instead of copying `GetTickCount`, which moves in
-  15.6 ms steps. Pirates! ends each frame at sea and in battle by sleeping
-  until the tick is 31 ms past the frame's start; with 15.6 ms steps every
-  frame took exactly 31.25 ms (32 fps).
-
-- **0015-flip-gate-lend-any-divisor** (`src/kernel/xbox_memory_layout.c`).
-  The flip gate lends its wait to frame interpolation at any vblank divisor,
-  not only at one Swap a vblank, and tells it which vblank will release the
-  frame. A title held to 30 can then show the frames between. Pirates! uses
-  it with `frame_interp = 2` in `pirates.ini` (`src/recomp_manual.c`,
-  `sub_001A958A`): at sea and in battles the game keeps its 30 and the
-  screen shows 60.
-
-- **0016-flip-gate-vblanks-per-swap** (`src/kernel/xbox_memory_layout.c`).
-  `xbox_Nv2aFlipGateVblanksPerSwap()` says how many vblanks each Swap waits
-  for now. The player's frame cap outranks the title's presentation
-  interval, so Pirates! checks it before handing its 30 fps wait to the
-  gate: with `frame_cap = 60` the gate ran those scenes at 60 and the game
-  at twice its speed. Now the game then keeps its own wait.
-
-- **0017-hle-push-buffer-draws-ff-and-timing** (`src/hle/hle_d3d8_vertex.c`,
-  `hle_d3d8.c`). Gamebryo draws each character's head and hands (one skin
-  partition of 1,200+ triangles) through `D3DDevice_RunPushBuffer`, a
-  prebuilt push buffer, and the rest of the body through
-  `DrawIndexedVertices`. Two gaps lost them: the walk drew a push buffer
-  only at the next replaced call, with the next object's transforms (the
-  head came out huge in front of the camera), and it could not lay out a
-  pushed draw under a fixed-function FVF at all (it needs a program
-  object), so the head and hands were dropped. `RunPushBuffer` is now
-  replaced and brings the walk up to date after its body, and pushed
-  fixed-function draws are gathered in the FVF's layout from the registers
-  the XDK feeds (v0 position, v1 weights, v2 normal, v3/v4 colours, v9-v12
-  texture coordinates). `RECOMP_HLE_D3D8_PB_RUN_SYNC=0` restores the late
-  draw. Needs a re-lift (`--from lift`): it adds an `HLE_ORIGINAL`.
-
-- **0018-hle-interp-fixed-function** (`src/hle/hle_d3d8_interp.c`,
-  `hle_d3d8_record.c`, `.h`). Frame interpolation blended only draws made
-  by vertex programs, through their matrix constants. Pirates! draws its
-  characters, the duels, the governor's rooms and the menus with the
-  fixed-function pipeline, so those frames were held (no in-betweens) or
-  the characters moved at 30 while the scene around them moved at 60. A
-  fixed-function draw now keeps its view, projection and world matrices
-  (one more world per blend weight), and an in-between frame draws it with
-  them blended like a program's: rotation as a quaternion, scale and
-  translation linearly, the projection term by term. Screen-space
-  (XYZRHW) draws are left as they are.
-
-- **0019-config-title-default-frame-interp** (`src/config/recomp_config.c`,
-  `.h`, `src/hle/hle_d3d8_interp.c`). A title can set the frame
-  interpolation it starts with (`RECOMP_TITLE_DEFAULT_FRAME_INTERP` on
-  `xbox_config`); this game's CMakeLists sets 2. And with `frame_cap = 60`
-  (a strict 60: every present waits for a vblank) an in-between frame is
-  drawn only between title frames two vblanks or more apart: between two
-  a vblank apart it cost the title a vblank, and the menus and sea dialogs
-  ran at 40-50 instead of 60.
-
-- **0020-hle-interp-mirror-quaternion** (`src/hle/hle_d3d8_interp.c`).
-  The flicker at sea with frame interpolation: every in-between frame lost
-  the towns, the ships' sails and the cloud shadows. The sea camera's view
-  matrix is a mirror whose proper part turns half a turn, and the
-  quaternion taken from it lost the relative sign of its axes at 180
-  degrees, so even an unblended rebuild flipped two axes. The quaternion is
-  now taken by Shepperd's method. Also: a fixed-function draw's matrices
-  are read back from the device at the draw, a world matrix's jump is
-  judged in camera space, and only draws of the same bytes are blended.
-  `RECOMP_INTERP_FF=0` draws fixed-function draws as the frame has them.
-
-- **0021-d3d-pixel-offset-scaled** (`src/d3d/d3d8_device.c`). At a
-  `resolution_scale` above 1, the toolkit's half-pixel screen-space offset
-  (half a game pixel, so the console's pixel centres land on integers)
-  left the first rows and columns of host pixels outside any full-screen
-  quad the game draws from 0: a blue line of the clear colour along the
-  top and left of the picture, two pixels wide at 4x. With
-  `RECOMP_D3D8_PIXEL_OFFSET=scaled` (this game's CMakeLists sets it through
-  `RECOMP_TITLE_PIXEL_OFFSET_SCALED`) the offset is half a host pixel: the
-  same at 1x, and the quad covers the edge above it.
-
-- **0022-headless-test-runs** (`src/config/recomp_config.c`,
-  `src/hle/hle_d3d8.c`, `src/hle/input_host.c`, `src/input/input_bindings.c`).
-  Test scripts ran the game on the same desk as the player: its window came
-  up in front, took the focus, and the player's own keyboard and pad (one in
-  slot 2 included) reached the game alongside the script. `RECOMP_HEADLESS=1`
-  (or `headless = 1` in `pirates.ini`) opens the window off every monitor,
-  off the taskbar and Alt+Tab, never active; no real keyboard, pad or mouse
-  is read on any port, the game is shown one controller (the script's), and
-  nothing rumbles. The window is still shown, not hidden or minimised, so
-  frames are drawn, presented and paced exactly as in play (measured: 60 a
-  second in the menus, 30 in a VS MODE battle with `frame_interp = 2`, as
-  without it). `RECOMP_SHOT_REQUEST=<file>` lets a script ask the game for
-  its next frame as a BMP (and a replayable capture, as F11), since nothing
-  on the desktop can photograph a window that is off it. Off by default;
-  a player's game is unchanged.
-
-- **0023-d3d-clipplane-texture-mode** (`src/d3d/d3d8_combiners.c`, `.h`,
-  `d3d8_xbox.h`, `src/hle/hle_d3d8_state.c`). The CLIPPLANE texture mode
-  killed nothing, and PSCOMPAREMODE was not forwarded. The world map's
-  forests use it: each tree's stage-0 coordinate is its map cell's tree
-  density less a half, and the hardware kills the pixels where it is below
-  zero, so a forest tile is thinned into natural clumps. Without it every
-  tile was drawn whole, as a square block of trees (compared against xemu).
-  PSCOMPAREMODE now goes to host render state 255, and a CLIPPLANE stage
-  discards a pixel when any of s, t, r, q fails its test, as xemu does.
-
-- **0024-in-game-settings-menu** (`src/hle/hle_settings_menu.c` new,
-  `hle_d3d8.c`, `hle_d3d8_interp.c`, `hle_settings.h`, `input_host.c`,
-  `src/d3d/d3d8_overlay.c`, `.h`, `src/config/recomp_config.c`, `.h`). F2,
-  or Start+Back on a pad, opens a settings panel over the game: frame-rate
-  cap, frame interpolation, the frame-rate counter and fullscreen apply at
-  once; internal resolution, widescreen, texture filtering, variable
-  refresh, movies and sound are written for the next start (marked *).
-  Every change is written to `pirates.ini` in place (`recomp_config_set`,
-  comments kept). While it is open the game reads no input; Start or Back
-  pressed alone is held back up to 150 ms, so the pair never pauses the game
-  first, and a short tap still reaches it. The overlay can draw a centred
-  panel of several lines. Also: frame interpolation can be changed while
-  running (`hle_set_frame_interp`; the title's 30 fps pacing follows it),
-  a loose fixed-function match no longer holds a frame back, and
-  `RECOMP_SHOT_REQUEST` takes `screen <file>` (the window as presented,
-  overlay and menu included; `drive.ps1 screen`).
-
-- **0025-display-crop-and-interval-ceiling** (`src/d3d/d3d8_display.c`,
-  `d3d8_xbox.h`, `src/hle/hle_settings_menu.c`,
-  `src/kernel/xbox_memory_layout.c`). The display resolve can leave the
-  game's last rows off the screen and stretch the rest (`crop_bottom`,
-  `RECOMP_CROP_BOTTOM`, guest rows; this game defaults to 8 through
-  `RECOMP_TITLE_CROP_BOTTOM` on `xbox_d3d8`): the sea's grey-lavender band
-  along the bottom, which the console shows too, is gone. "Hide bottom band"
-  in the F2 menu switches it live. And a title that sets
-  `RECOMP_TITLE_INTERVAL_CEILING=1` has the player's frame cap read as a
-  ceiling over its presentation interval, not an override: with the cap at
-  60 or off, sailing presented every vblank or as fast as it could and
-  frame interpolation never had a gap to fill (the sea stayed at 30). Now
-  the sea presents at 30 and interpolation shows 60, at the same game speed.
-
-- **0026-startup-window-black** (`src/hle/hle_d3d8.c`). The game window is
-  black until its first frame (it had no background brush, so a fullscreen
-  start showed a white box in the corner while the game loaded), and the
-  log says when the window opened and when Swaps 1, 10 and 100 came
-  (`[STARTUP] <seconds since the process started>`), to find where a slow
-  start goes.
-
-- **0027-pad-start-in-background** (`src/input/recomp_pad.c`). SDL's
-  gamepad start-up runs on a thread of its own. It enumerates every input
-  device, and on this PC it once took 20.8 s (instant on the next tries, a
-  device waking up); the game's first pad poll comes before its first
-  frame, so a start waited that long on a black screen. Until SDL is up
-  there are no SDL pads, and the pad arrives as an insertion (the keyboard
-  works throughout). The log says how long it took: `pads through SDL3
-  ..., ready after N s`.
-
-- **0028-crop-left-widescreen** (`src/d3d/d3d8_display.c`, `d3d8_xbox.h`,
-  `src/hle/hle_settings_menu.c`). The display resolve can leave the game's
-  first columns off too (`crop_left`, `RECOMP_CROP_LEFT`, guest columns).
-  In widescreen the main menu's map stops three and a half columns short of
-  the left edge, a light blue bar of clear colour; this game defaults to 4
-  columns in its 16:9 mode only (`RECOMP_TITLE_CROP_LEFT_WIDE` on
-  `xbox_d3d8`). "Hide left band" in the F2 menu switches it live.
-
-- **0029-front-end-4x3-and-pad-hotplug** (`src/d3d/d3d8_display.c`,
-  `src/input/recomp_pad.c`). A frame the title calls 4:3
-  (`xbox_D3D8SetWideFrames(FALSE)`) from a buffer wider than 4:3 is shown
-  as its centre at 4:3, between bars: this game's widescreen front end is
-  its 4:3 menu with more background either side, and stretched to 16:9 it
-  looked wide (`recomp_manual.c` calls the main menu's frames 4:3 while
-  sub_00126BC0 runs). And SDL pads live on a thread of their own, which
-  starts SDL, pumps the messages of the hidden windows SDL learns of new
-  devices through, and updates and rescans the pads every 2 ms: polled
-  from the title's threads, a pad plugged in after start-up was never
-  seen.
-
-- **0030-pads-no-directinput-follow-input** (`src/input/recomp_pad.c`).
-  SDL's DirectInput back end is off on Windows unless `pad_directinput = 1`
-  (`RECOMP_PAD_DIRECTINPUT`): it enumerates every DirectInput device and
-  took 12-40 s on this PC every time (0.01 s without it), so a pad came
-  long after the game. Xbox pads come through XInput, raw input and WGI,
-  PlayStation and Switch pads through HIDAPI. And controller 1 follows the
-  pad used last (`pad_follow_input`, `RECOMP_PAD_FOLLOW_INPUT`, on by
-  default): a button, a trigger or a stick on any pad makes it controller
-  1, the others follow in the order they were found. 0 keeps each pad in
-  its own slot, for several players. The title now calls every front-end
-  frame 4:3 (legal text, title, menus, the new-career pages) until the game
-  world starts (`recomp_manual.c`).
-
-## Running a build of your own
-
-```
-build\Release\pirates_launcher.exe
-```
-
-The launcher starts `pirates_recomp` beside it with the chosen settings;
-`build\Release\pirates_recomp.exe` starts the game directly. The game is
-looked up at `game/` relative to the repository, or wherever `RECOMP_GAME_DIR`
-points.
-
-**Saves.** The game keeps its saves on the Xbox's E: drive, which the runtime
-maps to the game folder: in a build of your own they are written into
-`game/UDATA`. Test runs belong on a copy of `game/` without `UDATA`
-(`RECOMP_GAME_DIR`) and with `RECOMP_SAVE_DIR` set to a fresh folder.
-The save folder also holds the emulated console's identity (`console.ini`,
-its MAC address, part of what XAPI signs settings and saves with), so
-deleting it or pointing `RECOMP_SAVE_DIR` somewhere new makes existing
-settings and console-bound saves read as damaged: keep one folder per player.
-
-**Test runs stay off your desk.** The scripts in `tools/test` start the game
-headless (`RECOMP_HEADLESS=1`, toolkit patch 0022): its window opens off the
-screen and off the taskbar and never takes the focus, your keyboard and pads
-are not read (only the script presses anything), and screenshots come from
-the game itself. `drive.ps1 start -Visible` shows a run's window again,
-behind the others, for watching one. A game you start yourself is not
-affected.
-
-**Settings: `pirates.ini`.** The settings live in `pirates.ini`, beside
-`pirates_launcher.exe` and `pirates_recomp.exe` (`build\Release\pirates.ini`
-in a build of your own). It is written with the defaults and a comment on
-every line the first time either program runs, and both read it; edit it in
-any text editor, or change the common settings in the launcher. Delete it to
-go back to the defaults. Every line names the environment variable that
-overrides it, so a `.bat` file or a command line still wins.
-
-The lines a player would touch: `widescreen` (the game's own 16:9 mode),
-`resolution_scale` (render 2-8 times larger), `frame_cap`, `fps_overlay`,
-`fullscreen`, `skip_intro` (`1`, `intro` or `0`), `minigames` (the debug
-MINIGAMES menu) and `mute`. A section marked for debugging holds
-`guest_lock`, `log_buffer` and `cache_pause`.
-
-The game's own switches, by environment variable (the `pirates.ini` key is
-given first in each row; the toolkit's are listed in `xboxrecomp/CLAUDE.md`):
-
-| Variable | Default | Effect |
-| --- | --- | --- |
-| `skip_intro`, `RECOMP_PIRATES_SKIP_INTRO` | `1` | Skip every Bink movie through the movie player's own "not played" exit (`src/recomp_manual.c`): the 2K and Firaxis logos at boot, and the opening story (`PiratesOpening1.bik`) and mutiny (`PiratesOpening2.bik`) after NEW GAME, which are pre-rendered movies, not in-engine scenes. `intro` skips only the 2K, Firaxis and Pirates! movies; `0` plays everything as the disc does. On during bring-up. |
-| `log_buffer`, `RECOMP_PIRATES_LOG_BUFFER` | `1` | The log (stderr) is buffered (64 KB). The toolkit logs every file read, path lookup and event, and unbuffered that took about half the game's main-thread time: a new game's first town loaded in 47 s or more instead of 10-16 s. `0` goes back to unbuffered, for a crash that leaves no report. |
-| `minigames`, `RECOMP_PIRATES_MINIGAMES` | `0` | `1` shows the developers' own "MINIGAMES (*DEBUG!*)" entry on the main menu: dancing, dueling (any stage and difficulty), button matching, a ship battle, town sneaking and a land battle, each straight from the menu. The menu draws it while byte 0x004D69C0 is set (`src/recomp_manual.c` sets it); the game toggles it on a debug input no pad produces. For testing; a player never needs it. |
-| `treasure_map`, `RECOMP_PIRATES_TREASURE_MAP` | `0` | `n` buys up to `n` pieces of a buried-treasure map, free, the way the mysterious traveller sells one (`sub_000AA3C0(0, x, y, 1, ...)` from `src/recomp_manual.c`), whenever a town menu opens with no treasure hunt under way; `2` makes a whole map on the default difficulty. For testing treasure hunts without waiting for the traveller or a beaten pirate's map; a player never needs it. |
-| `test_probe`, `RECOMP_PIRATES_TEST_PROBE` | (empty) | A folder for test scripts that play by themselves (`src/recomp_manual.c`, from the game's clock read): `pos.txt` (the player's ship, `0x004564BC/C0`, map units times 4,000,000, y northward), `ships.txt` (every object at sea: the array from `0x004564BC`, stride `0x45C`), `battle.txt` (both ships in a ship battle: position, heading, crew at `0x004D8F10` and `0x004DBE08`), and `teleport.txt` (written by the script, "x y" in map units, moves the player's ship once). At sea the left stick turns the ship, about 150 degrees a second. Empty is off; a player never needs it. |
-| `cache_pause`, `RECOMP_PIRATES_CACHE_PAUSE` | `0` | The game copies its `.FPK` archives from the disc into the cache (`<save folder>\Cache`) on first use, on a job thread that copies only while its "go" event is set: the game sets it for a movie or a loading screen and resets it afterwards, so the copy never competes with gameplay for the DVD. With the movies skipped those windows were microseconds long, the copy stopped part-way through a file, and loading a save then waited for that file: three of three loads on a fresh save folder froze. `src/recomp_manual.c` leaves that one event set, so the copy finishes in the background (about a minute, once per save folder). `1` passes the resets on as the disc does. |
-| `guest_lock`, `RECOMP_GUEST_LOCK` | `1` (set by `src/main.c`) | One game thread runs lifted code at a time, as on the console's single CPU (the toolkit's default is on only for ARM). Without it, about half the runs through a new career's first governor visit froze or crashed: the main thread stopped after NEW GAME, the governor's welcome hung on its last line, or two threads crashed in one memmove. With it, 7 of 7 runs went through, at the same load time and frame rate. `0` turns it off. |
+The game needs 30 changes to the toolkit, kept as patches until they land
+upstream: CPU translation fixes, file system and kernel timing fixes, fixed-
+function lighting, skinning and shader fixes, frame interpolation for the
+fixed-function pipeline, the in-game settings menu, display cropping and
+controller handling. Each one is described, with the bug it fixes, in
+[docs/toolkit-patches.md](docs/toolkit-patches.md).
 
 ## The disc
 
-The retail disc (USA, Europe, En/Fr/De/Es/It): title ID `0x5454008F`, XDK
-5849, built 2005-06-20, entry point `0x001AC88A`. `default.xbe` SHA-1
-`19191d2b0364c6ca7ee2a6fc063f3c8e3c843244`. Beside the game's code it links
-D3D8, D3DX8, DirectSound, Xbox Live (XONLINE/XNET), Bink video, Miles'
-MSSMIXER and the Dolby encoder; XbSymbolDatabase names 399 of the XDK
-functions in it.
+Supported: the retail disc **Sid Meier's Pirates! (USA, Europe)
+(En,Fr,De,Es,It)**, title ID `0x5454008F`, XDK 5849, built 2005-06-20.
+`default.xbe` SHA-1 `19191d2b0364c6ca7ee2a6fc063f3c8e3c843244`. Other
+revisions and the PC version are not supported.
 
-## What is specific to this game
+## Credits and licensing
 
-Nothing yet. As the bring-up finds things, they go in `src/recomp_manual.c`,
-`config/` and `CMakeLists.txt`, each with its reason, as the toolkit's other
-title projects do.
+Built on [DirectXbox-Recomp](https://github.com/phobos665/DirectXbox-Recomp)
+by phobos665, itself based on
+[xboxrecomp](https://github.com/sp00nznet/xboxrecomp) by sp00nz, with
+xemu-derived hardware components. Original Xbox behaviour was checked against
+[xemu](https://xemu.app/) and community documentation such as
+[XboxDevWiki](https://xboxdevwiki.net/). Development included assistance from
+Claude Code.
 
-## Licence
+| Submodule | Source | Used for |
+| --- | --- | --- |
+| `xboxrecomp` | [phobos665/DirectXbox-Recomp](https://github.com/phobos665/DirectXbox-Recomp) | The translation pipeline and runtime (D3D, kernel, audio, input, launcher), with `patches/` applied |
 
-The code in this repository is under the licence in `LICENSE`. The toolkit is
-GPL-3.0. The game is Firaxis' and 2K's; nothing of it is here.
+The code in this repository is under the licence in [`LICENSE`](LICENSE). The
+toolkit is GPL-3.0. *Sid Meier's Pirates!* belongs to Firaxis Games and 2K
+Games; nothing of the game is included here, and this project is not
+affiliated with them. Use only a copy of the game you own.

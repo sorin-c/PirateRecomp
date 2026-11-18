@@ -1,0 +1,317 @@
+# Toolkit patches
+
+`patches/` holds changes to the
+[DirectXbox-Recomp](https://github.com/phobos665/DirectXbox-Recomp) toolkit
+that this game needs and that are not in the pinned `xboxrecomp` commit yet.
+They are applied to the submodule's working tree, never committed inside it,
+so the submodule still points at an upstream commit. Apply them in number
+order, after the submodule init and before the lift, from the repository
+root (PowerShell):
+
+```powershell
+Get-ChildItem patches\*.patch | Sort-Object Name | ForEach-Object { git -C xboxrecomp apply $_.FullName }
+```
+
+Each one, with the reason it exists:
+
+- **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
+  `translator.py`, and a regression test in `test_lifter_lock_flags.py`).
+  The jcc after `xadd` / `lock xadd` was lifted as a re-read of the
+  destination (`MEM32(edi) != 0`) at the branch instead of the sum the
+  instruction produced. This game releases a reference with
+  `lock xadd [edi], eax / pop edi / jne` (0x0020AD80), so the branch tested
+  whatever the popped edi pointed at, and every child added to a UI node was
+  destroyed on the spot. The game then made virtual calls into freed memory
+  and crashed about a second after `CreateDevice`. The re-read was also racy
+  across guest threads. The lift now snapshots the sum into `_fa`/`_fas`,
+  as it already did for `cmpxchg`. Without it the build boots and crashes;
+  with it the game reaches its main menu.
+
+- **0002-kernel-empty-directory-pattern** (`src/kernel/kernel_file.c`).
+  On Windows, `NtQueryDirectoryFile` with a zero-length file name built
+  the search path `<dir>\` and `FindFirstFileW` failed. XAPI's
+  `FindFirstFile` passes exactly that for `*.*`, and the game indexes its
+  loose files by scanning `d:\Assets\*.*` recursively, so it found none of
+  `assets\Bink\*.bik` or `assets\sounds\*.wav`: no logo movies and no
+  music, with no error anywhere. An empty name now means every entry, as the
+  POSIX backend already read it. With it the 2K and Firaxis movies play
+  with sound and the title and menu music plays.
+
+- **0003-input-live-file** (`src/hle/input_host.c`). Test tooling, not a
+  game fix: `RECOMP_INPUT_LIVE=<file>` presses each line appended to the
+  file (`a`, `dpad_down:300`, `lstick_left+a:800`), one after another.
+  Fixed `RECOMP_INPUT_SEQ` timelines drift by tens of seconds over this
+  game's long loading screens; this lets a test look at a screenshot first
+  and press second (`tools/test/drive.ps1`). Does nothing unless the
+  variable is set.
+
+- **0004-d3d-bump-env-map** (`src/d3d/d3d8_combiners.c`, `.h`). The pixel
+  shader translator sampled `BUMPENVMAP` and `BUMPENVMAP_LUM` stages as
+  plain 2D textures and ignored the bump matrix, which the HLE layer
+  already forwards. The stage's coordinates are now offset by the source
+  stage's (du, dv) through `BUMPENVMAT00..11`, reading an unsigned colour's
+  bytes as two's complement as the NV2A does. The game's
+  `PSDistortReflections_XB` pass uses it to ripple the reflection the sea
+  samples. `_LUM`'s luminance scale is still not applied (`BUMPENVLSCALE`
+  and `LOFFSET` are not forwarded).
+
+- **0005-hle-walk-draw-simple-states** (`src/hle/hle_d3d8_state.c`,
+  `hle_d3d8_vertex.c`). The game pushes its terrain draws into the push
+  buffer itself, and the toolkit's push-buffer walk only draws them at the
+  next replaced call. By then the game's SetRenderState has already stored
+  the states for what comes next in the state array: blending, alpha test
+  and depth write put back after the third terrain pass. Drawn with those,
+  that pass painted its faded-out deep-water vertices over the sea as opaque
+  black tiles, in seven frames out of eight. The walk now keeps the simple
+  render states (depth, blend, alpha test, colour mask, stencil) in buffer
+  order, and the draws it makes use them. The array itself is unchanged.
+  `RECOMP_HLE_D3D8_WALK_RS=0` turns it off. Cull mode is not covered.
+
+- **0006-d3d-spot-falloff-nan** (`src/d3d/d3d8_shaders.c`). The
+  fixed-function lighting shader raised a spot light's cone ratio to its
+  falloff everywhere, so a light with falloff 0 gave pow(0, 0), NaN on the
+  GPU, at every vertex outside the cone, and the NaN made the whole lit
+  colour black. The main menu is lit by two such spots, and the sea chart
+  behind it came out black. The spot term now follows D3D: 0 outside the
+  outer cone, 1 inside the inner one, and the falloff curve only between.
+
+- **0007-d3d-light-indices** (`src/d3d/d3d8_device.c`). The host device
+  kept 8 light slots and dropped `SetLight` and `LightEnable` for any index
+  above 7. D3D8 allows any index and limits only how many lights are
+  enabled at once. The game lights its rooms with lights 39-43, so
+  characters in the governor's mansion, the shipwright's and the merchant's
+  were lit by nothing and drew as black silhouettes. 256 slots now; the
+  shader still packs the first 8 enabled.
+
+- **0008-d3d-vertex-blending** (`src/d3d/d3d8_shaders.c`,
+  `src/hle/hle_d3d8_state.c`). `D3DRS_VERTEXBLEND` was not forwarded, and
+  the fixed-function vertex shader skipped the blend weights in XYZB1-5
+  vertices. Every skinned vertex was drawn with world matrix 0 alone, so
+  the game's characters came apart: torsos torn, limbs and coats out of
+  place. The Xbox values (n WEIGHTS = 2n-1, n WEIGHTS n MATRICES = 2n)
+  are forwarded, and the shader blends position and normal over up to
+  four world matrices.
+
+- **0009-d3d-lighting-without-normals** (`src/d3d/d3d8_shaders.c`). With
+  lighting on, a vertex without a normal was left unlit, with a white
+  diffuse colour. D3D lights it with a zero normal, so only the emissive
+  and ambient terms count. The game darkens its stencil shadows with a lit,
+  position-only quad whose colour comes from the material (black,
+  translucent), and every character's shadow came out white.
+
+- **0010-hle-declaration-blend-weights** (`src/hle/hle_d3d8.c`). A
+  fixed-function draw described by a vertex declaration (no program) is
+  drawn through an equivalent FVF, and the blend weights (v1) were
+  dropped on the way, so 0008's blending never saw them: the dancers'
+  dresses in the governor's ball came apart into strips. The weights now
+  follow the position as XYZB1-4.
+
+- **0011-d3d-normal-matrix** (`src/d3d/d3d8_shaders.c`). The fixed-function
+  vertex shader's normal matrices (WorldInvTranspose, WorldViewInvTranspose)
+  were uploaded transposed once too often, so the shader got inverse(world)
+  instead of its transpose and turned every lit normal by the inverse of the
+  world rotation. Objects whose world matrix rotates were lit from the wrong
+  side: in the sword duel, the duellists' skin and shirts were lit only by
+  the garden's teal fill lights behind them and came out green.
+
+- **0012-config-title-settings-file** (`src/config/recomp_config.c`). A
+  title can keep its settings in one file beside its executables
+  (`RECOMP_TITLE_SETTINGS_FILE`), which the game and the launcher both
+  read and write, instead of the per-user file under `%APPDATA%`. It can
+  also add its own commented lines to that file
+  (`RECOMP_TITLE_SETTINGS_HEADER`), which a save from the launcher keeps.
+  Pirates! uses both: `pirates.ini`, with `src/settings_title.h`.
+
+- **0013-kernel-contiguous-protect** (`src/kernel/kernel_memory.c`,
+  `kernel_bridge.c`). `MmQueryAddressProtect` reports the protection a
+  contiguous allocation was made with (write-combine and no-cache
+  included), not the host's, which has no such bits. Pirates! builds its two
+  contiguous heaps with write-combine and checks for it when one is full:
+  without it, the overflow went to malloc, and those low addresses, freed
+  through the D3D free hook (which sets bit 31), were freed into the other
+  heap and corrupted it. That was the crash on quitting the town sneak.
+
+- **0014-kernel-tick-count-1ms** (`src/kernel/kernel_hal.c`,
+  `xbox_memory_layout.c`). `KeTickCount` counts milliseconds from the
+  performance counter instead of copying `GetTickCount`, which moves in
+  15.6 ms steps. Pirates! ends each frame at sea and in battle by sleeping
+  until the tick is 31 ms past the frame's start; with 15.6 ms steps every
+  frame took exactly 31.25 ms (32 fps).
+
+- **0015-flip-gate-lend-any-divisor** (`src/kernel/xbox_memory_layout.c`).
+  The flip gate lends its wait to frame interpolation at any vblank divisor,
+  not only at one Swap a vblank, and tells it which vblank will release the
+  frame. A title held to 30 can then show the frames between. Pirates! uses
+  it with `frame_interp = 2` in `pirates.ini` (`src/recomp_manual.c`,
+  `sub_001A958A`): at sea and in battles the game keeps its 30 and the
+  screen shows 60.
+
+- **0016-flip-gate-vblanks-per-swap** (`src/kernel/xbox_memory_layout.c`).
+  `xbox_Nv2aFlipGateVblanksPerSwap()` says how many vblanks each Swap waits
+  for now. The player's frame cap outranks the title's presentation
+  interval, so Pirates! checks it before handing its 30 fps wait to the
+  gate: with `frame_cap = 60` the gate ran those scenes at 60 and the game
+  at twice its speed. Now the game then keeps its own wait.
+
+- **0017-hle-push-buffer-draws-ff-and-timing** (`src/hle/hle_d3d8_vertex.c`,
+  `hle_d3d8.c`). Gamebryo draws each character's head and hands (one skin
+  partition of 1,200+ triangles) through `D3DDevice_RunPushBuffer`, a
+  prebuilt push buffer, and the rest of the body through
+  `DrawIndexedVertices`. Two gaps lost them: the walk drew a push buffer
+  only at the next replaced call, with the next object's transforms (the
+  head came out huge in front of the camera), and it could not lay out a
+  pushed draw under a fixed-function FVF at all (it needs a program
+  object), so the head and hands were dropped. `RunPushBuffer` is now
+  replaced and brings the walk up to date after its body, and pushed
+  fixed-function draws are gathered in the FVF's layout from the registers
+  the XDK feeds (v0 position, v1 weights, v2 normal, v3/v4 colours, v9-v12
+  texture coordinates). `RECOMP_HLE_D3D8_PB_RUN_SYNC=0` restores the late
+  draw. Needs a re-lift (`--from lift`): it adds an `HLE_ORIGINAL`.
+
+- **0018-hle-interp-fixed-function** (`src/hle/hle_d3d8_interp.c`,
+  `hle_d3d8_record.c`, `.h`). Frame interpolation blended only draws made
+  by vertex programs, through their matrix constants. Pirates! draws its
+  characters, the duels, the governor's rooms and the menus with the
+  fixed-function pipeline, so those frames were held (no in-betweens) or
+  the characters moved at 30 while the scene around them moved at 60. A
+  fixed-function draw now keeps its view, projection and world matrices
+  (one more world per blend weight), and an in-between frame draws it with
+  them blended like a program's: rotation as a quaternion, scale and
+  translation linearly, the projection term by term. Screen-space
+  (XYZRHW) draws are left as they are.
+
+- **0019-config-title-default-frame-interp** (`src/config/recomp_config.c`,
+  `.h`, `src/hle/hle_d3d8_interp.c`). A title can set the frame
+  interpolation it starts with (`RECOMP_TITLE_DEFAULT_FRAME_INTERP` on
+  `xbox_config`); this game's CMakeLists sets 2. And with `frame_cap = 60`
+  (a strict 60: every present waits for a vblank) an in-between frame is
+  drawn only between title frames two vblanks or more apart: between two
+  a vblank apart it cost the title a vblank, and the menus and sea dialogs
+  ran at 40-50 instead of 60.
+
+- **0020-hle-interp-mirror-quaternion** (`src/hle/hle_d3d8_interp.c`).
+  The flicker at sea with frame interpolation: every in-between frame lost
+  the towns, the ships' sails and the cloud shadows. The sea camera's view
+  matrix is a mirror whose proper part turns half a turn, and the
+  quaternion taken from it lost the relative sign of its axes at 180
+  degrees, so even an unblended rebuild flipped two axes. The quaternion is
+  now taken by Shepperd's method. Also: a fixed-function draw's matrices
+  are read back from the device at the draw, a world matrix's jump is
+  judged in camera space, and only draws of the same bytes are blended.
+  `RECOMP_INTERP_FF=0` draws fixed-function draws as the frame has them.
+
+- **0021-d3d-pixel-offset-scaled** (`src/d3d/d3d8_device.c`). At a
+  `resolution_scale` above 1, the toolkit's half-pixel screen-space offset
+  (half a game pixel, so the console's pixel centres land on integers)
+  left the first rows and columns of host pixels outside any full-screen
+  quad the game draws from 0: a blue line of the clear colour along the
+  top and left of the picture, two pixels wide at 4x. With
+  `RECOMP_D3D8_PIXEL_OFFSET=scaled` (this game's CMakeLists sets it through
+  `RECOMP_TITLE_PIXEL_OFFSET_SCALED`) the offset is half a host pixel: the
+  same at 1x, and the quad covers the edge above it.
+
+- **0022-headless-test-runs** (`src/config/recomp_config.c`,
+  `src/hle/hle_d3d8.c`, `src/hle/input_host.c`, `src/input/input_bindings.c`).
+  Test scripts ran the game on the same desk as the player: its window came
+  up in front, took the focus, and the player's own keyboard and pad (one in
+  slot 2 included) reached the game alongside the script. `RECOMP_HEADLESS=1`
+  (or `headless = 1` in `pirates.ini`) opens the window off every monitor,
+  off the taskbar and Alt+Tab, never active; no real keyboard, pad or mouse
+  is read on any port, the game is shown one controller (the script's), and
+  nothing rumbles. The window is still shown, not hidden or minimised, so
+  frames are drawn, presented and paced exactly as in play (measured: 60 a
+  second in the menus, 30 in a VS MODE battle with `frame_interp = 2`, as
+  without it). `RECOMP_SHOT_REQUEST=<file>` lets a script ask the game for
+  its next frame as a BMP (and a replayable capture, as F11), since nothing
+  on the desktop can photograph a window that is off it. Off by default;
+  a player's game is unchanged.
+
+- **0023-d3d-clipplane-texture-mode** (`src/d3d/d3d8_combiners.c`, `.h`,
+  `d3d8_xbox.h`, `src/hle/hle_d3d8_state.c`). The CLIPPLANE texture mode
+  killed nothing, and PSCOMPAREMODE was not forwarded. The world map's
+  forests use it: each tree's stage-0 coordinate is its map cell's tree
+  density less a half, and the hardware kills the pixels where it is below
+  zero, so a forest tile is thinned into natural clumps. Without it every
+  tile was drawn whole, as a square block of trees (compared against xemu).
+  PSCOMPAREMODE now goes to host render state 255, and a CLIPPLANE stage
+  discards a pixel when any of s, t, r, q fails its test, as xemu does.
+
+- **0024-in-game-settings-menu** (`src/hle/hle_settings_menu.c` new,
+  `hle_d3d8.c`, `hle_d3d8_interp.c`, `hle_settings.h`, `input_host.c`,
+  `src/d3d/d3d8_overlay.c`, `.h`, `src/config/recomp_config.c`, `.h`). F2,
+  or Start+Back on a pad, opens a settings panel over the game: frame-rate
+  cap, frame interpolation, the frame-rate counter and fullscreen apply at
+  once; internal resolution, widescreen, texture filtering, variable
+  refresh, movies and sound are written for the next start (marked *).
+  Every change is written to `pirates.ini` in place (`recomp_config_set`,
+  comments kept). While it is open the game reads no input; Start or Back
+  pressed alone is held back up to 150 ms, so the pair never pauses the game
+  first, and a short tap still reaches it. The overlay can draw a centred
+  panel of several lines. Also: frame interpolation can be changed while
+  running (`hle_set_frame_interp`; the title's 30 fps pacing follows it),
+  a loose fixed-function match no longer holds a frame back, and
+  `RECOMP_SHOT_REQUEST` takes `screen <file>` (the window as presented,
+  overlay and menu included; `drive.ps1 screen`).
+
+- **0025-display-crop-and-interval-ceiling** (`src/d3d/d3d8_display.c`,
+  `d3d8_xbox.h`, `src/hle/hle_settings_menu.c`,
+  `src/kernel/xbox_memory_layout.c`). The display resolve can leave the
+  game's last rows off the screen and stretch the rest (`crop_bottom`,
+  `RECOMP_CROP_BOTTOM`, guest rows; this game defaults to 8 through
+  `RECOMP_TITLE_CROP_BOTTOM` on `xbox_d3d8`): the sea's grey-lavender band
+  along the bottom, which the console shows too, is gone. "Hide bottom band"
+  in the F2 menu switches it live. And a title that sets
+  `RECOMP_TITLE_INTERVAL_CEILING=1` has the player's frame cap read as a
+  ceiling over its presentation interval, not an override: with the cap at
+  60 or off, sailing presented every vblank or as fast as it could and
+  frame interpolation never had a gap to fill (the sea stayed at 30). Now
+  the sea presents at 30 and interpolation shows 60, at the same game speed.
+
+- **0026-startup-window-black** (`src/hle/hle_d3d8.c`). The game window is
+  black until its first frame (it had no background brush, so a fullscreen
+  start showed a white box in the corner while the game loaded), and the
+  log says when the window opened and when Swaps 1, 10 and 100 came
+  (`[STARTUP] <seconds since the process started>`), to find where a slow
+  start goes.
+
+- **0027-pad-start-in-background** (`src/input/recomp_pad.c`). SDL's
+  gamepad start-up runs on a thread of its own. It enumerates every input
+  device, and on this PC it once took 20.8 s (instant on the next tries, a
+  device waking up); the game's first pad poll comes before its first
+  frame, so a start waited that long on a black screen. Until SDL is up
+  there are no SDL pads, and the pad arrives as an insertion (the keyboard
+  works throughout). The log says how long it took: `pads through SDL3
+  ..., ready after N s`.
+
+- **0028-crop-left-widescreen** (`src/d3d/d3d8_display.c`, `d3d8_xbox.h`,
+  `src/hle/hle_settings_menu.c`). The display resolve can leave the game's
+  first columns off too (`crop_left`, `RECOMP_CROP_LEFT`, guest columns).
+  In widescreen the main menu's map stops three and a half columns short of
+  the left edge, a light blue bar of clear colour; this game defaults to 4
+  columns in its 16:9 mode only (`RECOMP_TITLE_CROP_LEFT_WIDE` on
+  `xbox_d3d8`). "Hide left band" in the F2 menu switches it live.
+
+- **0029-front-end-4x3-and-pad-hotplug** (`src/d3d/d3d8_display.c`,
+  `src/input/recomp_pad.c`). A frame the title calls 4:3
+  (`xbox_D3D8SetWideFrames(FALSE)`) from a buffer wider than 4:3 is shown
+  as its centre at 4:3, between bars: this game's widescreen front end is
+  its 4:3 menu with more background either side, and stretched to 16:9 it
+  looked wide (`recomp_manual.c` calls the main menu's frames 4:3 while
+  sub_00126BC0 runs). And SDL pads live on a thread of their own, which
+  starts SDL, pumps the messages of the hidden windows SDL learns of new
+  devices through, and updates and rescans the pads every 2 ms: polled
+  from the title's threads, a pad plugged in after start-up was never
+  seen.
+
+- **0030-pads-no-directinput-follow-input** (`src/input/recomp_pad.c`).
+  SDL's DirectInput back end is off on Windows unless `pad_directinput = 1`
+  (`RECOMP_PAD_DIRECTINPUT`): it enumerates every DirectInput device and
+  took 12-40 s on this PC every time (0.01 s without it), so a pad came
+  long after the game. Xbox pads come through XInput, raw input and WGI,
+  PlayStation and Switch pads through HIDAPI. And controller 1 follows the
+  pad used last (`pad_follow_input`, `RECOMP_PAD_FOLLOW_INPUT`, on by
+  default): a button, a trigger or a stick on any pad makes it controller
+  1, the others follow in the order they were found. 0 keeps each pad in
+  its own slot, for several players. The title now calls every front-end
+  frame 4:3 (legal text, title, menus, the new-career pages) until the game
+  world starts (`recomp_manual.c`).
