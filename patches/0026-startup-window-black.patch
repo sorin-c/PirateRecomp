@@ -1,0 +1,61 @@
+diff --git a/src/hle/hle_d3d8.c b/src/hle/hle_d3d8.c
+index 561ebe8..22db014 100644
+--- a/src/hle/hle_d3d8.c
++++ b/src/hle/hle_d3d8.c
+@@ -535,6 +535,21 @@ static LRESULT CALLBACK shadow_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
+  * own thread. */
+ static WINDOWPLACEMENT g_shadow_restore;
+ 
++/* Seconds since the process started, for the [STARTUP] lines that say where
++ * a slow start goes (window, first Swaps). */
++static double startup_seconds(void)
++{
++    FILETIME created, exited, kernel, user, now;
++    ULARGE_INTEGER a, b;
++
++    if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user))
++        return -1.0;
++    GetSystemTimeAsFileTime(&now);
++    a.LowPart = created.dwLowDateTime; a.HighPart = created.dwHighDateTime;
++    b.LowPart = now.dwLowDateTime;     b.HighPart = now.dwHighDateTime;
++    return (double)(b.QuadPart - a.QuadPart) / 1e7;
++}
++
+ static void shadow_set_fullscreen(HWND hwnd, int on)
+ {
+     on = on ? 1 : 0;
+@@ -600,6 +615,10 @@ static DWORD WINAPI shadow_window_thread(LPVOID param)
+      * (cmake/title_icon.cmake); none, and Windows draws its default. */
+     wc.hIcon         = LoadIconA(wc.hInstance, MAKEINTRESOURCEA(1));
+     wc.lpszClassName = "xboxrecomp_hle_d3d8_shadow";
++    /* Black until the first frame: with no brush Windows leaves the client
++     * area unpainted, a white box in the corner of a fullscreen window
++     * while the game loads. */
++    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+     RegisterClassA(&wc);
+ 
+     {
+@@ -688,7 +707,9 @@ static DWORD WINAPI shadow_window_thread(LPVOID param)
+     }
+     if (!req->hwnd)
+         fprintf(stderr, "[HLE-D3D8] shadow: CreateWindow failed (%lu)\n", GetLastError());
+-    SetEvent(req->ready);                /* req lives on the waiting caller's stack */
++    else
++        fprintf(stderr, "[STARTUP] %.2f s: game window open\n", startup_seconds());
++    SetEvent(req->ready);               /* req lives on the waiting caller's stack */
+     if (!req->hwnd)
+         return 1;
+ 
+@@ -3476,6 +3497,12 @@ static void frame_end_shadow(void)
+         DWORD thread = GetCurrentThreadId();
+ 
+         g_last_frame_end = now;
++        {
++            static unsigned swaps;
++            swaps++;
++            if (swaps == 1 || swaps == 10 || swaps == 100)
++                fprintf(stderr, "[STARTUP] %.2f s: Swap %u\n", startup_seconds(), swaps);
++        }
+ 
+         /* Which guest threads swap, against the one that created the device.
+          * Capped, in case they alternate. */
