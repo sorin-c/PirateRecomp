@@ -363,3 +363,11 @@ Each one, with the reason it exists:
   off, 1, 2, 4, 8 and 16 in the launcher and the F2 menu. `0` (the new
   default) leaves the game's own filtering; `1` and up force anisotropic
   filtering at that level where the game filters linearly.
+
+- **0036-texcoord-index-not-above-stage** (`src/d3d/d3d8_shaders.c`). A
+  fixed-function stage reads a texture coordinate set no higher than its own
+  number; one whose `D3DTSS_TEXCOORDINDEX` names a later set gets its own.
+  The game leaves stage 0 at set 1 while it draws the tavern tables (the
+  new-career nation choice and town taverns); xemu draws them with set 0
+  for both textures, and taken literally the lightmap was read with the
+  wrong coordinates and the tables came out as a black-patched mosaic.
