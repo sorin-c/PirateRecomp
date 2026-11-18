@@ -23,26 +23,49 @@ the original Xbox game (see [The disc](#the-disc)).
 
 ### Option A: download and play (no compiler needed)
 
-1. Download `PirateRecomp-<version>-windows-x86_64.zip` from the
-   [Releases](https://github.com/sorin-c/PirateRecomp/releases) page and
-   unpack it anywhere.
-2. Start **`PirateRecomp.exe`**. The release is not signed, so the first time
-   Windows may say it protected your PC: choose *More info*, then *Run anyway*.
-3. The first time, it asks for your copy of the game: choose **Disc
-   image...** for an `.iso` (XISO or Redump), or **Folder...** for a folder
-   with the disc's files. It checks that it is the supported disc, then
-   builds the game from it on your PC. This takes a few minutes and happens
-   once.
-4. The settings appear; press **Play**.
+**You need:** 64-bit Windows 10 or 11, about 3 GB of free disk space, and an
+image of your own **original Xbox** disc of the game (an `.iso`, XISO or
+Redump, or a folder holding the disc's files with `default.xbe` in it). The
+Xbox 360 and PC versions do not work. Nothing else: no Visual Studio, Python
+or other tools.
 
-The download is the toolkit's *self-building release*: the launcher, a
-compiler (zig), CMake, Ninja, Python and the translation pipeline, about
-600 MB unpacked, so nothing else needs installing on 64-bit Windows 10 or 11.
-What it builds goes in `%LOCALAPPDATA%\xboxrecomp\builds\5454008F`: the game,
-its files (an image is extracted there once; a folder is linked, never
-changed), your saves (`game\UDATA`), `pirates.ini` and `build.log`, the file
-to attach to a bug report. A newer release finds the old build out of date and
-offers **Build again**, with the same disc remembered.
+1. **Download** `PirateRecomp-<version>-windows-x86_64.zip` (about 160 MB)
+   from the [Releases](https://github.com/sorin-c/PirateRecomp/releases) page.
+2. **Unpack** it anywhere, for example `C:\Games\PirateRecomp`. Unpack the
+   whole zip; do not run it from inside the zip.
+3. **Start `PirateRecomp.exe`.** The release is not signed, so the first time
+   Windows may say it protected your PC: choose *More info*, then *Run
+   anyway*.
+4. **Choose your game.** The first time, the launcher asks for your copy of
+   the game: **Disc image...** for an `.iso`, or **Folder...** for a folder
+   with the disc's files. You can also type or paste the path.
+5. **Wait for the build.** The launcher checks that it is the supported disc
+   (any other is refused, with the reason), copies the game's files out of
+   the image, and builds the PC version of the game from it, showing its
+   progress. This takes a few minutes and only happens once.
+6. **Play.** When the build is done, press OK, adjust the settings if you
+   like (see [The launcher](#the-launcher)), and press **Play**. From then on,
+   starting `PirateRecomp.exe` goes straight to the settings and Play.
+
+How it works: the download holds no game code. It carries the launcher, a
+compiler (zig), CMake, Ninja, Python and the translation pipeline, and turns
+*your* disc into the PC game on your machine, the same way Option B does by
+hand.
+
+Where things are: everything it builds is in
+`%LOCALAPPDATA%\xboxrecomp\builds\5454008F` (paste that into Explorer's
+address bar): the game, its files (an image is extracted there once; a folder
+is linked, never changed), your saves (`game\UDATA`), the settings file
+`pirates.ini`, and `build.log`.
+
+- **A newer release:** unpack it and start its `PirateRecomp.exe`. It sees
+  that the game was built by an older release and offers **Build again**,
+  with the same disc remembered. Your saves and settings stay.
+- **If the build fails,** open an
+  [issue](https://github.com/sorin-c/PirateRecomp/issues) and attach
+  `build.log` from the folder above.
+- **To uninstall,** delete the unpacked folder and the folder above (back up
+  `game\UDATA` first if you want to keep your saves).
 
 ### Option B: build it yourself
 
