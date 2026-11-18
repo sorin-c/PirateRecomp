@@ -484,10 +484,16 @@ void sub_001A958A(void)
          * fps scene asks below, and interpolation can be turned on in the
          * settings menu while the game runs. */
         env_set = 1;
+/* And a player's cap is a ceiling, not an override: at frame_cap = 60
+         * a 30 fps scene still presents at 30, and interpolation fills it to
+         * 60. Overruled, the sea presented every vblank, half of them
+         * repeats, and interpolation had nothing to fill. */
 #ifdef _WIN32
         _putenv("RECOMP_TITLE_INTERVAL=1");
+        _putenv("RECOMP_TITLE_INTERVAL_CEILING=1");
 #else
         setenv("RECOMP_TITLE_INTERVAL", "1", 1);
+        setenv("RECOMP_TITLE_INTERVAL_CEILING", "1", 1);
 #endif
     }
     /* What is in effect now (frame_interp, or the settings menu since). */

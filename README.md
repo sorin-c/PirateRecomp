@@ -110,6 +110,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0022-headless-test-runs.patch
    git -C xboxrecomp apply ..\patches\0023-d3d-clipplane-texture-mode.patch
    git -C xboxrecomp apply ..\patches\0024-in-game-settings-menu.patch
+   git -C xboxrecomp apply ..\patches\0025-display-crop-and-interval-ceiling.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -178,6 +179,7 @@ git -C xboxrecomp apply ..\patches\0021-d3d-pixel-offset-scaled.patch
 git -C xboxrecomp apply ..\patches\0022-headless-test-runs.patch
 git -C xboxrecomp apply ..\patches\0023-d3d-clipplane-texture-mode.patch
 git -C xboxrecomp apply ..\patches\0024-in-game-settings-menu.patch
+git -C xboxrecomp apply ..\patches\0025-display-crop-and-interval-ceiling.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -418,6 +420,20 @@ git -C xboxrecomp apply ..\patches\0024-in-game-settings-menu.patch
   a loose fixed-function match no longer holds a frame back, and
   `RECOMP_SHOT_REQUEST` takes `screen <file>` (the window as presented,
   overlay and menu included; `drive.ps1 screen`).
+
+- **0025-display-crop-and-interval-ceiling** (`src/d3d/d3d8_display.c`,
+  `d3d8_xbox.h`, `src/hle/hle_settings_menu.c`,
+  `src/kernel/xbox_memory_layout.c`). The display resolve can leave the
+  game's last rows off the screen and stretch the rest (`crop_bottom`,
+  `RECOMP_CROP_BOTTOM`, guest rows; this game defaults to 8 through
+  `RECOMP_TITLE_CROP_BOTTOM` on `xbox_d3d8`): the sea's grey-lavender band
+  along the bottom, which the console shows too, is gone. "Hide bottom band"
+  in the F2 menu switches it live. And a title that sets
+  `RECOMP_TITLE_INTERVAL_CEILING=1` has the player's frame cap read as a
+  ceiling over its presentation interval, not an override: with the cap at
+  60 or off, sailing presented every vblank or as fast as it could and
+  frame interpolation never had a gap to fill (the sea stayed at 30). Now
+  the sea presents at 30 and interpolation shows 60, at the same game speed.
 
 ## Running a build of your own
 
