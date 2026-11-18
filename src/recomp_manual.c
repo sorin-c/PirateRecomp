@@ -204,20 +204,26 @@ void sub_000DB7A0(void)
  * setting it before the menu runs is all it takes. */
 extern void sub_00126BC0_gen(void);
 extern void xbox_D3D8SetWideFrames(int wide);
-/* The front end in widescreen: the game draws its 4:3 menu into the 16:9
- * buffer with more background either side, so stretched to 16:9 it looks
- * wide. While the main menu runs the frames are called 4:3 (the toolkit
- * shows the buffer's centre between bars); sub_001A958A calls them 16:9
- * again once it has not run for 300 ms of game time. */
-static volatile int g_pirates_menu_seen, g_pirates_menu_narrow;
+/* The front end in widescreen: the game draws its 4:3 screens (legal text,
+ * title, main menu, the new-career pages) into the 16:9 buffer with more
+ * background either side, so stretched to 16:9 they look wide. From start-up
+ * and whenever the main menu runs, frames are called 4:3 (the toolkit shows
+ * the buffer's centre between bars); the game world calls them 16:9 again --
+ * the sea, battle and duel frame waits (sub_001A958A) and the town menu
+ * (sub_00021D70). */
+static volatile int g_pirates_front = -1;   /* -1 not said yet */
+
+static void pirates_front_end(int on)
+{
+    if (g_pirates_front != on) {
+        g_pirates_front = on;
+        xbox_D3D8SetWideFrames(on ? 0 : 1);
+    }
+}
 
 void sub_00126BC0(void)
 {
-    g_pirates_menu_seen = 1;
-    if (!g_pirates_menu_narrow) {
-        g_pirates_menu_narrow = 1;
-        xbox_D3D8SetWideFrames(0);
-    }
+    pirates_front_end(1);
     static int on = -1;
     if (on < 0) {
         on = recomp_config_bool("RECOMP_PIRATES_MINIGAMES", "minigames", 0);
@@ -256,6 +262,7 @@ extern void sub_000AA3C0(void);
 
 void sub_00021D70(void)
 {
+    pirates_front_end(0);                /* a town: the game world */
     static int pieces = -1;
     if (pieces < 0) {
         pieces = recomp_config_int("RECOMP_PIRATES_TREASURE_MAP", "treasure_map", 0);
@@ -473,16 +480,11 @@ void sub_001A958A(void)
 
     sub_001A958A_gen();
     pirates_test_probe(g_eax);
-    {   /* the main menu's 4:3 frames end when it stops running */
-        static uint32_t menu_at;
-        if (g_pirates_menu_seen) {
-            g_pirates_menu_seen = 0;
-            menu_at = g_eax;
-        } else if (g_pirates_menu_narrow && g_eax - menu_at > 300u) {
-            g_pirates_menu_narrow = 0;
-            xbox_D3D8SetWideFrames(1);
-        }
-    }
+    if (g_pirates_front < 0)
+        pirates_front_end(1);            /* start-up is the front end */
+    if (ra == 0x00091DE1u || ra == 0x000A4AEEu || ra == 0x000C3B4Eu ||
+        ra == 0x00036C60u || ra == 0x0004DF8Fu)
+        pirates_front_end(0);            /* sea, battle, duel: the game world */
     {   /* RECOMP_PIRATES_TICK_SITES=1: name each new caller once (which
          * limiter a scene uses) */
         static int sites = -1;
