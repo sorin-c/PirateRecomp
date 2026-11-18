@@ -1,0 +1,233 @@
+diff --git a/src/d3d/d3d8_display.c b/src/d3d/d3d8_display.c
+index b37f3ca..ff6e60a 100644
+--- a/src/d3d/d3d8_display.c
++++ b/src/d3d/d3d8_display.c
+@@ -466,9 +466,38 @@ static int create(UINT taps)
+     return 1;
+ }
+ 
++/* The game's bottom rows left off the screen (crop_bottom, guest rows,
++ * RECOMP_CROP_BOTTOM; a title's default from RECOMP_TITLE_CROP_BOTTOM on
++ * xbox_d3d8), the rest stretched to fill the picture. Pirates! draws its sea
++ * a grey-lavender for the last eight rows of the frame, on the console too;
++ * eight of 480 is a 1.7% stretch nobody sees. -1 until read; the settings
++ * menu sets it live. */
++static int g_crop_bottom = -1;
++
++void xbox_D3D8SetCropBottom(int rows)
++{
++    g_crop_bottom = rows < 0 ? 0 : rows;
++}
++
++int xbox_D3D8CropBottom(void)
++{
++    if (g_crop_bottom < 0) {
++#if defined(RECOMP_TITLE_CROP_BOTTOM)
++        int def = RECOMP_TITLE_CROP_BOTTOM;
++#else
++        int def = 0;
++#endif
++        g_crop_bottom = recomp_config_int("RECOMP_CROP_BOTTOM", "crop_bottom", def);
++        if (g_crop_bottom < 0 || g_crop_bottom > 64)
++            g_crop_bottom = 0;
++    }
++    return g_crop_bottom;
++}
++
+ HRESULT d3d8_display_resolve(RhiView *scene, UINT scene_w, UINT scene_h,
+                              RhiView *out, D3D8DisplayFit fit)
+ {
++    UINT used_h = scene_h;
+     RhiOutputState saved;
+     RhiViewport vp;
+     float blend_factor[4] = { 1, 1, 1, 1 };
+@@ -477,6 +506,11 @@ HRESULT d3d8_display_resolve(RhiView *scene, UINT scene_w, UINT scene_h,
+ 
+     if (!scene || !out || !fit.w || !fit.h || !scene_h)
+         return E_INVALIDARG;
++    {
++        UINT gh = d3d8_GetGuestHeight(), crop = (UINT)xbox_D3D8CropBottom();
++        if (crop && gh > crop * 4u)
++            used_h = scene_h - (UINT)((unsigned long long)crop * scene_h / gh);
++    }
+ 
+     /* Square taps, from the vertical ratio: the horizontal one is the
+      * same whenever the fit preserved the scene's shape, which it does,
+@@ -495,7 +529,7 @@ HRESULT d3d8_display_resolve(RhiView *scene, UINT scene_w, UINT scene_h,
+         c.origin_x = (float)fit.x;
+         c.origin_y = (float)fit.y;
+         c.ratio_x = (float)scene_w / (float)fit.w;
+-        c.ratio_y = (float)scene_h / (float)fit.h;
++        c.ratio_y = (float)used_h / (float)fit.h;
+         c.texel_x = 1.0f / (float)scene_w;
+         c.texel_y = 1.0f / (float)scene_h;
+         c.inv_taps = 1.0f / (float)(taps * taps);
+diff --git a/src/d3d/d3d8_xbox.h b/src/d3d/d3d8_xbox.h
+index a8b2fb2..d5c68be 100644
+--- a/src/d3d/d3d8_xbox.h
++++ b/src/d3d/d3d8_xbox.h
+@@ -1199,6 +1199,10 @@ void xbox_D3D8SetPresentInterval(UINT interval);
+  * what reaches the screen rather than the scene (d3d8_replay --present).
+  * Presented returns the last copy and its size, or NULL. */
+ void           xbox_D3D8KeepPresented(BOOL on);
++/* Guest rows left off the bottom of the picture, the rest stretched to fill
++ * it (d3d8_display.c, crop_bottom): now, and set live. */
++int            xbox_D3D8CropBottom(void);
++void           xbox_D3D8SetCropBottom(int rows);
+ const uint8_t *xbox_D3D8Presented(UINT *width, UINT *height);
+ /* The size the guest presents at, for its screen-space geometry; the HLE
+  * sets it from the title's present parameters (d3d8_GetGuestWidth). */
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index 59cca8d..e48b945 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -30,12 +30,15 @@
+ #include "input_host.h"
+ #include "recomp_config.h"
+ 
++int  xbox_D3D8CropBottom(void);                 /* src/d3d/d3d8_display.c */
++void xbox_D3D8SetCropBottom(int rows);
++
+ enum {
+     PAD_UP = 0x0001u, PAD_DOWN = 0x0002u, PAD_LEFT = 0x0004u, PAD_RIGHT = 0x0008u,
+     PAD_START = 0x0010u, PAD_BACK = 0x0020u,
+ };
+ 
+-enum { LIVE_NONE, LIVE_CAP, LIVE_INTERP, LIVE_FPS, LIVE_FULLSCREEN };
++enum { LIVE_NONE, LIVE_CAP, LIVE_INTERP, LIVE_FPS, LIVE_FULLSCREEN, LIVE_CROP };
+ 
+ typedef struct {
+     const char *label;
+@@ -64,6 +67,8 @@ static const Item ITEMS[] = {
+       { "1", "2", "4", "8", "16" }, { "off", "2x", "4x", "8x", "16x" } },
+     { "Variable refresh",    "vrr",              "RECOMP_VRR",           LIVE_NONE, 2,
+       { "0", "1" }, { "off", "on" } },
++    { "Hide bottom band",    "crop_bottom",      "RECOMP_CROP_BOTTOM",   LIVE_CROP, 2,
++      { "0", "8" }, { "off", "on" } },
+ };
+ #define ITEM_COUNT ((int)(sizeof ITEMS / sizeof ITEMS[0]))
+ 
+@@ -125,6 +130,10 @@ static int current_index(const Item *it)
+     case LIVE_FULLSCREEN:
+         v = hle_fullscreen() ? "1" : "0";
+         break;
++    case LIVE_CROP:
++        snprintf(buf, sizeof buf, "%d", xbox_D3D8CropBottom());
++        v = buf;
++        break;
+     default:
+         v = recomp_config_lookup(it->env, it->key);
+         if (!v || !*v)
+@@ -153,6 +162,7 @@ static void change(int dir)
+     case LIVE_INTERP:     hle_set_frame_interp(atoi(it->vals[i])); break;
+     case LIVE_FPS:        hle_set_fps_overlay(i); break;
+     case LIVE_FULLSCREEN: hle_set_fullscreen(i); break;
++    case LIVE_CROP:       xbox_D3D8SetCropBottom(atoi(it->vals[i])); break;
+     default:              g_restart_needed = 1; break;
+     }
+     fprintf(stderr, "[MENU] %s = %s%s\n", it->key, it->vals[i],
+diff --git a/src/kernel/xbox_memory_layout.c b/src/kernel/xbox_memory_layout.c
+index a721b15..a304d55 100644
+--- a/src/kernel/xbox_memory_layout.c
++++ b/src/kernel/xbox_memory_layout.c
+@@ -2185,6 +2185,9 @@ int xbox_EnvSwitch(const char *name, int default_on)
+              _stricmp(v, "no") == 0 || _stricmp(v, "false") == 0);
+ }
+ 
++static int flip_gate_effective_divisor(void);
++static int g_flip_gate_ceiling;     /* RECOMP_TITLE_INTERVAL_CEILING */
++
+ static int flip_gate_divisor(void)
+ {
+     if (g_flip_gate_divisor < 0) {
+@@ -2281,6 +2284,9 @@ void xbox_Nv2aFlipGateSetTitleInterval(uint32_t interval)
+         }
+     }
+     g_flip_gate_title = n;
++    /* Read here, not at the first Swap: a title sets it from its own code,
++     * which may run after the gate has started. */
++    g_flip_gate_ceiling = xbox_EnvSwitch("RECOMP_TITLE_INTERVAL_CEILING", 0);
+     flip_gate_divisor();                    /* reads the player's cap, once */
+     if (g_flip_gate_user) {
+         fprintf(stderr, "  [NV2A] flip gate: the title asks for one Swap per %d vblank(s) "
+@@ -2312,7 +2318,7 @@ static int flip_gate_mode_index(void)
+ 
+ int xbox_Nv2aFlipGateVblanksPerSwap(void)
+ {
+-    int d = flip_gate_divisor();
++    int d = flip_gate_effective_divisor();
+ 
+     return g_flip_gate_host_hz ? 0 : d;
+ }
+@@ -2358,13 +2364,34 @@ void xbox_Nv2aFlipGateSetIdle(xbox_FlipGateIdleFn fn)
+     g_flip_gate_idle = fn;
+ }
+ 
++/* The divisor the gate actually releases on. A strict cap from the player
++ * (frame_cap = 60) normally decides over the title's interval, but a title
++ * that sets RECOMP_TITLE_INTERVAL_CEILING=1 has the cap read as a ceiling:
++ * a title asking for fewer Swaps than the cap allows gets them. Pirates! asks
++ * for INTERVAL_TWO in its 30 fps scenes only while frame interpolation is on,
++ * and at a strict 60 that request was overruled: the sea loop then presented
++ * every vblank, half of them repeats, and interpolation had no gap to fill.
++ * The same with the cap off: off means no ceiling, not that the title's own
++ * interval is ignored -- and with the gate never waiting there was no wait
++ * for interpolation to draw in, so Pirates!' sea stayed at 30. The cap's
++ * name (F9 overlay, F10, the settings menu) stays the player's. */
++static int flip_gate_effective_divisor(void)
++{
++    int d = flip_gate_divisor();
++
++    if (g_flip_gate_ceiling && !g_flip_gate_host_hz && g_flip_gate_title > 1 &&
++        (d == 0 || (g_flip_gate_strict && g_flip_gate_title > d)))
++        return g_flip_gate_title;
++    return d;
++}
++
+ /* When the gate opens next: the next vblank at one Swap a vblank, and at d
+  * the next vblank whose count is a multiple of d (xbox_Nv2aFlipGateRelease
+  * opens it on those only). A title held to 30 is still given the whole
+  * two-vblank wait to lend. */
+ static LONGLONG flip_gate_next_release(void)
+ {
+-    int d = flip_gate_divisor();
++    int d = flip_gate_effective_divisor();
+     LONG n = InterlockedCompareExchange(&g_flip_gate_vblanks, 0, 0);
+     LONG ahead = d > 1 ? d - (LONG)(n % d) : 1;
+ 
+@@ -2478,7 +2505,7 @@ void xbox_Nv2aFlipGateArm(void)
+     static int said;
+ 
+     flip_gate_hold_suspended();
+-    if (flip_gate_divisor() == 0)
++    if (flip_gate_effective_divisor() == 0)
+         return;
+     if (g_flip_gate_host_hz) {
+         flip_gate_host_paced();
+@@ -2488,7 +2515,7 @@ void xbox_Nv2aFlipGateArm(void)
+         return;                                         /* no vblank has ever come */
+     if (!g_flip_gate_event)
+         return;
+-    if (g_flip_gate_strict)
++    if (g_flip_gate_strict && flip_gate_divisor() != 0)
+         ResetEvent(g_flip_gate_event);                  /* the next vblank, not a past one */
+     {
+         /* Swap is an HLE call, not a kernel call, so the guest lock is still
+@@ -2501,7 +2528,7 @@ void xbox_Nv2aFlipGateArm(void)
+ 
+         /* Whenever the gate releases on vblanks: the hook is told which
+          * vblank will release it (flip_gate_next_release). */
+-        if (!(g_flip_gate_idle && flip_gate_divisor() >= 1 && flip_gate_lend()) &&
++        if (!(g_flip_gate_idle && flip_gate_effective_divisor() >= 1 && flip_gate_lend()) &&
+             WaitForSingleObject(g_flip_gate_event, 250) == WAIT_TIMEOUT && !said++) {
+             fprintf(stderr, "  [NV2A] flip gate timed out: no vblank for 250 ms, "
+                             "the title is not being paced\n");
+@@ -2514,7 +2541,7 @@ void xbox_Nv2aFlipGateArm(void)
+ void xbox_Nv2aFlipGateRelease(void)
+ {
+     LONG n = InterlockedIncrement(&g_flip_gate_vblanks);
+-    int d = flip_gate_divisor();
++    int d = flip_gate_effective_divisor();
+     LARGE_INTEGER now;
+ 
+     QueryPerformanceCounter(&now);
