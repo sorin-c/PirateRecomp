@@ -8,8 +8,9 @@ with a Direct3D renderer, XInput and SDL controller support, keyboard
 controls, a settings launcher, an in-game settings menu, widescreen, higher
 internal resolutions and 60 fps through frame interpolation.
 
-This repository contains no game code or data. You supply your own copy of the
-game, and the PC version is built from it on your computer.
+Neither this repository nor its downloads contain any game code or data. You
+supply your own copy of the game, and the PC version is built from it on your
+computer.
 
 > **Status: partly playable.** A new career runs from crew sign-up through
 > towns, sailing, ship battles, boarding duels and saving. Some parts are not
@@ -17,8 +18,36 @@ game, and the PC version is built from it on your computer.
 
 ## Start here
 
-There is no prebuilt download yet. You build the game yourself from your own
-disc, once, on Windows. It takes a few commands and several minutes.
+There are two ways to get the game running. Both need your own disc image of
+the original Xbox game (see [The disc](#the-disc)).
+
+### Option A: download and play (no compiler needed)
+
+1. Download `PirateRecomp-<version>-windows-x86_64.zip` from the
+   [Releases](https://github.com/sorin-c/PirateRecomp/releases) page and
+   unpack it anywhere.
+2. Start **`PirateRecomp.exe`**. The release is not signed, so the first time
+   Windows may say it protected your PC: choose *More info*, then *Run anyway*.
+3. The first time, it asks for your copy of the game: choose **Disc
+   image...** for an `.iso` (XISO or Redump), or **Folder...** for a folder
+   with the disc's files. It checks that it is the supported disc, then
+   builds the game from it on your PC. This takes a few minutes and happens
+   once.
+4. The settings appear; press **Play**.
+
+The download is the toolkit's *self-building release*: the launcher, a
+compiler (zig), CMake, Ninja, Python and the translation pipeline, about
+600 MB unpacked, so nothing else needs installing on 64-bit Windows 10 or 11.
+What it builds goes in `%LOCALAPPDATA%\xboxrecomp\builds\5454008F`: the game,
+its files (an image is extracted there once; a folder is linked, never
+changed), your saves (`game\UDATA`), `pirates.ini` and `build.log`, the file
+to attach to a bug report. A newer release finds the old build out of date and
+offers **Build again**, with the same disc remembered.
+
+### Option B: build it yourself
+
+For development, or to build from the latest code. Done once, on Windows, in
+a few commands and several minutes.
 
 1. Install **Visual Studio 2022** with the *Desktop development with C++*
    workload (it includes CMake), **Git**, and **Python 3.10+**, then:
@@ -222,6 +251,16 @@ and paced exactly as in play. `drive.ps1 start -Visible` shows a run's window
 behind the others, for watching one. A game you start yourself is not
 affected.
 
+## Making a release
+
+`.github/workflows/release.yml` builds the Option A zip on a Windows runner
+with the toolkit's `tools/release/make_release.py`, from
+[`release/pirates.json`](release/pirates.json) (the title, the launcher and
+executable targets, and the SHA-1 of the supported `default.xbe`). Pushing a
+version tag (`git tag v0.1.0 && git push origin v0.1.0`) attaches the zip to
+a draft GitHub release, which is published by hand. A pull request that
+touches the build makes the zip as a check. No game files are involved.
+
 ## How it is built
 
 ```
@@ -235,7 +274,8 @@ PirateRecomp/
   src/recomp/gen/         generated C (not committed)
   config/seeds/           functions the disassembler cannot find on its own
   config/sections/        sections the XBE marks executable that hold data
-  release/pirates.json    the recipe for a self-building release
+  release/pirates.json    the recipe for the self-building release (Option A)
+  .github/workflows/      the release workflow
   scripts/recompile.*     runs the toolkit's translation pipeline for this game
   tools/test/             headless test scripts
   game/                   your game files (not committed)
