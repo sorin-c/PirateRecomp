@@ -220,7 +220,8 @@ if(TARGET xbox_d3d8)
     # And the last eight game rows left off the screen (toolkit patch 0025):
     # the game paints its sea a grey-lavender there, on the console too.
     target_compile_definitions(xbox_d3d8 PRIVATE RECOMP_TITLE_PIXEL_OFFSET_SCALED=1
-                               RECOMP_TITLE_CROP_BOTTOM=8)
+                               RECOMP_TITLE_CROP_BOTTOM=8
+                               RECOMP_TITLE_CROP_LEFT_WIDE=4)
 endif()
 
 # The launcher (the toolkit's src/launcher): resolution, widescreen, frame

@@ -1,0 +1,139 @@
+diff --git a/src/d3d/d3d8_display.c b/src/d3d/d3d8_display.c
+index ff6e60a..aaaa518 100644
+--- a/src/d3d/d3d8_display.c
++++ b/src/d3d/d3d8_display.c
+@@ -494,10 +494,42 @@ int xbox_D3D8CropBottom(void)
+     return g_crop_bottom;
+ }
+ 
++/* The game's left columns left off the screen the same way (crop_left,
++ * guest columns, RECOMP_CROP_LEFT). A title's default can be for its 16:9
++ * mode only (RECOMP_TITLE_CROP_LEFT_WIDE, applied when the guest presents
++ * wider than 4:3): Pirates!' main menu in widescreen leaves its first three
++ * and a half columns at the clear colour, a light blue bar, where its map
++ * stops short of the edge. Set in the file or live, it applies at any width.
++ * -1 until read. */
++static int g_crop_left = -1;
++
++void xbox_D3D8SetCropLeft(int cols)
++{
++    g_crop_left = cols < 0 ? 0 : cols;
++}
++
++int xbox_D3D8CropLeft(void)
++{
++    if (g_crop_left < 0) {
++        int def = 0;
++#if defined(RECOMP_TITLE_CROP_LEFT_WIDE)
++        UINT gw = d3d8_GetGuestWidth(), gh = d3d8_GetGuestHeight();
++        if (gw && gh && gw * 3u > gh * 4u + gh / 4u)
++            def = RECOMP_TITLE_CROP_LEFT_WIDE;
++        else if (!gw || !gh)
++            return 0;                       /* not known yet: ask again */
++#endif
++        g_crop_left = recomp_config_int("RECOMP_CROP_LEFT", "crop_left", def);
++        if (g_crop_left < 0 || g_crop_left > 64)
++            g_crop_left = 0;
++    }
++    return g_crop_left;
++}
++
+ HRESULT d3d8_display_resolve(RhiView *scene, UINT scene_w, UINT scene_h,
+                              RhiView *out, D3D8DisplayFit fit)
+ {
+-    UINT used_h = scene_h;
++    UINT used_h = scene_h, used_w = scene_w, skip_w = 0;
+     RhiOutputState saved;
+     RhiViewport vp;
+     float blend_factor[4] = { 1, 1, 1, 1 };
+@@ -511,6 +543,13 @@ HRESULT d3d8_display_resolve(RhiView *scene, UINT scene_w, UINT scene_h,
+         if (crop && gh > crop * 4u)
+             used_h = scene_h - (UINT)((unsigned long long)crop * scene_h / gh);
+     }
++    {
++        UINT gw = d3d8_GetGuestWidth(), crop = (UINT)xbox_D3D8CropLeft();
++        if (crop && gw > crop * 4u) {
++            skip_w = (UINT)((unsigned long long)crop * scene_w / gw);
++            used_w = scene_w - skip_w;
++        }
++    }
+ 
+     /* Square taps, from the vertical ratio: the horizontal one is the
+      * same whenever the fit preserved the scene's shape, which it does,
+@@ -526,9 +565,11 @@ HRESULT d3d8_display_resolve(RhiView *scene, UINT scene_w, UINT scene_h,
+ 
+     if ((mapped = rhi_buffer_map(g.cb, RHI_MAP_WRITE_DISCARD)) != NULL) {
+         ResolveConstants c;
+-        c.origin_x = (float)fit.x;
++        c.ratio_x = (float)used_w / (float)fit.w;
++        /* The shader samples (pixel - origin) * ratio: starting skip_w scene
++         * pixels in is an origin skip_w / ratio screen pixels to the left. */
++        c.origin_x = (float)fit.x - (float)skip_w / c.ratio_x;
+         c.origin_y = (float)fit.y;
+-        c.ratio_x = (float)scene_w / (float)fit.w;
+         c.ratio_y = (float)used_h / (float)fit.h;
+         c.texel_x = 1.0f / (float)scene_w;
+         c.texel_y = 1.0f / (float)scene_h;
+diff --git a/src/d3d/d3d8_xbox.h b/src/d3d/d3d8_xbox.h
+index d5c68be..a798fa1 100644
+--- a/src/d3d/d3d8_xbox.h
++++ b/src/d3d/d3d8_xbox.h
+@@ -1203,6 +1203,9 @@ void           xbox_D3D8KeepPresented(BOOL on);
+  * it (d3d8_display.c, crop_bottom): now, and set live. */
+ int            xbox_D3D8CropBottom(void);
+ void           xbox_D3D8SetCropBottom(int rows);
++/* Guest columns left off the left of the picture (crop_left). */
++int            xbox_D3D8CropLeft(void);
++void           xbox_D3D8SetCropLeft(int cols);
+ const uint8_t *xbox_D3D8Presented(UINT *width, UINT *height);
+ /* The size the guest presents at, for its screen-space geometry; the HLE
+  * sets it from the title's present parameters (d3d8_GetGuestWidth). */
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index e48b945..d5221b7 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -32,13 +32,15 @@
+ 
+ int  xbox_D3D8CropBottom(void);                 /* src/d3d/d3d8_display.c */
+ void xbox_D3D8SetCropBottom(int rows);
++int  xbox_D3D8CropLeft(void);
++void xbox_D3D8SetCropLeft(int cols);
+ 
+ enum {
+     PAD_UP = 0x0001u, PAD_DOWN = 0x0002u, PAD_LEFT = 0x0004u, PAD_RIGHT = 0x0008u,
+     PAD_START = 0x0010u, PAD_BACK = 0x0020u,
+ };
+ 
+-enum { LIVE_NONE, LIVE_CAP, LIVE_INTERP, LIVE_FPS, LIVE_FULLSCREEN, LIVE_CROP };
++enum { LIVE_NONE, LIVE_CAP, LIVE_INTERP, LIVE_FPS, LIVE_FULLSCREEN, LIVE_CROP, LIVE_CROPL };
+ 
+ typedef struct {
+     const char *label;
+@@ -69,6 +71,8 @@ static const Item ITEMS[] = {
+       { "0", "1" }, { "off", "on" } },
+     { "Hide bottom band",    "crop_bottom",      "RECOMP_CROP_BOTTOM",   LIVE_CROP, 2,
+       { "0", "8" }, { "off", "on" } },
++    { "Hide left band",      "crop_left",        "RECOMP_CROP_LEFT",     LIVE_CROPL, 2,
++      { "0", "4" }, { "off", "on" } },
+ };
+ #define ITEM_COUNT ((int)(sizeof ITEMS / sizeof ITEMS[0]))
+ 
+@@ -134,6 +138,10 @@ static int current_index(const Item *it)
+         snprintf(buf, sizeof buf, "%d", xbox_D3D8CropBottom());
+         v = buf;
+         break;
++    case LIVE_CROPL:
++        snprintf(buf, sizeof buf, "%d", xbox_D3D8CropLeft());
++        v = buf;
++        break;
+     default:
+         v = recomp_config_lookup(it->env, it->key);
+         if (!v || !*v)
+@@ -163,6 +171,7 @@ static void change(int dir)
+     case LIVE_FPS:        hle_set_fps_overlay(i); break;
+     case LIVE_FULLSCREEN: hle_set_fullscreen(i); break;
+     case LIVE_CROP:       xbox_D3D8SetCropBottom(atoi(it->vals[i])); break;
++    case LIVE_CROPL:      xbox_D3D8SetCropLeft(atoi(it->vals[i])); break;
+     default:              g_restart_needed = 1; break;
+     }
+     fprintf(stderr, "[MENU] %s = %s%s\n", it->key, it->vals[i],
