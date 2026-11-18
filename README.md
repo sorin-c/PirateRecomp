@@ -138,8 +138,6 @@ Back pressed alone still reaches the game as usual.
 | Frame interpolation (off, 2x, 3x, 4x) | at once |
 | Frame-rate counter | at once |
 | Fullscreen | at once |
-| Hide bottom band | at once |
-| Hide left band (widescreen) | at once |
 | Internal resolution (1x to 8x) | next start |
 | Widescreen (16:9) | next start |
 | Texture filtering (off to 16x) | next start |
@@ -161,10 +159,9 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   between bars, as it was drawn, and the game world fills the screen.
 - **Internal resolution.** `resolution_scale` renders 2 to 8 times larger
   than the console.
-- **Hide bottom band / Hide left band.** The console leaves a grey-lavender
-  band along the bottom of the sea view, and in widescreen the main menu's
-  map stops short of the left edge. Both are cropped off by default and can
-  be switched in the F2 menu (`crop_bottom`, `crop_left`).
+- **Bottom and left bands.** The console leaves a grey-lavender band along
+  the bottom of the sea view, and in widescreen the main menu's map stops
+  short of the left edge. Both are always cropped off.
 
 ## Controllers
 
@@ -196,8 +193,6 @@ defaults. Every line names the environment variable that overrides it, so a
 | `fullscreen` | `0` | Fullscreen window. |
 | `anisotropy` | `1` | Texture filtering, `1` to `16`. |
 | `vrr` | `0` | Variable refresh rate. |
-| `crop_bottom` | `8` | Rows hidden at the bottom (the band). `0` shows them. |
-| `crop_left` | `4` (widescreen) | Columns hidden at the left in widescreen. |
 | `pad_follow_input` | `1` | Controller 1 is the pad used last. |
 | `pad_directinput` | `0` | SDL's DirectInput back end. |
 | `skip_intro` | `1` | `1` skips every movie, `intro` only the logos and title movie, `0` plays all. |
@@ -281,7 +276,7 @@ PirateRecomp/
   game/                   your game files (not committed)
 ```
 
-The game needs 30 changes to the toolkit, kept as patches until they land
+The game needs 33 changes to the toolkit, kept as patches until they land
 upstream: CPU translation fixes, file system and kernel timing fixes, fixed-
 function lighting, skinning and shader fixes, frame interpolation for the
 fixed-function pipeline, the in-game settings menu, display cropping and

@@ -219,7 +219,7 @@ if(TARGET xbox_config)
         # 0025): the game paints its sea a grey-lavender there, on the
         # console too. In widescreen, the main menu's first four columns
         # (patch 0028). On xbox_config, not xbox_d3d8, so a release's
-        # prebuilt renderer reads them too (patch 0031).
+        # prebuilt renderer reads them too (patch 0032).
         RECOMP_TITLE_CROP_BOTTOM=8
         RECOMP_TITLE_CROP_LEFT_WIDE=4)
 endif()

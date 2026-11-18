@@ -259,8 +259,8 @@ Each one, with the reason it exists:
   game's last rows off the screen and stretch the rest (`crop_bottom`,
   `RECOMP_CROP_BOTTOM`, guest rows; this game defaults to 8 through
   `RECOMP_TITLE_CROP_BOTTOM` on `xbox_d3d8`): the sea's grey-lavender band
-  along the bottom, which the console shows too, is gone. "Hide bottom band"
-  in the F2 menu switches it live. And a title that sets
+  along the bottom, which the console shows too, is gone (always, since
+  0031). And a title that sets
   `RECOMP_TITLE_INTERVAL_CEILING=1` has the player's frame cap read as a
   ceiling over its presentation interval, not an override: with the cap at
   60 or off, sailing presented every vblank or as fast as it could and
@@ -289,7 +289,7 @@ Each one, with the reason it exists:
   In widescreen the main menu's map stops three and a half columns short of
   the left edge, a light blue bar of clear colour; this game defaults to 4
   columns in its 16:9 mode only (`RECOMP_TITLE_CROP_LEFT_WIDE` on
-  `xbox_d3d8`). "Hide left band" in the F2 menu switches it live.
+  `xbox_d3d8`); always, since 0031.
 
 - **0029-front-end-4x3-and-pad-hotplug** (`src/d3d/d3d8_display.c`,
   `src/input/recomp_pad.c`). A frame the title calls 4:3
@@ -316,7 +316,13 @@ Each one, with the reason it exists:
   frame 4:3 (legal text, title, menus, the new-career pages) until the game
   world starts (`recomp_manual.c`).
 
-- **0031-title-display-defaults-and-release-settings**
+- **0031-bands-always-cropped** (`src/d3d/d3d8_display.c`, `d3d8_xbox.h`,
+  `src/hle/hle_settings_menu.c`). A title's crop defaults
+  (`RECOMP_TITLE_CROP_BOTTOM`, `RECOMP_TITLE_CROP_LEFT_WIDE`) are fixed: no
+  F2 menu item and no settings key turns them off. `crop_bottom` and
+  `crop_left` remain for a title without a default.
+
+- **0032-title-display-defaults-and-release-settings**
   (`src/config/recomp_config.c`, `recomp_config.h`, `src/d3d/d3d8_display.c`,
   `d3d8_device.c`, `src/launcher/launcher.c`). For the self-building release,
   where the runtime is built once, before any title, and only `xbox_config`
@@ -331,7 +337,7 @@ Each one, with the reason it exists:
   settings file (`pirates.ini`) at the game's folder, so the launcher and
   the game read and write one file.
 
-- **0032-mmio-shared-decoder-fallback** (`src/apu/apu_mmio_hook.c`,
+- **0033-mmio-shared-decoder-fallback** (`src/apu/apu_mmio_hook.c`,
   `src/nv2a/nv2a_mmio_hook.c`). The Windows APU and NV2A fault handlers
   decode the faulting instruction by hand, and knew only the forms MSVC
   emits. A release is built with zig's clang, which reads a volatile
