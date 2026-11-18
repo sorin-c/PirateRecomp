@@ -315,3 +315,18 @@ Each one, with the reason it exists:
   its own slot, for several players. The title now calls every front-end
   frame 4:3 (legal text, title, menus, the new-career pages) until the game
   world starts (`recomp_manual.c`).
+
+- **0031-title-display-defaults-and-release-settings**
+  (`src/config/recomp_config.c`, `recomp_config.h`, `src/d3d/d3d8_display.c`,
+  `d3d8_device.c`, `src/launcher/launcher.c`). For the self-building release,
+  where the runtime is built once, before any title, and only `xbox_config`
+  is built with the title. The title's display defaults
+  (`RECOMP_TITLE_CROP_BOTTOM`, `RECOMP_TITLE_CROP_LEFT_WIDE`,
+  `RECOMP_TITLE_PIXEL_OFFSET_SCALED`) move from `xbox_d3d8` to
+  `xbox_config`, which the renderer asks (`recomp_title_crop_bottom()` and
+  the like); set on `xbox_d3d8`, a prebuilt engine never saw them and the
+  title's CMakeLists failed to configure against it. And a release's
+  launcher sits in the release folder while the game it starts is built in
+  the player's folder: `recomp_settings_set_title_dir` points the title's
+  settings file (`pirates.ini`) at the game's folder, so the launcher and
+  the game read and write one file.
