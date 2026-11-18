@@ -330,3 +330,13 @@ Each one, with the reason it exists:
   the player's folder: `recomp_settings_set_title_dir` points the title's
   settings file (`pirates.ini`) at the game's folder, so the launcher and
   the game read and write one file.
+
+- **0032-mmio-shared-decoder-fallback** (`src/apu/apu_mmio_hook.c`,
+  `src/nv2a/nv2a_mmio_hook.c`). The Windows APU and NV2A fault handlers
+  decode the faulting instruction by hand, and knew only the forms MSVC
+  emits. A release is built with zig's clang, which reads a volatile
+  `if (reg & 0x18)` as `test dword [mem], 0x18` (F7 /0): the release build
+  crashed as Miles Sound System started (`[APU] MMIO decode fail ... F7 84`).
+  Both now fall back to the shared decoder (`platform/mmio_decode.h`,
+  already used on Linux and for AC'97 stores), which covers TEST and group 1
+  with an immediate, the ALU forms and the SSE scalar moves.
