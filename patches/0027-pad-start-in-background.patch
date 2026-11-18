@@ -1,0 +1,89 @@
+diff --git a/src/input/recomp_pad.c b/src/input/recomp_pad.c
+index 8d345a2..24bd763 100644
+--- a/src/input/recomp_pad.c
++++ b/src/input/recomp_pad.c
+@@ -63,16 +63,53 @@ typedef struct {
+ 
+ static SdlSlot         g_sdl[RECOMP_PAD_SLOTS];
+ static SDL_SpinLock    g_lock;
+-static int             g_sdl_state;   /* 0 not tried, 1 running, -1 failed */
++/* 0 not tried, 2 starting, 1 running, -1 failed. */
++static SDL_AtomicInt   g_sdl_state;
+ static uint64_t        g_scan_at, g_update_at;
+ 
+-static int sdl_start(void)
++/* SDL's gamepad start-up enumerates every input device, and on some machines
++ * that takes seconds: 20.8 s once on a Windows 11 PC with an Xbox One pad,
++ * instant on the next tries (a device waking up). The title's first pad poll
++ * comes before its first frame, so it used to wait for all of it on a black
++ * screen. It runs on a thread of its own now; until it is done there are no
++ * SDL pads, and a pad found later arrives as an insertion, as one plugged in
++ * after start-up always has. */
++static int SDLCALL sdl_start_thread(void *unused)
+ {
+     Uint32 t;
+     int v;
++    Uint64 began = SDL_GetTicks();
+ 
+-    if (g_sdl_state)
+-        return g_sdl_state > 0;
++    (void)unused;
++    if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
++        fprintf(stderr, "[INPUT] SDL3 could not start its gamepad support (%s)\n",
++                SDL_GetError());
++        fflush(stderr);
++        SDL_SetAtomicInt(&g_sdl_state, -1);
++        return 0;
++    }
++    for (t = SDL_EVENT_JOYSTICK_AXIS_MOTION; t < SDL_EVENT_FINGER_DOWN; t++)
++        SDL_SetEventEnabled(t, false);
++    v = SDL_GetVersion();
++    fprintf(stderr, "[INPUT] pads through SDL3 %d.%d.%d, ready after %.2f s "
++                    "(RECOMP_PAD_API=xinput for XInput)\n",
++            SDL_VERSIONNUM_MAJOR(v), SDL_VERSIONNUM_MINOR(v), SDL_VERSIONNUM_MICRO(v),
++            (double)(SDL_GetTicks() - began) / 1000.0);
++    fflush(stderr);
++    SDL_SetAtomicInt(&g_sdl_state, 1);
++    return 0;
++}
++
++/* TRUE once SDL's gamepad support is up; the first call starts it. */
++static int sdl_start(void)
++{
++    int st = SDL_GetAtomicInt(&g_sdl_state);
++    SDL_Thread *th;
++
++    if (st == 1)
++        return 1;
++    if (st != 0 || !SDL_CompareAndSwapAtomicInt(&g_sdl_state, 0, 2))
++        return 0;
+     SDL_SetHint(SDL_HINT_JOYSTICK_THREAD, "1");
+     /* The window the player looks at may not be SDL's, so SDL cannot know
+      * it has focus: read the pads regardless, as XInput always did. */
+@@ -84,20 +121,13 @@ static int sdl_start(void)
+      * Windows keeps its behaviour as it was. */
+     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+ #endif
+-    if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
+-        fprintf(stderr, "[INPUT] SDL3 could not start its gamepad support (%s)\n",
+-                SDL_GetError());
+-        g_sdl_state = -1;
+-        return 0;
++    th = SDL_CreateThread(sdl_start_thread, "recomp_pad_start", NULL);
++    if (!th) {                          /* no thread: start it here, as before */
++        sdl_start_thread(NULL);
++        return SDL_GetAtomicInt(&g_sdl_state) == 1;
+     }
+-    for (t = SDL_EVENT_JOYSTICK_AXIS_MOTION; t < SDL_EVENT_FINGER_DOWN; t++)
+-        SDL_SetEventEnabled(t, false);
+-    v = SDL_GetVersion();
+-    fprintf(stderr, "[INPUT] pads through SDL3 %d.%d.%d (RECOMP_PAD_API=xinput for XInput)\n",
+-            SDL_VERSIONNUM_MAJOR(v), SDL_VERSIONNUM_MINOR(v), SDL_VERSIONNUM_MICRO(v));
+-    fflush(stderr);
+-    g_sdl_state = 1;
+-    return 1;
++    SDL_DetachThread(th);
++    return 0;
+ }
+ 
+ /* Called with g_lock held. Drops pads that went away and seats new ones in

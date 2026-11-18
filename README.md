@@ -112,6 +112,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0024-in-game-settings-menu.patch
    git -C xboxrecomp apply ..\patches\0025-display-crop-and-interval-ceiling.patch
    git -C xboxrecomp apply ..\patches\0026-startup-window-black.patch
+   git -C xboxrecomp apply ..\patches\0027-pad-start-in-background.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -182,6 +183,7 @@ git -C xboxrecomp apply ..\patches\0023-d3d-clipplane-texture-mode.patch
 git -C xboxrecomp apply ..\patches\0024-in-game-settings-menu.patch
 git -C xboxrecomp apply ..\patches\0025-display-crop-and-interval-ceiling.patch
 git -C xboxrecomp apply ..\patches\0026-startup-window-black.patch
+git -C xboxrecomp apply ..\patches\0027-pad-start-in-background.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -443,6 +445,15 @@ git -C xboxrecomp apply ..\patches\0026-startup-window-black.patch
   log says when the window opened and when Swaps 1, 10 and 100 came
   (`[STARTUP] <seconds since the process started>`), to find where a slow
   start goes.
+
+- **0027-pad-start-in-background** (`src/input/recomp_pad.c`). SDL's
+  gamepad start-up runs on a thread of its own. It enumerates every input
+  device, and on this PC it once took 20.8 s (instant on the next tries, a
+  device waking up); the game's first pad poll comes before its first
+  frame, so a start waited that long on a black screen. Until SDL is up
+  there are no SDL pads, and the pad arrives as an insertion (the keyboard
+  works throughout). The log says how long it took: `pads through SDL3
+  ..., ready after N s`.
 
 ## Running a build of your own
 
