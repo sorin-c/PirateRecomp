@@ -116,6 +116,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0028-crop-left-widescreen.patch
    git -C xboxrecomp apply ..\patches\0029-front-end-4x3-and-pad-hotplug.patch
    git -C xboxrecomp apply ..\patches\0030-pads-no-directinput-follow-input.patch
+   git -C xboxrecomp apply ..\patches\0031-bands-always-cropped.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -190,6 +191,7 @@ git -C xboxrecomp apply ..\patches\0027-pad-start-in-background.patch
 git -C xboxrecomp apply ..\patches\0028-crop-left-widescreen.patch
 git -C xboxrecomp apply ..\patches\0029-front-end-4x3-and-pad-hotplug.patch
 git -C xboxrecomp apply ..\patches\0030-pads-no-directinput-follow-input.patch
+git -C xboxrecomp apply ..\patches\0031-bands-always-cropped.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -437,8 +439,8 @@ git -C xboxrecomp apply ..\patches\0030-pads-no-directinput-follow-input.patch
   game's last rows off the screen and stretch the rest (`crop_bottom`,
   `RECOMP_CROP_BOTTOM`, guest rows; this game defaults to 8 through
   `RECOMP_TITLE_CROP_BOTTOM` on `xbox_d3d8`): the sea's grey-lavender band
-  along the bottom, which the console shows too, is gone. "Hide bottom band"
-  in the F2 menu switches it live. And a title that sets
+  along the bottom, which the console shows too, is gone (always, since
+  0031). And a title that sets
   `RECOMP_TITLE_INTERVAL_CEILING=1` has the player's frame cap read as a
   ceiling over its presentation interval, not an override: with the cap at
   60 or off, sailing presented every vblank or as fast as it could and
@@ -467,7 +469,7 @@ git -C xboxrecomp apply ..\patches\0030-pads-no-directinput-follow-input.patch
   In widescreen the main menu's map stops three and a half columns short of
   the left edge, a light blue bar of clear colour; this game defaults to 4
   columns in its 16:9 mode only (`RECOMP_TITLE_CROP_LEFT_WIDE` on
-  `xbox_d3d8`). "Hide left band" in the F2 menu switches it live.
+  `xbox_d3d8`); always, since 0031.
 
 - **0029-front-end-4x3-and-pad-hotplug** (`src/d3d/d3d8_display.c`,
   `src/input/recomp_pad.c`). A frame the title calls 4:3
@@ -493,6 +495,12 @@ git -C xboxrecomp apply ..\patches\0030-pads-no-directinput-follow-input.patch
   its own slot, for several players. The title now calls every front-end
   frame 4:3 (legal text, title, menus, the new-career pages) until the game
   world starts (`recomp_manual.c`).
+
+- **0031-bands-always-cropped** (`src/d3d/d3d8_display.c`, `d3d8_xbox.h`,
+  `src/hle/hle_settings_menu.c`). A title's crop defaults
+  (`RECOMP_TITLE_CROP_BOTTOM`, `RECOMP_TITLE_CROP_LEFT_WIDE`) are fixed: no
+  F2 menu item and no settings key turns them off. `crop_bottom` and
+  `crop_left` remain for a title without a default.
 
 ## Running a build of your own
 
