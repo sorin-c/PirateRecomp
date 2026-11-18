@@ -1,0 +1,74 @@
+diff --git a/tools/builder/src/main.rs b/tools/builder/src/main.rs
+index 3015e00..af207aa 100644
+--- a/tools/builder/src/main.rs
++++ b/tools/builder/src/main.rs
+@@ -658,6 +658,26 @@ fn check_disc(release: &Release, user: &Path) -> Result<Image, Failure> {
+ 
+ // ── running the tools ───────────────────────────────────────────────────────
+ 
++/// The lines a tool prints, each decoded leniently: a tool may print in the
++/// system's code page rather than UTF-8 (Python does to a pipe on Windows,
++/// a disc's title can hold a "™", cmake and zig echo paths), and one
++/// undecodable line must never stop the reading -- with `lines()` it did, the
++/// pipe filled or closed, and the tool's next write failed (EINVAL from
++/// Python's print), so the build died on the title's trade mark sign.
++fn lossy_lines<R: std::io::Read>(r: R) -> impl Iterator<Item = String> {
++    let mut r = BufReader::new(r);
++    std::iter::from_fn(move || {
++        let mut buf = Vec::new();
++        match r.read_until(b'\n', &mut buf) {
++            Ok(0) | Err(_) => None,
++            Ok(_) => {
++                while matches!(buf.last(), Some(b'\n' | b'\r')) { buf.pop(); }
++                Some(String::from_utf8_lossy(&buf).into_owned())
++            }
++        }
++    })
++}
++
+ /// Run a tool, its output appended to the log and each line handed to
+ /// `on_line`; on failure, the error carries the last lines it printed.
+ fn run(cmd: &mut Command, log: &Path, what: &str, mut on_line: impl FnMut(&str))
+@@ -680,14 +700,14 @@ fn run(cmd: &mut Command, log: &Path, what: &str, mut on_line: impl FnMut(&str))
+     let err = child.stderr.take().unwrap();
+     let (log2, tail2) = (logf.clone(), tail.clone());
+     let errs = std::thread::spawn(move || {
+-        for line in BufReader::new(err).lines().map_while(Result::ok) {
++        for line in lossy_lines(err) {
+             let _ = writeln!(log2.lock().unwrap(), "{line}");
+             let mut t = tail2.lock().unwrap();
+             t.push_back(line);
+             if t.len() > 25 { t.pop_front(); }
+         }
+     });
+-    for line in BufReader::new(child.stdout.take().unwrap()).lines().map_while(Result::ok) {
++    for line in lossy_lines(child.stdout.take().unwrap()) {
+         let _ = writeln!(logf.lock().unwrap(), "{line}");
+         {
+             let mut t = tail.lock().unwrap();
+@@ -758,6 +778,9 @@ fn lift(release: &Release, image: &Image, user: &Path, log: &Path) -> Result<(),
+     let python = |c: &mut Command, dir: &Path| {
+         c.current_dir(dir)
+             .env("PYTHONDONTWRITEBYTECODE", "1").env("PYTHONUNBUFFERED", "1")
++            // UTF-8 to the pipe whatever the system code page is: the
++            // pipeline prints the disc's title, which can hold a "\u{2122}".
++            .env("PYTHONUTF8", "1").env("PYTHONIOENCODING", "utf-8")
+             .env("TMPDIR", &tmp);
+     };
+ 
+@@ -1176,6 +1199,15 @@ fn main() -> ExitCode {
+ 
+ #[cfg(test)]
+ mod tests {
++
++    #[test]
++    fn a_line_in_the_system_code_page_does_not_stop_the_reading() {
++        // "Sid Meier's Pirates! \u{2122}" as cp1252 prints it: 0x99, not UTF-8.
++        let out: &[u8] = b"  XBE Analysis Report\r\n  File: Pirates! \x99\r\n  Title ID: 0x5454008F\n";
++        let lines: Vec<String> = super::lossy_lines(out).collect();
++        assert_eq!(lines.len(), 3);
++        assert_eq!(lines[2], "  Title ID: 0x5454008F");
++    }
+     use super::*;
+ 
+     fn scratch(name: &str) -> PathBuf {

@@ -346,3 +346,13 @@ Each one, with the reason it exists:
   Both now fall back to the shared decoder (`platform/mmio_decode.h`,
   already used on Linux and for AC'97 stores), which covers TEST and group 1
   with an immediate, the ALU forms and the SSE scalar moves.
+
+- **0034-builder-utf8-tool-output** (`tools/builder/src/main.rs`). The
+  release's builder read each tool's output with `lines()`, which stops at
+  the first line that is not UTF-8. Python writes to a pipe in the system's
+  code page on Windows, and the parser prints the disc's title, "Sid Meier's
+  Pirates! ™", so the ™ came out as one cp1252 byte: the builder stopped
+  reading, the pipe closed, and the parser's next `print` failed with
+  `OSError: [Errno 22]`. The first build of the v0.1.0 download failed this
+  way on a player's PC. The builder now decodes each line leniently, and
+  runs every Python tool with `PYTHONUTF8=1` and `PYTHONIOENCODING=utf-8`.
