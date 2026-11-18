@@ -1,0 +1,403 @@
+diff --git a/src/d3d/d3d8_display.c b/src/d3d/d3d8_display.c
+index aaaa518..30a97fb 100644
+--- a/src/d3d/d3d8_display.c
++++ b/src/d3d/d3d8_display.c
+@@ -185,6 +185,18 @@ void d3d8_display_scene_size(UINT guest_w, UINT guest_h,
+     if (scene_h) *scene_h = guest_h * p->scale;
+ }
+ 
++/* A frame the title called 4:3 (xbox_D3D8SetWideFrames(FALSE)) in
++ * widescreen, from a buffer wider than 4:3: a title with a 16:9 mode of its
++ * own renders such screens into its wide buffer as the 4:3 layout with more
++ * background either side (Pirates!' front end, 720x480). Shown as that
++ * centre at 4:3, between bars, rather than at the buffer's own shape (a
++ * little wide) or stretched to 16:9. */
++static int d3d8_display_narrow_centre(UINT scene_w, UINT scene_h)
++{
++    return d3d8_display_policy()->widescreen && !d3d8_display_wide_now() &&
++           scene_w && scene_h && (unsigned long long)scene_w * 3u > (unsigned long long)scene_h * 4u + scene_h / 8u;
++}
++
+ void d3d8_display_output_shape(UINT scene_w, UINT scene_h,
+                                UINT *shape_w, UINT *shape_h)
+ {
+@@ -195,6 +207,9 @@ void d3d8_display_output_shape(UINT scene_w, UINT scene_h,
+          * squeeze left in. */
+         if (shape_w) *shape_w = 16;
+         if (shape_h) *shape_h = 9;
++    } else if (d3d8_display_narrow_centre(scene_w, scene_h)) {
++        if (shape_w) *shape_w = 4;
++        if (shape_h) *shape_h = 3;
+     } else {
+         if (shape_w) *shape_w = scene_w;
+         if (shape_h) *shape_h = scene_h;
+@@ -550,6 +565,15 @@ HRESULT d3d8_display_resolve(RhiView *scene, UINT scene_w, UINT scene_h,
+             used_w = scene_w - skip_w;
+         }
+     }
++    if (d3d8_display_narrow_centre(scene_w, scene_h)) {
++        /* A frame the title called 4:3, from a buffer wider than that: its
++         * centre, at 4:3 (d3d8_display_output_shape). */
++        UINT want = (UINT)(((unsigned long long)used_h * 4u) / 3u);
++        if (want < scene_w) {
++            skip_w = (scene_w - want) / 2u;
++            used_w = want;
++        }
++    }
+ 
+     /* Square taps, from the vertical ratio: the horizontal one is the
+      * same whenever the fit preserved the scene's shape, which it does,
+diff --git a/src/input/recomp_pad.c b/src/input/recomp_pad.c
+index 24bd763..fb93919 100644
+--- a/src/input/recomp_pad.c
++++ b/src/input/recomp_pad.c
+@@ -3,13 +3,12 @@
+  * recomp_pad.h says what this is for; the notes here are about how.
+  *
+  * SDL3 is started with the gamepad subsystem only: no window, no event
+- * loop. So nothing here waits for SDL events. The pad list is re-read every
+- * SCAN_MS, pad state is refreshed with SDL_UpdateGamepads at most once a
+- * millisecond however often a title polls, and the joystick and gamepad
+- * event types are switched off so an event queue nobody drains cannot
+- * grow. On Windows SDL's raw-input work runs on its own thread
+- * (SDL_HINT_JOYSTICK_THREAD), because the threads that poll here are the
+- * title's.
++ * loop. So nothing here waits for SDL events. A thread of the pads' own
++ * (sdl_pad_thread) re-reads the pad list every SCAN_MS and refreshes pad
++ * state every 2 ms; a title's polls copy the last state. The joystick and
++ * gamepad event types are switched off so an event queue nobody drains
++ * cannot grow. On Windows SDL's raw-input work runs on its own thread
++ * besides (SDL_HINT_JOYSTICK_THREAD).
+  */
+ #include "recomp_pad.h"
+ 
+@@ -54,85 +53,48 @@ void recomp_pad_set_api(int api)
+ 
+ /* ---- SDL3 ------------------------------------------------------------- */
+ 
++/* Everything SDL is done on one thread of the pads' own, started by the
++ * first read and kept for the life of the process.
++ *
++ * - Start-up enumerates every input device, and on some machines that takes
++ *   seconds: 20.8 s once on a Windows 11 PC with an Xbox One pad, instant on
++ *   the next tries (a device waking up). The title's first pad poll comes
++ *   before its first frame, so it used to wait for all of it on a black
++ *   screen. Until the thread is up there are no SDL pads; a pad found later
++ *   arrives as an insertion, as one plugged in after start-up always has.
++ * - Hot-plug. SDL learns of a new device through hidden windows (the HIDAPI
++ *   discovery window, device notifications), and a window's messages reach
++ *   only the thread that made it. Polled from whichever title thread asked,
++ *   or started on a thread that then ended, a pad plugged in after start-up
++ *   was never seen. This thread made them, pumps its messages, and updates
++ *   and rescans the pads itself.
++ *
++ * The title's threads only copy the last state out (POLL_NS old at most). */
++
++#define POLL_NS     2000000ull  /* 2 ms between updates */
++
+ typedef struct {
+-    SDL_Gamepad   *pad;
++    SDL_Gamepad   *pad;          /* the pad thread's only */
+     SDL_JoystickID id;
+-    uint16_t       rumble_low, rumble_high;
+     uint64_t       rumble_at;
+ } SdlSlot;
+ 
++typedef struct {                 /* published under g_lock */
++    int            have;
++    RecompPadState st;
++    char           name[64];
++    uint16_t       rumble_low, rumble_high;
++    int            rumble_new;
++} SdlShared;
++
+ static SdlSlot         g_sdl[RECOMP_PAD_SLOTS];
++static SdlShared       g_pub[RECOMP_PAD_SLOTS];
+ static SDL_SpinLock    g_lock;
+ /* 0 not tried, 2 starting, 1 running, -1 failed. */
+ static SDL_AtomicInt   g_sdl_state;
+-static uint64_t        g_scan_at, g_update_at;
+-
+-/* SDL's gamepad start-up enumerates every input device, and on some machines
+- * that takes seconds: 20.8 s once on a Windows 11 PC with an Xbox One pad,
+- * instant on the next tries (a device waking up). The title's first pad poll
+- * comes before its first frame, so it used to wait for all of it on a black
+- * screen. It runs on a thread of its own now; until it is done there are no
+- * SDL pads, and a pad found later arrives as an insertion, as one plugged in
+- * after start-up always has. */
+-static int SDLCALL sdl_start_thread(void *unused)
+-{
+-    Uint32 t;
+-    int v;
+-    Uint64 began = SDL_GetTicks();
+-
+-    (void)unused;
+-    if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
+-        fprintf(stderr, "[INPUT] SDL3 could not start its gamepad support (%s)\n",
+-                SDL_GetError());
+-        fflush(stderr);
+-        SDL_SetAtomicInt(&g_sdl_state, -1);
+-        return 0;
+-    }
+-    for (t = SDL_EVENT_JOYSTICK_AXIS_MOTION; t < SDL_EVENT_FINGER_DOWN; t++)
+-        SDL_SetEventEnabled(t, false);
+-    v = SDL_GetVersion();
+-    fprintf(stderr, "[INPUT] pads through SDL3 %d.%d.%d, ready after %.2f s "
+-                    "(RECOMP_PAD_API=xinput for XInput)\n",
+-            SDL_VERSIONNUM_MAJOR(v), SDL_VERSIONNUM_MINOR(v), SDL_VERSIONNUM_MICRO(v),
+-            (double)(SDL_GetTicks() - began) / 1000.0);
+-    fflush(stderr);
+-    SDL_SetAtomicInt(&g_sdl_state, 1);
+-    return 0;
+-}
+-
+-/* TRUE once SDL's gamepad support is up; the first call starts it. */
+-static int sdl_start(void)
+-{
+-    int st = SDL_GetAtomicInt(&g_sdl_state);
+-    SDL_Thread *th;
+-
+-    if (st == 1)
+-        return 1;
+-    if (st != 0 || !SDL_CompareAndSwapAtomicInt(&g_sdl_state, 0, 2))
+-        return 0;
+-    SDL_SetHint(SDL_HINT_JOYSTICK_THREAD, "1");
+-    /* The window the player looks at may not be SDL's, so SDL cannot know
+-     * it has focus: read the pads regardless, as XInput always did. */
+-    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+-#ifndef _WIN32
+-    /* The gamepad subsystem brings up SDL's events, which would otherwise
+-     * turn SIGINT/SIGTERM into a quit event nobody reads: a timeout or
+-     * Ctrl-C must still end the process (src/host/host_sdl.c does the same).
+-     * Windows keeps its behaviour as it was. */
+-    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+-#endif
+-    th = SDL_CreateThread(sdl_start_thread, "recomp_pad_start", NULL);
+-    if (!th) {                          /* no thread: start it here, as before */
+-        sdl_start_thread(NULL);
+-        return SDL_GetAtomicInt(&g_sdl_state) == 1;
+-    }
+-    SDL_DetachThread(th);
+-    return 0;
+-}
+ 
+-/* Called with g_lock held. Drops pads that went away and seats new ones in
+- * the first free slot. */
+-static void sdl_scan(uint64_t now)
++/* Drops pads that went away and seats new ones in the first free slot. */
++static void sdl_scan(void)
+ {
+     SDL_JoystickID *ids;
+     int n = 0, i, s;
+@@ -163,7 +125,6 @@ static void sdl_scan(uint64_t now)
+     }
+     SDL_free(ids);
+     fflush(stderr);
+-    g_scan_at = now + SCAN_MS;
+ }
+ 
+ static int16_t flip_y(Sint16 v)
+@@ -171,34 +132,11 @@ static int16_t flip_y(Sint16 v)
+     return v == -32768 ? (int16_t)32767 : (int16_t)-v;
+ }
+ 
+-static int sdl_read(int slot, RecompPadState *out)
++static void sdl_state_of(SDL_Gamepad *p, RecompPadState *out)
+ {
+-    SDL_Gamepad *p;
+-    uint64_t now;
+     uint16_t b = 0;
+ 
+-    SDL_LockSpinlock(&g_lock);          /* first use starts SDL, once */
+-    if (!sdl_start()) {
+-        SDL_UnlockSpinlock(&g_lock);
+-        return 0;
+-    }
+-    now = SDL_GetTicks();
+-    if (now != g_update_at) {
+-        SDL_UpdateGamepads();
+-        g_update_at = now;
+-    }
+-    if (now >= g_scan_at)
+-        sdl_scan(now);
+-    p = g_sdl[slot].pad;
+-    if (p && (g_sdl[slot].rumble_low || g_sdl[slot].rumble_high) &&
+-        now - g_sdl[slot].rumble_at > RUMBLE_MS / 2) {
+-        SDL_RumbleGamepad(p, g_sdl[slot].rumble_low, g_sdl[slot].rumble_high, RUMBLE_MS);
+-        g_sdl[slot].rumble_at = now;
+-    }
+-    SDL_UnlockSpinlock(&g_lock);
+-    if (!p)
+-        return 0;
+-
++    memset(out, 0, sizeof *out);
+     if (SDL_GetGamepadButton(p, SDL_GAMEPAD_BUTTON_DPAD_UP))        b |= RECOMP_PAD_DPAD_UP;
+     if (SDL_GetGamepadButton(p, SDL_GAMEPAD_BUTTON_DPAD_DOWN))      b |= RECOMP_PAD_DPAD_DOWN;
+     if (SDL_GetGamepadButton(p, SDL_GAMEPAD_BUTTON_DPAD_LEFT))      b |= RECOMP_PAD_DPAD_LEFT;
+@@ -227,7 +165,128 @@ static int sdl_read(int slot, RecompPadState *out)
+     out->ly = flip_y(SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_LEFTY));
+     out->rx = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_RIGHTX);
+     out->ry = flip_y(SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_RIGHTY));
+-    return 1;
++}
++
++static int SDLCALL sdl_pad_thread(void *unused)
++{
++    Uint32 t;
++    int v, s;
++    Uint64 began = SDL_GetTicks(), scan_at = 0;
++
++    (void)unused;
++    if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
++        fprintf(stderr, "[INPUT] SDL3 could not start its gamepad support (%s)\n",
++                SDL_GetError());
++        fflush(stderr);
++        SDL_SetAtomicInt(&g_sdl_state, -1);
++        return 0;
++    }
++    for (t = SDL_EVENT_JOYSTICK_AXIS_MOTION; t < SDL_EVENT_FINGER_DOWN; t++)
++        SDL_SetEventEnabled(t, false);
++    v = SDL_GetVersion();
++    fprintf(stderr, "[INPUT] pads through SDL3 %d.%d.%d, ready after %.2f s "
++                    "(RECOMP_PAD_API=xinput for XInput)\n",
++            SDL_VERSIONNUM_MAJOR(v), SDL_VERSIONNUM_MINOR(v), SDL_VERSIONNUM_MICRO(v),
++            (double)(SDL_GetTicks() - began) / 1000.0);
++    fflush(stderr);
++    SDL_SetAtomicInt(&g_sdl_state, 1);
++
++    for (;;) {
++        SdlShared now_pub[RECOMP_PAD_SLOTS];
++        Uint64 now;
++
++#if defined(_WIN32)
++        {   /* the hidden windows SDL made on this thread: device arrivals */
++            MSG msg;
++            while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
++                TranslateMessage(&msg);
++                DispatchMessageA(&msg);
++            }
++        }
++#endif
++        SDL_UpdateGamepads();
++        now = SDL_GetTicks();
++        if (now >= scan_at) {
++            sdl_scan();
++            scan_at = now + SCAN_MS;
++        }
++        memset(now_pub, 0, sizeof now_pub);
++        for (s = 0; s < RECOMP_PAD_SLOTS; s++) {
++            const char *name;
++            if (!g_sdl[s].pad)
++                continue;
++            now_pub[s].have = 1;
++            sdl_state_of(g_sdl[s].pad, &now_pub[s].st);
++            name = SDL_GetGamepadName(g_sdl[s].pad);
++            snprintf(now_pub[s].name, sizeof now_pub[s].name, "%s", name ? name : "Gamepad");
++        }
++        SDL_LockSpinlock(&g_lock);
++        for (s = 0; s < RECOMP_PAD_SLOTS; s++) {
++            uint16_t lo = g_pub[s].rumble_low, hi = g_pub[s].rumble_high;
++            int fresh = g_pub[s].rumble_new;
++
++            g_pub[s].rumble_new = 0;
++            g_pub[s].have = now_pub[s].have;
++            g_pub[s].st = now_pub[s].st;
++            memcpy(g_pub[s].name, now_pub[s].name, sizeof g_pub[s].name);
++            SDL_UnlockSpinlock(&g_lock);
++            /* SDL rumble has a duration; XInput's does not: renewed while on. */
++            if (g_sdl[s].pad && (fresh || ((lo || hi) && now - g_sdl[s].rumble_at > RUMBLE_MS / 2))) {
++                SDL_RumbleGamepad(g_sdl[s].pad, lo, hi, (lo || hi) ? RUMBLE_MS : 0);
++                g_sdl[s].rumble_at = now;
++            }
++            SDL_LockSpinlock(&g_lock);
++        }
++        SDL_UnlockSpinlock(&g_lock);
++        SDL_DelayNS(POLL_NS);
++    }
++    return 0;
++}
++
++/* TRUE once SDL's gamepad support is up; the first call starts it. */
++static int sdl_start(void)
++{
++    int st = SDL_GetAtomicInt(&g_sdl_state);
++    SDL_Thread *th;
++
++    if (st == 1)
++        return 1;
++    if (st != 0 || !SDL_CompareAndSwapAtomicInt(&g_sdl_state, 0, 2))
++        return 0;
++    SDL_SetHint(SDL_HINT_JOYSTICK_THREAD, "1");
++    /* The window the player looks at may not be SDL's, so SDL cannot know
++     * it has focus: read the pads regardless, as XInput always did. */
++    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
++#ifndef _WIN32
++    /* The gamepad subsystem brings up SDL's events, which would otherwise
++     * turn SIGINT/SIGTERM into a quit event nobody reads: a timeout or
++     * Ctrl-C must still end the process (src/host/host_sdl.c does the same).
++     * Windows keeps its behaviour as it was. */
++    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
++#endif
++    th = SDL_CreateThread(sdl_pad_thread, "recomp_pads", NULL);
++    if (!th) {
++        fprintf(stderr, "[INPUT] no thread for the pads (%s): SDL3 pads off\n", SDL_GetError());
++        fflush(stderr);
++        SDL_SetAtomicInt(&g_sdl_state, -1);
++        return 0;
++    }
++    SDL_DetachThread(th);
++    return 0;
++}
++
++static int sdl_read(int slot, RecompPadState *out)
++{
++    int have;
++
++    if (!sdl_start())
++        return 0;
++    SDL_LockSpinlock(&g_lock);
++    have = g_pub[slot].have;
++    if (have)
++        *out = g_pub[slot].st;
++    SDL_UnlockSpinlock(&g_lock);
++    return have;
+ }
+ 
+ /* ---- XInput (Windows) ----------------------------------------------------- */
+@@ -322,13 +381,10 @@ void recomp_pad_name(int slot, char *out, size_t n)
+ #endif
+     {
+         RecompPadState st;
+-        const char *name = NULL;
+         if (!sdl_read(slot, &st))
+             return;
+         SDL_LockSpinlock(&g_lock);
+-        if (g_sdl[slot].pad)
+-            name = SDL_GetGamepadName(g_sdl[slot].pad);
+-        snprintf(out, n, "%s", name ? name : "Gamepad");
++        snprintf(out, n, "%s", g_pub[slot].name[0] ? g_pub[slot].name : "Gamepad");
+         SDL_UnlockSpinlock(&g_lock);
+     }
+ }
+@@ -346,16 +402,11 @@ void recomp_pad_rumble(int slot, uint16_t low, uint16_t high)
+         return;
+     }
+ #endif
+-    SDL_LockSpinlock(&g_lock);
+-    if (!sdl_start()) {
+-        SDL_UnlockSpinlock(&g_lock);
++    if (!sdl_start())
+         return;
+-    }
+-    g_sdl[slot].rumble_low = low;
+-    g_sdl[slot].rumble_high = high;
+-    if (g_sdl[slot].pad) {
+-        SDL_RumbleGamepad(g_sdl[slot].pad, low, high, (low || high) ? RUMBLE_MS : 0);
+-        g_sdl[slot].rumble_at = SDL_GetTicks();
+-    }
++    SDL_LockSpinlock(&g_lock);
++    g_pub[slot].rumble_low = low;
++    g_pub[slot].rumble_high = high;
++    g_pub[slot].rumble_new = 1;
+     SDL_UnlockSpinlock(&g_lock);
+ }
