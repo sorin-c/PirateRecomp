@@ -28,7 +28,7 @@ Back pressed alone still reaches the game as usual.
 | Fullscreen | at once |
 | Internal resolution (1x to 8x) | next start |
 | Widescreen (16:9) | next start |
-| Texture filtering (off to 16x) | next start |
+| Texture sharpness (off, 1x, 2x, 4x, 8x, 16x) | next start |
 | Variable refresh | next start |
 | Movies (skip all, skip intro, play all) | next start |
 | Sound | next start |
@@ -37,11 +37,11 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
 
 ## Display and frame rate
 
-- **60 fps.** The game runs its world at 30 fps at sea, in battles, duels and
-  the town sneak. Frame interpolation draws the frame in between, so you see
-  60 while the game keeps its original speed. This is on by default
-  (`frame_interp = 2`); menus, towns and the governor's rooms already run
-  at 60. Characters, ships and the camera are all interpolated.
+- **Frame interpolation.** The game runs its world at 30 fps at sea, in
+  battles, duels and the town sneak. Frame interpolation (`frame_interp = 2`,
+  off by default) draws the frame in between, so you see 60 while the game
+  keeps its original speed; menus, towns and the governor's rooms already
+  run at 60. Characters, ships and the camera are all interpolated.
 - **Widescreen.** `widescreen = 1` turns on the game's own 16:9 mode. The
   front end (legal text, title, menus and the new-career pages) stays at 4:3
   between bars, as it was drawn, and the game world fills the screen.
@@ -76,10 +76,10 @@ defaults. Every line names the environment variable that overrides it, so a
 | `widescreen` | `0` | The game's own 16:9 mode. |
 | `resolution_scale` | `1` | Render 1 to 8 times the console's resolution. |
 | `frame_cap` | `adaptive` | `adaptive` (as the console), `60`, `30` or `0` (off). |
-| `frame_interp` | `2` | `1` off, `2` shows 60 where the game runs at 30. |
+| `frame_interp` | `1` | `1` off, `2` shows 60 where the game runs at 30. |
 | `fps_overlay` | `0` | Frame-rate counter. |
 | `fullscreen` | `0` | Fullscreen window. |
-| `anisotropy` | `1` | Texture filtering, `1` to `16`. |
+| `anisotropy` | `0` | Texture sharpness: `0` off (the game's own filtering), `1`, `2`, `4`, `8` or `16`. |
 | `vrr` | `0` | Variable refresh rate. |
 | `pad_follow_input` | `1` | Controller 1 is the pad used last. |
 | `pad_directinput` | `0` | SDL's DirectInput back end. |

@@ -42,14 +42,40 @@ With Visual Studio, Git and Python. See [docs/building.md](docs/building.md).
 ## Playing
 
 - **Launcher:** resolution, fullscreen, widescreen, frame rate, frame
-  interpolation, texture filtering, and keyboard and controller bindings.
+  interpolation, texture sharpness, and keyboard and controller bindings.
 - **In game:** **F2**, or **Start + Back** on a controller, opens a settings
   menu.
 - **Controllers:** Xbox, PlayStation and Switch pads. Controller 1 is
   whichever pad you used last.
-- **Display:** 60 fps by default, with the game still running at its
-  original speed. Widescreen uses the game's own 16:9 mode, and the menus
-  stay 4:3.
+- **Display:** the game's own 30 fps at sea and in battles; turn on frame
+  interpolation for 60 on screen at the same game speed. Widescreen uses
+  the game's own 16:9 mode, and the menus stay 4:3.
+
+### Controls
+
+| Original Xbox pad | Modern pad | Keyboard | In the game |
+| --- | --- | --- | --- |
+| A | A | Z | Select, confirm |
+| B | B | X | Back, cancel |
+| X | X | A | |
+| Y | Y | S | |
+| Black | LB | W | |
+| White | RB | Q | |
+| Left / right trigger | LT / RT | E / R | |
+| Start | Start / Menu | Enter | Pause menu (saving is at sea) |
+| Back | Back / View | Backspace | |
+| D-pad | D-pad | Arrow keys | Move through menus |
+| Left stick | Left stick | (none) | Steer the ship, walk |
+| Right stick | Right stick | (none) | |
+| Start + Back | Start + Back | F2 | Settings menu |
+
+Keyboard only: **F9** shows the frame rate, **F10** changes the frame cap,
+**F11** saves a screenshot (`frameNNN.bmp`, with a `frameNNN.d3dcap` frame
+capture for bug reports) beside `pirates_recomp.exe`, and **Alt+Enter**
+switches fullscreen.
+
+Keys and buttons can be rebound in the launcher's Input tab. The pad
+columns are by position, so a PlayStation pad's Cross is A.
 
 Every setting, the controller options and how saves work are in
 [docs/settings.md](docs/settings.md).
@@ -66,7 +92,7 @@ Built on [DirectXbox-Recomp](https://github.com/phobos665/DirectXbox-Recomp)
 by phobos665, based on [xboxrecomp](https://github.com/sp00nznet/xboxrecomp)
 by sp00nz, with xemu-derived hardware components. Checked against
 [xemu](https://xemu.app/) and [XboxDevWiki](https://xboxdevwiki.net/).
-Development included assistance from Claude Code. The game needs 34 toolkit
+Development included assistance from Claude Code. The game needs 35 toolkit
 changes, kept in `patches/` and described in
 [docs/toolkit-patches.md](docs/toolkit-patches.md).
 
