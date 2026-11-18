@@ -70,9 +70,10 @@ Windows version and the end of the game's log.
 `.github/workflows/release.yml` builds the Option A zip on a Windows runner
 with the toolkit's `tools/release/make_release.py`, from
 [`release/pirates.json`](../release/pirates.json) (the title, the launcher and
-executable targets, and the SHA-1 of the supported `default.xbe`). Pushing a
-version tag (`git tag v0.1.0 && git push origin v0.1.0`) attaches the zip to
-a draft GitHub release, which is published by hand. A pull request that
+executable targets, and the SHA-1 of the supported `default.xbe`). Either
+push a version tag (`git tag v0.1.0 && git push origin v0.1.0`), or run the
+workflow by hand (Actions, Release, Run workflow) with a version: both attach
+the zip to a draft GitHub release, which is published by hand. A pull request that
 touches the build makes the zip as a check. No game files are involved.
 
 ## Testing

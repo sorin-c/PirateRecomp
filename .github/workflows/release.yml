@@ -23,7 +23,15 @@ on:
       - "config/**"
       - "CMakeLists.txt"
       - "xboxrecomp"
+  # Run by hand (Actions, Release, Run workflow) with a version to make the
+  # draft release without pushing a tag first: the tag is created on main's
+  # commit when the draft is published.
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. v0.1.0 (empty: a test build only)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -70,6 +78,8 @@ jobs:
         run: |
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          elif [[ -n "${{ inputs.version }}" ]]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
           else
             echo "version=ci-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
@@ -109,8 +119,11 @@ jobs:
 
       # A draft only: it is not public until someone publishes it on GitHub.
       - name: Attach to a draft release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || inputs.version != ''
         uses: softprops/action-gh-release@v2
         with:
           draft: true
+          tag_name: ${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.version.outputs.version }}
           files: ${{ runner.temp }}/release/*.zip
