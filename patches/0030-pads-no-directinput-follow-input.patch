@@ -1,0 +1,155 @@
+diff --git a/src/input/recomp_pad.c b/src/input/recomp_pad.c
+index fb93919..7f23538 100644
+--- a/src/input/recomp_pad.c
++++ b/src/input/recomp_pad.c
+@@ -11,6 +11,7 @@
+  * besides (SDL_HINT_JOYSTICK_THREAD).
+  */
+ #include "recomp_pad.h"
++#include "recomp_config.h"
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -77,8 +78,33 @@ typedef struct {
+     SDL_Gamepad   *pad;          /* the pad thread's only */
+     SDL_JoystickID id;
+     uint64_t       rumble_at;
++    uint64_t       used_at;      /* when it was last used, in uses: 0 never */
++    RecompPadState last;
+ } SdlSlot;
+ 
++/* pad_follow_input (RECOMP_PAD_FOLLOW_INPUT, on unless 0): controller 1 is
++ * whichever pad was used last -- a button pressed, a trigger pulled or a
++ * stick pushed -- and the other pads follow in the order they were found.
++ * Off, each pad keeps the slot it was found in (for games with several
++ * players). Read where the thread starts. */
++static int g_follow = 1;
++static uint64_t g_uses;
++
++/* A pad used since the last look: a new button, or a trigger or stick that
++ * crossed half-way. */
++static int sdl_used(const RecompPadState *was, const RecompPadState *now)
++{
++#define PAST(v) ((v) > 16000 || (v) < -16000)
++    if (now->buttons & ~was->buttons)
++        return 1;
++    if ((now->left_trigger > 128 && was->left_trigger <= 128) ||
++        (now->right_trigger > 128 && was->right_trigger <= 128))
++        return 1;
++    return (PAST(now->lx) && !PAST(was->lx)) || (PAST(now->ly) && !PAST(was->ly)) ||
++           (PAST(now->rx) && !PAST(was->rx)) || (PAST(now->ry) && !PAST(was->ry));
++#undef PAST
++}
++
+ typedef struct {                 /* published under g_lock */
+     int            have;
+     RecompPadState st;
+@@ -210,32 +236,67 @@ static int SDLCALL sdl_pad_thread(void *unused)
+             sdl_scan();
+             scan_at = now + SCAN_MS;
+         }
+-        memset(now_pub, 0, sizeof now_pub);
+-        for (s = 0; s < RECOMP_PAD_SLOTS; s++) {
+-            const char *name;
+-            if (!g_sdl[s].pad)
+-                continue;
+-            now_pub[s].have = 1;
+-            sdl_state_of(g_sdl[s].pad, &now_pub[s].st);
+-            name = SDL_GetGamepadName(g_sdl[s].pad);
+-            snprintf(now_pub[s].name, sizeof now_pub[s].name, "%s", name ? name : "Gamepad");
+-        }
+-        SDL_LockSpinlock(&g_lock);
+-        for (s = 0; s < RECOMP_PAD_SLOTS; s++) {
+-            uint16_t lo = g_pub[s].rumble_low, hi = g_pub[s].rumble_high;
+-            int fresh = g_pub[s].rumble_new;
+-
+-            g_pub[s].rumble_new = 0;
+-            g_pub[s].have = now_pub[s].have;
+-            g_pub[s].st = now_pub[s].st;
+-            memcpy(g_pub[s].name, now_pub[s].name, sizeof g_pub[s].name);
+-            SDL_UnlockSpinlock(&g_lock);
+-            /* SDL rumble has a duration; XInput's does not: renewed while on. */
+-            if (g_sdl[s].pad && (fresh || ((lo || hi) && now - g_sdl[s].rumble_at > RUMBLE_MS / 2))) {
+-                SDL_RumbleGamepad(g_sdl[s].pad, lo, hi, (lo || hi) ? RUMBLE_MS : 0);
+-                g_sdl[s].rumble_at = now;
++        {
++            /* order[k]: the pad behind controller slot k */
++            int order[RECOMP_PAD_SLOTS], n = 0, first = -1, k;
++            static int said_first = -1;
++
++            for (s = 0; s < RECOMP_PAD_SLOTS; s++) {
++                RecompPadState st;
++                if (!g_sdl[s].pad)
++                    continue;
++                sdl_state_of(g_sdl[s].pad, &st);
++                if (sdl_used(&g_sdl[s].last, &st))
++                    g_sdl[s].used_at = ++g_uses;
++                g_sdl[s].last = st;
++            }
++            if (g_follow)
++                for (s = 0; s < RECOMP_PAD_SLOTS; s++)
++                    if (g_sdl[s].pad && g_sdl[s].used_at &&
++                        (first < 0 || g_sdl[s].used_at > g_sdl[first].used_at))
++                        first = s;
++            if (first >= 0)
++                order[n++] = first;
++            for (s = 0; s < RECOMP_PAD_SLOTS; s++)
++                if (s != first)
++                    order[n++] = s;
++            if (first >= 0 && first != said_first) {
++                const char *name = SDL_GetGamepadName(g_sdl[first].pad);
++                said_first = first;
++                fprintf(stderr, "[INPUT] controller 1 follows the pad used last: %s (pad %d)\n",
++                        name ? name : "Gamepad", first + 1);
++                fflush(stderr);
++            }
++
++            memset(now_pub, 0, sizeof now_pub);
++            for (k = 0; k < RECOMP_PAD_SLOTS; k++) {
++                const char *name;
++                s = order[k];
++                if (!g_sdl[s].pad)
++                    continue;
++                now_pub[k].have = 1;
++                now_pub[k].st = g_sdl[s].last;
++                name = SDL_GetGamepadName(g_sdl[s].pad);
++                snprintf(now_pub[k].name, sizeof now_pub[k].name, "%s", name ? name : "Gamepad");
+             }
+             SDL_LockSpinlock(&g_lock);
++            for (k = 0; k < RECOMP_PAD_SLOTS; k++) {
++                uint16_t lo = g_pub[k].rumble_low, hi = g_pub[k].rumble_high;
++                int fresh = g_pub[k].rumble_new;
++
++                s = order[k];
++                g_pub[k].rumble_new = 0;
++                g_pub[k].have = now_pub[k].have;
++                g_pub[k].st = now_pub[k].st;
++                memcpy(g_pub[k].name, now_pub[k].name, sizeof g_pub[k].name);
++                SDL_UnlockSpinlock(&g_lock);
++                /* SDL rumble has a duration; XInput's does not: renewed while on. */
++                if (g_sdl[s].pad && (fresh || ((lo || hi) && now - g_sdl[s].rumble_at > RUMBLE_MS / 2))) {
++                    SDL_RumbleGamepad(g_sdl[s].pad, lo, hi, (lo || hi) ? RUMBLE_MS : 0);
++                    g_sdl[s].rumble_at = now;
++                }
++                SDL_LockSpinlock(&g_lock);
++            }
+         }
+         SDL_UnlockSpinlock(&g_lock);
+         SDL_DelayNS(POLL_NS);
+@@ -257,6 +318,16 @@ static int sdl_start(void)
+     /* The window the player looks at may not be SDL's, so SDL cannot know
+      * it has focus: read the pads regardless, as XInput always did. */
+     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
++#if defined(_WIN32)
++    /* SDL's DirectInput back end enumerates every DirectInput device, and on
++     * a Windows 11 PC that took 40 s every time (0.01 s without it). Xbox
++     * pads come through XInput, raw input and WGI, PlayStation and Switch
++     * pads through HIDAPI; only an old DirectInput-only pad needs it:
++     * pad_directinput = 1 (RECOMP_PAD_DIRECTINPUT=1). */
++    if (!recomp_config_bool("RECOMP_PAD_DIRECTINPUT", "pad_directinput", 0))
++        SDL_SetHint(SDL_HINT_JOYSTICK_DIRECTINPUT, "0");
++#endif
++    g_follow = recomp_config_bool("RECOMP_PAD_FOLLOW_INPUT", "pad_follow_input", 1);
+ #ifndef _WIN32
+     /* The gamepad subsystem brings up SDL's events, which would otherwise
+      * turn SIGINT/SIGTERM into a quit event nobody reads: a timeout or

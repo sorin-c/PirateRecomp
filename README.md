@@ -115,6 +115,7 @@ CMake), and Python 3.10+ with `capstone` (`py -3 -m pip install capstone`).
    git -C xboxrecomp apply ..\patches\0027-pad-start-in-background.patch
    git -C xboxrecomp apply ..\patches\0028-crop-left-widescreen.patch
    git -C xboxrecomp apply ..\patches\0029-front-end-4x3-and-pad-hotplug.patch
+   git -C xboxrecomp apply ..\patches\0030-pads-no-directinput-follow-input.patch
    ```
 
 2. **Game files.** Extract your disc image into `game/`, so that
@@ -188,6 +189,7 @@ git -C xboxrecomp apply ..\patches\0026-startup-window-black.patch
 git -C xboxrecomp apply ..\patches\0027-pad-start-in-background.patch
 git -C xboxrecomp apply ..\patches\0028-crop-left-widescreen.patch
 git -C xboxrecomp apply ..\patches\0029-front-end-4x3-and-pad-hotplug.patch
+git -C xboxrecomp apply ..\patches\0030-pads-no-directinput-follow-input.patch
 ```
 
 - **0001-lifter-xadd-flags-snapshot** (`tools/recomp/lifter.py`,
@@ -478,6 +480,19 @@ git -C xboxrecomp apply ..\patches\0029-front-end-4x3-and-pad-hotplug.patch
   devices through, and updates and rescans the pads every 2 ms: polled
   from the title's threads, a pad plugged in after start-up was never
   seen.
+
+- **0030-pads-no-directinput-follow-input** (`src/input/recomp_pad.c`).
+  SDL's DirectInput back end is off on Windows unless `pad_directinput = 1`
+  (`RECOMP_PAD_DIRECTINPUT`): it enumerates every DirectInput device and
+  took 12-40 s on this PC every time (0.01 s without it), so a pad came
+  long after the game. Xbox pads come through XInput, raw input and WGI,
+  PlayStation and Switch pads through HIDAPI. And controller 1 follows the
+  pad used last (`pad_follow_input`, `RECOMP_PAD_FOLLOW_INPUT`, on by
+  default): a button, a trigger or a stick on any pad makes it controller
+  1, the others follow in the order they were found. 0 keeps each pad in
+  its own slot, for several players. The title now calls every front-end
+  frame 4:3 (legal text, title, menus, the new-career pages) until the game
+  world starts (`recomp_manual.c`).
 
 ## Running a build of your own
 
