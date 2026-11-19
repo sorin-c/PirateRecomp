@@ -595,6 +595,270 @@ found with RECOMP_PIRATES_TICK_SITES=1); on the console the Swap then
  * frame_cap other than adaptive or 30 the game keeps its own wait (normal
  * speed, no frames in between there; patch 0016). Without frame
  * interpolation nothing changes. */
+/* ── SEA60 SPIKE (debug, measurement only) ──────────────────────
+ *
+ * RECOMP_PIRATES_SEA_WAIT_MS=N (default 31 = unchanged): with frame
+ * interpolation off, the sea's frame limiter (0x91DE1, 0xA4AEE) passes after
+ * N ms instead of 31, so the gate's one Swap a vblank paces sailing (N <= 16:
+ * 60 a second). Battles, duels and towns keep their waits.
+ *
+ * RECOMP_PIRATES_SEA_LOG=<folder>: at each sea frame's start (0x9190F,
+ * 0xA43FA) append to frames.txt: host ms, game tick, frame counter 0x4D67D8,
+ * then each dword of RECOMP_PIRATES_SEA_WATCH (hex addresses, comma list).
+ * Also keep, over .data (0x400400..0x5083C0), per dword the sum of |delta|
+ * frame to frame (as int and as float) and the count of changes, and write
+ * them to stats_<n>.bin every 10 s (cumulative, with host ms and frames),
+ * and a raw snapshot of the range every RECOMP_PIRATES_SEA_SNAP_MS (0 = off)
+ * to snaps.bin. */
+extern int recomp_config_int(const char *env_name, const char *key, int fallback);
+
+/* RECOMP_PIRATES_SEA_DTMIN=n: the floor of the sea's frame-time clamp
+ * (33 ms in the game, at 0x8605D, 0x864D9, 0x8656D in sub_00085980); read
+ * by the spike's edit of the lifted C (recomp_0033.c, not committed). */
+uint32_t g_sea60_dtmin = 0x21;
+
+/* RECOMP_PIRATES_SEA_WWATCH="a1,a2,..." (hex guest addresses, each a dword):
+ * while sea frames run, the host pages holding them are read-only; a vectored
+ * handler records every write to a watched dword (host RIP, delta), steps it
+ * with the trap flag and protects the page again. Every 10 s the table goes
+ * to wwatch.txt with the lifted function named from the PDB (dbghelp). */
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <dbghelp.h>
+#define WW_MAX 32
+#define WW_SITES 512
+static uint32_t ww_addr[WW_MAX];
+static int ww_n, ww_armed;
+static struct { uint64_t rip; uint32_t addr; int64_t sumd; uint32_t n; int32_t lastd; } ww_site[WW_SITES];
+static int ww_nsite;
+static __declspec(thread) uintptr_t ww_page_pending;
+static __declspec(thread) uint32_t ww_old[WW_MAX];
+static __declspec(thread) uint64_t ww_pending_rip;
+static uintptr_t ww_pages[WW_MAX];
+static int ww_npages;
+
+static LONG CALLBACK ww_handler(EXCEPTION_POINTERS *ep)
+{
+    DWORD code = ep->ExceptionRecord->ExceptionCode;
+    if (code == EXCEPTION_ACCESS_VIOLATION && ep->ExceptionRecord->ExceptionInformation[0] == 1) {
+        uintptr_t fa = (uintptr_t)ep->ExceptionRecord->ExceptionInformation[1];
+        uintptr_t pg = fa & ~(uintptr_t)0xFFF;
+        int i, hit = 0;
+        DWORD old;
+        for (i = 0; i < ww_npages; i++) if (ww_pages[i] == pg) hit = 1;
+        if (!hit) return EXCEPTION_CONTINUE_SEARCH;
+        for (i = 0; i < ww_n; i++)
+            ww_old[i] = *(volatile uint32_t *)((uintptr_t)ww_addr[i] + g_xbox_mem_offset);
+        ww_pending_rip = ep->ContextRecord->Rip;
+        VirtualProtect((void *)pg, 0x1000, PAGE_READWRITE, &old);
+        ww_page_pending = pg;
+        ep->ContextRecord->EFlags |= 0x100;   /* trap after the write */
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    if (code == EXCEPTION_SINGLE_STEP && ww_page_pending) {
+        DWORD old;
+        {
+            int k, i;
+            for (k = 0; k < ww_n; k++) {
+                int32_t d = (int32_t)(*(volatile uint32_t *)((uintptr_t)ww_addr[k] + g_xbox_mem_offset) - ww_old[k]);
+                if (!d) continue;
+                for (i = 0; i < ww_nsite; i++)
+                    if (ww_site[i].rip == ww_pending_rip && ww_site[i].addr == ww_addr[k]) break;
+                if (i == ww_nsite && ww_nsite < WW_SITES) {
+                    ww_site[i].rip = ww_pending_rip; ww_site[i].addr = ww_addr[k]; ww_nsite++;
+                }
+                if (i < WW_SITES) { ww_site[i].n++; ww_site[i].sumd += d; ww_site[i].lastd = d; }
+            }
+        }
+        if (ww_armed)
+            VirtualProtect((void *)ww_page_pending, 0x1000, PAGE_READONLY, &old);
+        ww_page_pending = 0;
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static void ww_arm(int on)
+{
+    int i; DWORD old;
+    if (on == ww_armed) return;
+    ww_armed = on;
+    for (i = 0; i < ww_npages; i++)
+        VirtualProtect((void *)ww_pages[i], 0x1000, on ? PAGE_READONLY : PAGE_READWRITE, &old);
+}
+
+typedef BOOL (WINAPI *ww_syminit_t)(HANDLE, PCSTR, BOOL);
+typedef BOOL (WINAPI *ww_symfrom_t)(HANDLE, DWORD64, PDWORD64, void *);
+typedef BOOL (WINAPI *ww_symline_t)(HANDLE, DWORD64, PDWORD, IMAGEHLP_LINE64 *);
+static void ww_report(const char *dir, uint32_t frames, uint32_t ms)
+{
+    static ww_syminit_t si; static ww_symfrom_t sf; static ww_symline_t sl; static int tried;
+    char fn[512]; FILE *fp; int i;
+    if (!tried) {
+        HMODULE h = LoadLibraryA("dbghelp.dll");
+        tried = 1;
+        if (h) { si = (ww_syminit_t)GetProcAddress(h, "SymInitialize"); sf = (ww_symfrom_t)GetProcAddress(h, "SymFromAddr"); sl = (ww_symline_t)GetProcAddress(h, "SymGetLineFromAddr64"); }
+        if (si) si(GetCurrentProcess(), NULL, TRUE);
+    }
+    snprintf(fn, sizeof fn, "%s/wwatch.txt", dir);
+    if ((fp = fopen(fn, "w")) == NULL) return;
+    fprintf(fp, "# frames %u ms %u\n", frames, ms);
+    for (i = 0; i < ww_nsite; i++) {
+        struct { SYMBOL_INFO si; char name[256]; } s;
+        DWORD64 disp = 0;
+        const char *name = "?";
+        memset(&s, 0, sizeof s);
+        s.si.SizeOfStruct = sizeof(SYMBOL_INFO); s.si.MaxNameLen = 255;
+        IMAGEHLP_LINE64 ln; DWORD ld = 0; const char *file = "?"; unsigned line = 0;
+        memset(&ln, 0, sizeof ln); ln.SizeOfStruct = sizeof ln;
+        if (sf && sf(GetCurrentProcess(), ww_site[i].rip, &disp, &s.si)) name = s.si.Name;
+        if (sl && sl(GetCurrentProcess(), ww_site[i].rip, &ld, &ln)) { file = ln.FileName; line = ln.LineNumber; }
+        { const char *b = strrchr(file, '\\'); if (b) file = b + 1; }
+        fprintf(fp, "%08X %s+0x%llX %s:%u changes %u (%.2f/frame) sum %lld (%.3f/frame) last %d\n",
+                ww_site[i].addr, name, (unsigned long long)disp, file, line, ww_site[i].n,
+                frames ? (double)ww_site[i].n / frames : 0.0, (long long)ww_site[i].sumd,
+                frames ? (double)ww_site[i].sumd / frames : 0.0, ww_site[i].lastd);
+    }
+    fclose(fp);
+}
+
+static void ww_init(void)
+{
+    const char *w = getenv("RECOMP_PIRATES_SEA_WWATCH");
+    int i, j;
+    while (w && *w && ww_n < WW_MAX) {
+        char *e;
+        ww_addr[ww_n++] = (uint32_t)strtoul(w, &e, 16);
+        w = (*e == ',') ? e + 1 : NULL;
+    }
+    for (i = 0; i < ww_n; i++) {
+        uintptr_t pg = ((uintptr_t)ww_addr[i] + g_xbox_mem_offset) & ~(uintptr_t)0xFFF;
+        for (j = 0; j < ww_npages && ww_pages[j] != pg; j++) ;
+        if (j == ww_npages) ww_pages[ww_npages++] = pg;
+    }
+    if (ww_n) {
+        AddVectoredExceptionHandler(1, ww_handler);
+        fprintf(stderr, "[SEA60] write watch on %d dwords, %d pages\n", ww_n, ww_npages);
+    }
+}
+#else
+static void ww_init(void) {}
+static void ww_arm(int on) { (void)on; }
+static void ww_report(const char *d, uint32_t f, uint32_t m) { (void)d; (void)f; (void)m; }
+static int ww_n;
+#endif
+
+#define SEA60_LO 0x00400400u
+#define SEA60_HI 0x005083C0u
+#define SEA60_N  ((SEA60_HI - SEA60_LO) / 4u)
+static void sea60_frame(uint32_t tick)
+{
+    static int on = -1, nwatch, nstat;
+    static char dir[400];
+    static uint32_t watch[64];
+    static FILE *ff, *fs;
+    static uint32_t *prev, *chg, t0, last_stat, last_snap, frames, snap_ms;
+    static uint64_t *iabs;
+    static double *fabs_;
+    uint32_t now = pirates_host_ms(), i;
+    const uint32_t *cur = (const uint32_t *)((uintptr_t)SEA60_LO + g_xbox_mem_offset);
+
+    if (on < 0) {
+        const char *v = recomp_config_lookup("RECOMP_PIRATES_SEA_LOG", "sea_log");
+        const char *w = getenv("RECOMP_PIRATES_SEA_WATCH");
+        char fn[512];
+        on = v && *v && strcmp(v, "0") != 0;
+        if (!on)
+            return;
+        snprintf(dir, sizeof dir, "%s", v);
+        snap_ms = (uint32_t)recomp_config_int("RECOMP_PIRATES_SEA_SNAP_MS", "sea_snap_ms", 0);
+        while (w && *w && nwatch < 64) {
+            char *e;
+            watch[nwatch++] = (uint32_t)strtoul(w, &e, 16);
+            w = (*e == ',') ? e + 1 : NULL;
+        }
+        snprintf(fn, sizeof fn, "%s/frames.txt", dir);
+        ff = fopen(fn, "w");
+        if (ff) setvbuf(ff, NULL, _IOFBF, 1 << 20);
+        prev = (uint32_t *)malloc(SEA60_N * 4u);
+        chg = (uint32_t *)calloc(SEA60_N, 4u);
+        iabs = (uint64_t *)calloc(SEA60_N, 8u);
+        fabs_ = (double *)calloc(SEA60_N, sizeof(double));
+        memcpy(prev, cur, SEA60_N * 4u);
+        t0 = last_stat = now;
+        fprintf(stderr, "[SEA60] logging to %s, %d watches, snap %u ms\n", dir, nwatch, snap_ms);
+        ww_init();
+        return;
+    }
+    if (!on)
+        return;
+    {   /* RECOMP_PIRATES_SEA_PIN="x y ms": back to open water every ms */
+        static int pin = -1, px, py, pms;
+        static uint32_t last_pin;
+        if (pin < 0) {
+            const char *p = getenv("RECOMP_PIRATES_SEA_PIN");
+            pin = p && sscanf(p, "%d %d %d", &px, &py, &pms) == 3;
+            last_pin = now;
+        }
+        if (pin && now - last_pin >= (uint32_t)pms) {
+            last_pin = now;
+            *(volatile int32_t *)((uintptr_t)0x004564BCu + g_xbox_mem_offset) = px * 4000000;
+            *(volatile int32_t *)((uintptr_t)0x004564C0u + g_xbox_mem_offset) = py * 4000000;
+            if (ff) fprintf(ff, "# pin\n");
+        }
+    }
+    frames++;
+    if (ww_n) ww_arm(1);
+    if (ff) {
+        fprintf(ff, "%u %u %u", now, tick, *(volatile uint32_t *)((uintptr_t)0x004D67D8u + g_xbox_mem_offset));
+        for (i = 0; i < (uint32_t)nwatch; i++)
+            fprintf(ff, " %d", *(volatile int32_t *)((uintptr_t)watch[i] + g_xbox_mem_offset));
+        fputc('\n', ff);
+    }
+    for (i = 0; i < SEA60_N; i++) {
+        uint32_t a = cur[i], b = prev[i];
+        if (a != b) {
+            int32_t d = (int32_t)(a - b);
+            float fa, fb;
+            chg[i]++;
+            iabs[i] += (uint64_t)(d < 0 ? -(int64_t)d : (int64_t)d);
+            memcpy(&fa, &a, 4); memcpy(&fb, &b, 4);
+            if (fa == fa && fb == fb && fa < 1e30f && fa > -1e30f && fb < 1e30f && fb > -1e30f)
+                fabs_[i] += fa > fb ? (double)fa - fb : (double)fb - fa;
+            prev[i] = a;
+        }
+    }
+    if (snap_ms && now - last_snap >= snap_ms) {
+        char fn[512];
+        last_snap = now;
+        if (!fs) { snprintf(fn, sizeof fn, "%s/snaps.bin", dir); fs = fopen(fn, "wb"); }
+        if (fs) {
+            uint32_t hdr[4] = { 0x53454136u, now, frames, SEA60_N };
+            fwrite(hdr, 4, 4, fs); fwrite(cur, 4, SEA60_N, fs); fflush(fs);
+        }
+    }
+    if (now - last_stat >= 10000u) {
+        char fn[512];
+        FILE *fp;
+        last_stat = now;
+        snprintf(fn, sizeof fn, "%s/stats_%03d.bin", dir, nstat++);
+        if ((fp = fopen(fn, "wb")) != NULL) {
+            uint32_t hdr[4] = { 0x53454137u, now - t0, frames, SEA60_N };
+            fwrite(hdr, 4, 4, fp); fwrite(chg, 4, SEA60_N, fp);
+            fwrite(iabs, 8, SEA60_N, fp); fwrite(fabs_, sizeof(double), SEA60_N, fp);
+            fclose(fp);
+        }
+        if (ff) fflush(ff);
+        if (ww_n) ww_report(dir, frames, now - t0);
+    }
+}
+
 extern void sub_001A958A_gen(void);
 extern int recomp_config_int(const char *env_name, const char *key, int fallback);
 extern int recomp_settings_default_frame_interp(void);
@@ -626,6 +890,7 @@ void sub_001A958A(void)
         g_pirates_world_ms = pirates_host_ms();
         g_pirates_world_seen = 1;
         if (ra == 0x00091DE1u || ra == 0x000A4AEEu) {   /* the sea */
+            if (ww_n) ww_arm(0);                 /* SEA60: frame done */
             g_pirates_sea_ms = g_pirates_world_ms;
             g_pirates_sea_seen = 1;
             g_pirates_in_sea_frame = 0;          /* its frame is drawn */
@@ -634,8 +899,10 @@ void sub_001A958A(void)
             g_pirates_battle_seen = 1;
         }
     }
-    if (ra == 0x0009190Fu || ra == 0x000A43FAu)  /* a sea frame begins */
+    if (ra == 0x0009190Fu || ra == 0x000A43FAu) { /* a sea frame begins */
         g_pirates_in_sea_frame = 1;
+        sea60_frame(g_eax);
+    }
     {   /* RECOMP_PIRATES_TICK_SITES=1: name each new caller once (which
          * limiter a scene uses) */
         static int sites = -1;
@@ -673,6 +940,20 @@ void sub_001A958A(void)
     }
     /* What is in effect now (frame_interp, or the settings menu since). */
     smooth = hle_frame_interp() >= 2;
+    {   /* SEA60 SPIKE: RECOMP_PIRATES_SEA_WAIT_MS */
+        static int sea_wait = -1;
+        if (sea_wait < 0) {
+            sea_wait = recomp_config_int("RECOMP_PIRATES_SEA_WAIT_MS", "sea_wait_ms", 31);
+            if (sea_wait < 0 || sea_wait > 31) sea_wait = 31;
+            if (sea_wait != 31)
+                fprintf(stderr, "[SEA60] sea frame wait %d ms (RECOMP_PIRATES_SEA_WAIT_MS)\n", sea_wait);
+            g_sea60_dtmin = (uint32_t)recomp_config_int("RECOMP_PIRATES_SEA_DTMIN", "sea_dtmin", 0x21);
+            if (g_sea60_dtmin != 0x21)
+                fprintf(stderr, "[SEA60] sea frame-time clamp floor %u ms (RECOMP_PIRATES_SEA_DTMIN)\n", g_sea60_dtmin);
+        }
+        if (!smooth && sea_wait != 31 && (ra == PIRATES_LIMITER_SEA || ra == PIRATES_LIMITER_SEA2))
+            g_eax += (uint32_t)(31 - sea_wait);
+    }
     if (!smooth) {
         if (at30) {                       /* turned off in a 30 fps scene */
             at30 = 0;
