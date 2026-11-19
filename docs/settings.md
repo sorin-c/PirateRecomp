@@ -43,10 +43,8 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   keeps its original speed; menus, towns and the governor's rooms already
   run at 60. Characters, ships and the camera are all interpolated.
 - **Widescreen.** `widescreen = 1` turns on the game's own 16:9 mode. The
-  legal text, title and new-career pages stay at 4:3 between bars, as they
-  were drawn. The main menu fills the screen with its map zoomed, the menu
-  and the swordfighter where the 4:3 menu has them; the Load Game screen,
-  the loading screens and the game world are 16:9.
+  front end (legal text, title, menus and the new-career pages) stays at 4:3
+  between bars, as it was drawn, and the game world fills the screen.
 - **Internal resolution.** `resolution_scale` renders 2 to 8 times larger
   than the console.
 - **Bottom and left bands.** The console leaves a grey-lavender band along
