@@ -154,6 +154,8 @@ def main():
         add(f"{name}: frame counter 0x49C288 (/s)", *[rate(rw, pn, s, W["49C288"], absd=False) for s, (rw, pn, _) in zip(sel, A)])
         for t in ("4C72FC", "4D65B8", "4D6600"):
             add(f"{name}: countdown 0x{t} (|d|/s)", *[rate(rw, pn, s, W[t]) for s, (rw, pn, _) in zip(sel, A)])
+        add(f"{name}: angle 0x4D652C changes (/s)", *[sum(1 for i in s[1:] if rw[i][W["4D652C"]] != rw[i - 1][W["4D652C"]])
+                                                     / (s32(rw[s[-1]][0] - rw[s[0]][0]) / 1000) for s, (rw, _, _) in zip(sel, A)])
         add(f"{name}: angle 0x4D652C (deg/s)", *[rate(rw, pn, s, W["4D652C"], angle=True) * 360 / 2 ** 32
                                                  for s, (rw, pn, _) in zip(sel, A)])
     # AI ships and sound over the whole sea stretch after the first 8 s

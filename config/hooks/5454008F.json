@@ -152,6 +152,22 @@
   {
    "address": "0x0007FE90",
    "note": "sea_60: 0x40D018 smoothing step, scaled by frame time"
+  },
+  {
+   "address": "0x00078F69",
+   "note": "sea_60: sub_00078EC0 easing step 1/16, scaled"
+  },
+  {
+   "address": "0x00078F9B",
+   "note": "sea_60: sub_00078EC0 random easing step 1/8, scaled"
+  },
+  {
+   "address": "0x00077C81",
+   "note": "sea_60: rand()%150 chance a frame, at the logic tick"
+  },
+  {
+   "address": "0x000860B0",
+   "note": "sea_60: time acceleration stored as the 30 fps value x frame time share"
   }
  ]
 }

@@ -575,7 +575,7 @@ void sub_001A9220(void)   /* XAPI ResetEvent(HANDLE), stdcall */
  *
  * Those scenes end each frame by sleeping, two milliseconds at a time, until
  * the tick count (GetTickCount, this function) is 31 ms past the frame's
- * start (sea: 0x00091DC2-0x00091DF5 in sub_00091170 and a second copy at
+ * start (sea: 0x00091DC2-0x00091DF5 in sub_00091170; the town sneak at
  * 0x000A4AE9; ship battles: 0x000C3B30, which waits 100 ms instead while
  * bit 0x20 of 0x0049C298 is set, left alone here; sword duels: 0x00036C41,
 the same wait with the same slow flag; and a 30 ms copy at 0x0004DF70,
@@ -819,6 +819,11 @@ static void sea60_frame(uint32_t tick)
             if (ff) fprintf(ff, "# pin\n");
         }
     }
+    if (getenv("RECOMP_PIRATES_SEA_NOSHIPS")) {   /* debug: no AI ships at all */
+        int k;
+        for (k = 1; k < 128; k++)
+            *(volatile int16_t *)((uintptr_t)(0x004564B0u + (uint32_t)k * 0x45Cu) + g_xbox_mem_offset) = -1;
+    }
     {   /* RECOMP_PIRATES_SEA_POKE="addr=value@ms,...": set a dword once, ms
          * after logging began (start a countdown in both runs alike). */
         static int np = -1;
@@ -892,45 +897,68 @@ static void sea60_frame(uint32_t tick)
  *
  * sea_60 = 1 (RECOMP_PIRATES_SEA_60, or the F2 menu's "Sailing at 60 fps",
  * applies at once; off by default) runs the sea's own game logic 60 times a
- * second at the speed it has at 30. Battles, duels, towns, the map and the
- * menus keep their pacing. Off, nothing below runs and the game is as before.
+ * second at the speed it has at 30. Battles, duels, towns, the town sneak,
+ * the map and the menus keep their pacing. Off, nothing below runs and the
+ * game is as before.
  *
- * Pacing: the sea's frame wait (sub_001A958A, 0x91DE1 / 0xA4AEE) passes
- * after SEA60_WAIT_MS instead of 31 and the flip gate's one Swap a vblank
- * holds it to 60. Frame interpolation is not used at sea then (nothing to
- * fill); battles and duels still use it when it is on.
+ * Pacing: the sea's frame wait (sub_001A958A, 0x91DE1) passes after
+ * SEA60_WAIT_MS instead of 31 and the flip gate's one Swap a vblank holds it
+ * to 60. Frame interpolation is not used at sea then (nothing to fill);
+ * battles and duels still use it when it is on. Only sub_00091170, the sea:
+ * the other "sea" wait, 0xA4AEE, belongs to the town sneak (sub_000A1E10,
+ * town.cpp) and keeps 30.
  *
- * The sea already scales motion by its frame time (0x4C72F8, ms, copied from
- * the engine's delta at 0x91DBC) but clamps that to 33..100 ms in three
- * places in sub_00085980, so at 16 ms every step was a 33 ms step: ships
- * sailed and turned twice as fast, AI ships too. Guest hooks (toolkit patch
- * 0042, config/hooks/5454008F.json) put the real frame time back after each
- * clamp (floor SEA60_DT_MIN):
- *   0x86078  time acceleration 0x40D4C4 (feeds positions and the calendar)
- *   0x864FE  [esp+0x24], the speed computation's frame time
- *   0x86588  the turn computation's frame time
+ * Every change below goes through guest hooks (toolkit patch 0042; the list
+ * is config/hooks/5454008F.json), so a clean lift reproduces it.
  *
- * The rest of the sea counts frames. That logic runs on a 30 Hz "logic
- * tick": a sea frame is a tick frame when the frame time accumulated since
- * the last tick reaches 33.3 ms. At 30 fps every frame ticks (as before);
- * at 60 every other one. On a frame that does not tick, each hooked step
- * below is undone before it runs, so the game sees it at 30 Hz:
- *   0x9259F  the sea frame counter 0x49C288 (timestamps in 0x4C70F0, ages,
- *            "every 8th frame" tests)
- *   0x85BC0  countdown 0x4C72FC (frames)
- *   0x91C19  countdown 0x4D65B8;  0x91C41  countdown 0x4D6600
- *   0x79433  ship word +0x4564D6 countdown; 0x87240 ship word +0x45650E
- *   0x86387  ship word +0x4564D0 count
- *   0x86891  a ship's speed approaching its target (0x4564C8)
- *   0x785E7  lifetime of the sea objects in 0x4B6434 (sub_000785C0)
- * The calendar (0x49C284) advances [0x40D4C4]/100 days' ticks a frame,
- * dropping the remainder, as the console does at 30: with sea_60 the time
- * scale is summed over the frames of one logic tick and the ticks happen on
- * the tick frame (hooks 0x85AAD, and 0x85B73 after the loop and its check
- * for a 4000-tick boundary, which reads the same value).
- * Steps that are smooth movement are scaled by the frame time instead:
- *   0x7860C, 0x78620  the sea objects' 100 units a frame
- *   0x7FEBB  the angle 0x4D652C advanced by [0x4D6530] a frame */
+ * 1. Frame time. The sea scales motion by its frame time (0x4C72F8, ms) but
+ *    clamps it to 33..100 ms in three places in sub_00085980, so at 16 ms
+ *    every step was a 33 ms step. After each clamp the real frame time is put
+ *    back: 0x86078 (time acceleration 0x40D4C4, which feeds positions and
+ *    the calendar), 0x864FE (speed), 0x86588 (turning). The frame time is
+ *    taken from the host clock between sea frames (the engine's is whole ms
+ *    truncated: 60 frames of 16.67 ms read 960 ms) and written to 0x4C72F8
+ *    too, for the sea's other readers (sub_00077680's timers and chances).
+ *
+ * 2. The 30 Hz logic tick. What the sea counts in frames runs on a tick: a
+ *    sea frame ticks when the frame time summed since the last tick reaches
+ *    33.3 ms (at 30 every frame, at 60 every other one). On a frame that does
+ *    not tick each of these is held back:
+ *      0x9259F  the frame counter 0x49C288 (its readers: timestamps in
+ *               0x4C70F0 and ages, which then count at 30 as they should)
+ *      0x85BC0, 0x91C19, 0x91C41  countdowns 0x4C72FC, 0x4D65B8, 0x4D6600
+ *      0x79433, 0x87240, 0x86387  ship words +0x4564D6, +0x45650E, +0x4564D0
+ *      0x86891  a ship's speed easing toward its target (0x4564C8)
+ *      0x785E7  the lifetime of the sea objects in 0x4B6434 (sub_000785C0)
+ *      "every Nth frame" tests on the counter, which would pass on both
+ *      frames of a tick: 0x8216B, 0x83AF1, 0x84380, 0x8448A, 0x845FD,
+ *      0x84720, 0x848C2, 0x87537 (bit 0 set in the tested register), and
+ *      0x7FE92 / 0x86702 (the counter bumped for the test only when it would
+ *      pass, put back at 0x7FF16 / 0x86711)
+ *      0x77C81  sub_00077680's one chance in 150 a frame
+ *    The calendar (0x49C284) advances [0x40D4C4]/100 ticks a frame, the
+ *    remainder dropped, as the console does at 30: the time scale is summed
+ *    over the frames of one logic tick and the ticks happen on the tick frame
+ *    (0x85AAD, and 0x85B73 after the loop and its 4000-tick check).
+ *
+ * 3. Phases made as frame counter x step move by the part of a step not yet
+ *    reached on a frame that does not tick, so they turn smoothly 60 times a
+ *    second: 0x7F892 (our ship's bob), 0x85202 (the AI ships'), 0x83F9F,
+ *    and the imul [0x49C288] pairs 0x81CB6/0x81CBD, 0x82233/0x8223A,
+ *    0x8272A/0x82731.
+ *
+ * 4. Steps eased or moved every frame, scaled by the frame time (33.3 ms =
+ *    one console frame): the sea objects' 100 units (0x7860C, 0x78620); the
+ *    1/32 easing of 0x40D018 (0x7FE90); sub_00078EC0's easing of each ship's
+ *    value, 1/16 or 1/8 toward a random target (0x78F69, 0x78F9B).
+ *
+ * 5. The time acceleration 0x40D4C4 (s += (t - s)/16 +- 1 a frame, sometimes
+ *    forced to 100, 50 or 1) is run as at 30 on the ticks and stored as this
+ *    frame's share of it (0x86078 takes M and s, 0x860B0 stores).
+ *
+ * Going to a battle, a town, the map or a menu and back: a sea frame that
+ * comes more than 250 ms after the last one starts a fresh tick with nothing
+ * carried in. Nothing of this is saved; saves are the same either way. */
 #define SEA60_WAIT_MS 15u
 #define SEA60_DT_MIN  8
 #define SEA60_DT_MAX  100
@@ -948,7 +976,10 @@ static struct {
     int frac;             /* hundredths of a tick to the next one, <= 0 */
     uint32_t phase_k;     /* a phase step saved by a hook before its imul */
     uint32_t ctr_pending; /* frame counter bumped for one test, to put back */
-} g_sea60 = { 0, 0, 1, 33, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    uint32_t ts_m, ts_sin;          /* time acceleration: M and s coming in */
+    int32_t ts_x, ts_rem, ts_last;  /* its 30 fps value, remainder, last stored */
+    int ts_valid;
+} g_sea60 = { 0, 0, 1, 33, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 
 /* step * frac: how far a phase built as counter * step is from where 60
  * frames a second put it (0 on a tick frame). */
@@ -983,12 +1014,17 @@ static void sea60_begin_frame(void)
     if (dt < SEA60_DT_MIN) dt = SEA60_DT_MIN;
     if (dt > SEA60_DT_MAX) dt = SEA60_DT_MAX;
     g_sea60.dt = dt;
+    /* The game's own frame time (0x4C72F8, read by the sea's timers and
+     * chances, e.g. sub_00077680) gets the same exact value. */
+    if (on && !gap)
+        S60_MEM32(0x004C72F8u) = dt;
     if (!on || gap) {
         /* Off, or a new stretch of sailing (after a battle, a town, the map,
          * a menu): this frame is a whole tick and nothing is carried in. */
         g_sea60.tick = 1;
         g_sea60.acc3 = 0;
         g_sea60.cal_acc = 0;
+        g_sea60.ts_valid = 0;
     } else {
         g_sea60.acc3 += dt * 3;
         if (g_sea60.acc3 >= 100) {
@@ -1049,7 +1085,11 @@ void recomp_guest_hook(uint32_t va)
     skip = !g_sea60.tick;
     switch (va) {
     /* The frame-time clamps: what the clamp left, replaced. */
-    case 0x00086078u: g_eax = (uint32_t)sea60_clamp_dt(); break;
+    case 0x00086078u:
+        g_sea60.ts_m = g_ecx;                 /* M, and s as it comes in (0x860B0) */
+        g_sea60.ts_sin = g_esi;
+        g_eax = (uint32_t)sea60_clamp_dt();
+        break;
     case 0x000864FEu: S60_MEM32(g_esp + 0x24u) = sea60_clamp_dt(); break;
     case 0x00086588u: g_eax = (uint32_t)sea60_clamp_dt(); break;
 
@@ -1129,8 +1169,74 @@ void recomp_guest_hook(uint32_t va)
      * scaled, is close enough to the same curve in time ((1-1/64)^2 for
      * (1-1/32) at 60). */
     case 0x0007FE90u: g_eax = (uint32_t)((int32_t)g_eax * g_sea60.dt * 3 / 100); break;
+    /* sub_00078EC0, called every frame for each ship (the HUD for ours, the
+     * AI step for theirs): a value eased 1/16 of the way to its target, or
+     * 1/8 toward a random one. Both steps scaled. */
+    case 0x00078F69u:
+    case 0x00078F9Bu: g_ecx = (uint32_t)((int32_t)g_ecx * g_sea60.dt * 3 / 100); break;
+    /* The time acceleration 0x40D4C4: each frame the game eases it toward
+     * frame time x M / 33 (M at 0x86078 in ecx: 200..599, or 100, 50 or 1
+     * when it forces the value), s += (target - s)/16 + c, c = +-1, and the
+     * result is a per-frame amount. Its fixed points are integer effects
+     * of that formula, so it is run here as the console runs it: a 30 fps
+     * value x, stepped on each logic tick with the 33 ms target M, and this
+     * frame's share x * dt / 33.3 stored (remainder carried). A value the
+     * game forced in (not the one stored last) restarts x. */
+    case 0x000860B0u: {                                /* mov [0x40D4C4], esi */
+        int32_t sin = (int32_t)g_sea60.ts_sin, m = (int32_t)g_sea60.ts_m, d, c;
+        int64_t v;
+        if (!g_sea60.ts_valid || sin != g_sea60.ts_last) {
+            g_sea60.ts_x = sin;
+            g_sea60.ts_rem = 0;
+            g_sea60.ts_valid = 1;
+        }
+        if (g_sea60.tick) {
+            d = m - g_sea60.ts_x;
+            c = d > 0 ? 1 : (d == 0 ? 0 : -1);
+            g_sea60.ts_x += d / 16 + c;               /* sar 4 after +15: toward zero */
+        }
+        v = (int64_t)g_sea60.ts_x * g_sea60.dt * 3 + g_sea60.ts_rem;
+        g_esi = (uint32_t)(int32_t)(v / 100);
+        g_sea60.ts_rem = (int32_t)(v % 100);
+        g_sea60.ts_last = (int32_t)g_esi;
+        break;
+    }
+    /* sub_00077680: one chance in 150 a frame (rand() % 150 == 0). */
+    case 0x00077C81u: if (skip) g_edx |= 1u; break;
     default: break;
     }
+}
+
+/* RECOMP_PIRATES_SEA60_RANDLOG=1 (debug): rand() (sub_002E0424, the CRT's)
+ * calls per second by caller while sailing, every 20 s to the log: a check
+ * made every frame against rand() happens twice as often at 60. */
+extern void sub_002E0424_gen(void);
+void sub_002E0424(void)
+{
+    static int log = -1;
+    static uint32_t ra_seen[256], n_seen[256], t0;
+    static int nra;
+    if (log < 0) log = getenv("RECOMP_PIRATES_SEA60_RANDLOG") != NULL;
+    if (log && pirates_host_ms() - g_sea60.last_ms <= 250u) {
+        uint32_t ra = *(volatile uint32_t *)((uintptr_t)g_esp + g_xbox_mem_offset);
+        uint32_t now = pirates_host_ms();
+        int i;
+        for (i = 0; i < nra && ra_seen[i] != ra; i++) ;
+        if (i == nra && nra < 256) ra_seen[nra++] = ra;
+        if (i < 256) n_seen[i]++;
+        if (!t0) t0 = now;
+        if (now - t0 >= 20000u) {
+            for (i = 0; i < nra; i++)
+                if (n_seen[i])
+                    fprintf(stderr, "[SEA60] rand from 0x%08X %.2f/s\n", ra_seen[i],
+                            n_seen[i] * 1000.0 / (now - t0));
+            fprintf(stderr, "[SEA60] rand window %u ms\n", now - t0);
+            fflush(stderr);
+            memset(n_seen, 0, sizeof n_seen);
+            t0 = now;
+        }
+    }
+    sub_002E0424_gen();
 }
 
 extern void sub_001A958A_gen(void);
@@ -1140,7 +1246,7 @@ extern int hle_frame_interp(void);   /* toolkit: frames shown per frame drawn, n
 extern void xbox_Nv2aFlipGateSetTitleInterval(uint32_t interval);
 extern int xbox_Nv2aFlipGateVblanksPerSwap(void);
 #define PIRATES_LIMITER_SEA  0x00091DE1u     /* after the limiters' tick reads: */
-#define PIRATES_LIMITER_SEA2 0x000A4AEEu     /* the sea (two loops), */
+#define PIRATES_LIMITER_SEA2 0x000A4AEEu     /* the town sneak (sub_000A1E10, town.cpp; long taken for a second sea loop), */
 #define PIRATES_LIMITER_BTL  0x000C3B4Eu     /* ship battles */
 #define PIRATES_LIMITER_DUEL 0x00036C60u     /* sword duels (120 ms when slowed) */
 #define PIRATES_LIMITER_30MS 0x0004DF8Fu     /* a 30 ms copy (sub_0004DE..) */
