@@ -385,3 +385,10 @@ Each one, with the reason it exists:
   edge test answers how far to move a draw, in the title's pixels, rather
   than which edge: the game moves each HUD group so its gap to the side edge
   equals its gap to the top (the compass: the bottom) on screen.
+
+- **0040-bumpers-as-triggers** (`src/config/recomp_config.c`, `.h`,
+  `src/input/input_bindings.c`). A title can set
+  `RECOMP_TITLE_BUMPERS_AS_TRIGGERS=1` on `xbox_config`: the default pad
+  bindings then give LB the left trigger and RB the right, as LT and RT
+  still do, and the Xbox's Black and White keep only their keys (W, Q). This
+  game sets it. A bindings file from the launcher overrides the defaults.
