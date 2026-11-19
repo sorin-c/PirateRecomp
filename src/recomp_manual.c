@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <stddef.h>   /* ptrdiff_t: not in stdlib.h off MSVC */
 #include <stdlib.h>   /* getenv, exit: the spin verdict below */
+#include <time.h>     /* timespec_get: the HUD's world-scene test */
 #include <string.h>   /* strcmp: RECOMP_ICALL_FATAL */
 
 /* One diagnostic report, one piece.
@@ -226,7 +227,27 @@ static volatile int g_pirates_front = -1;   /* -1 not said yet */
  * 35-row bottom gap a 30-pixel one. Measured at sea, widescreen: the ring
  * edges of the 4:3 layout at buffer x 87 (sword), 676 (food), 678 (compass).
  * The date banner (bottom middle), the town labels (their own 128x64 boxes)
- * and the world stay where they are. */
+ * and the world stay where they are.
+ *
+ * Only while a game-world scene runs: the pause menu (status, ship, log,
+ * the world map's "Select City") and the town menus draw their text and
+ * button prompts from the same font and icon sheets, laid out for 16:9 by
+ * the game itself, and the test moved them too -- the map's B BACK prompt
+ * slid off its box past the right edge, FLEET STORES and the scroll's R
+ * button out of place (xemu, widescreen, draws them where they were). Those
+ * screens never reach the world's frame waits (sub_001A958A below), so the
+ * test answers 0 unless one of those waits ran in the last 150 ms. */
+#define PIRATES_WORLD_RECENT_MS 150u
+static volatile uint32_t g_pirates_world_ms;   /* host ms of the last world frame wait */
+static volatile int      g_pirates_world_seen;
+
+static uint32_t pirates_host_ms(void)
+{
+    struct timespec ts;
+    if (!timespec_get(&ts, TIME_UTC))
+        return 0;
+    return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
+}
 typedef int (*pirates_edge_test_t)(uint32_t handle, unsigned w, unsigned h, unsigned fmt,
                                    const void *vertices, unsigned stride, unsigned count,
                                    const float *world, const float *view, const float *proj);
@@ -258,6 +279,8 @@ static int pirates_hud_edge(uint32_t handle, unsigned w, unsigned h, unsigned fm
     if (handle != 0x142u || !(fmt == 0x0Fu && w == 128u && h == 32u) &&
         !(fmt == 0x0Eu && w == 256u && h == 256u))
         return 0;
+    if (!g_pirates_world_seen || pirates_host_ms() - g_pirates_world_ms > PIRATES_WORLD_RECENT_MS)
+        return 0;                            /* a menu, not the world */
     pirates_mat_mul(wv, world, view);
     pirates_mat_mul(m, wv, proj);
     for (i = 0; i < count; i++) {
@@ -554,8 +577,11 @@ void sub_001A958A(void)
     if (g_pirates_front < 0)
         pirates_front_end(1);            /* start-up is the front end */
     if (ra == 0x00091DE1u || ra == 0x000A4AEEu || ra == 0x000C3B4Eu ||
-        ra == 0x00036C60u || ra == 0x0004DF8Fu)
+        ra == 0x00036C60u || ra == 0x0004DF8Fu) {
         pirates_front_end(0);            /* sea, battle, duel: the game world */
+        g_pirates_world_ms = pirates_host_ms();
+        g_pirates_world_seen = 1;
+    }
     {   /* RECOMP_PIRATES_TICK_SITES=1: name each new caller once (which
          * limiter a scene uses) */
         static int sites = -1;
