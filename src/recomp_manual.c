@@ -213,10 +213,71 @@ extern void xbox_D3D8SetWideFrames(int wide);
  * (sub_00021D70). */
 static volatile int g_pirates_front = -1;   /* -1 not said yet */
 
+/* The HUD in widescreen: the game draws it as quads in front of the camera
+ * (FVF 0x142) at its 4:3 places, so in 16:9 the crew count, the food and
+ * the compass sat inside the middle 4:3. Moved sideways to the picture's
+ * edges (xbox_D3D8SetEdgeTest): pieces drawn from the HUD bar (128x32) or
+ * the icon and font sheets (256x256) whose middle is in the top band or the
+ * bottom-right corner, by which third of the screen they are in. The date
+ * banner (bottom middle), the town labels (their own 128x64 boxes) and the
+ * world stay where they are. */
+typedef int (*pirates_edge_test_t)(uint32_t handle, unsigned w, unsigned h, unsigned fmt,
+                                   const void *vertices, unsigned stride, unsigned count,
+                                   const float *world, const float *view, const float *proj);
+extern void xbox_D3D8SetEdgeTest(pirates_edge_test_t test);
+
+static void pirates_mat_mul(float *o, const float *a, const float *b)
+{
+    int r, c, k;
+    for (r = 0; r < 4; r++)
+        for (c = 0; c < 4; c++) {
+            float v = 0.0f;
+            for (k = 0; k < 4; k++)
+                v += a[r * 4 + k] * b[k * 4 + c];
+            o[r * 4 + c] = v;
+        }
+}
+
+static int pirates_hud_edge(uint32_t handle, unsigned w, unsigned h, unsigned fmt,
+                            const void *vertices, unsigned stride, unsigned count,
+                            const float *world, const float *view, const float *proj)
+{
+    float wv[16], m[16], lo_x = 1e9f, hi_x = -1e9f, lo_y = 1e9f, hi_y = -1e9f, cx, cy;
+    unsigned i;
+
+    if (handle != 0x142u || !(fmt == 0x0Fu && w == 128u && h == 32u) &&
+        !(fmt == 0x0Eu && w == 256u && h == 256u))
+        return 0;
+    pirates_mat_mul(wv, world, view);
+    pirates_mat_mul(m, wv, proj);
+    for (i = 0; i < count; i++) {
+        const float *v = (const float *)((const char *)vertices + (size_t)i * stride);
+        float x = v[0] * m[0] + v[1] * m[4] + v[2] * m[8]  + m[12];
+        float y = v[0] * m[1] + v[1] * m[5] + v[2] * m[9]  + m[13];
+        float ww = v[0] * m[3] + v[1] * m[7] + v[2] * m[11] + m[15];
+        if (!(ww > 1e-6f))
+            return 0;
+        x = (x / ww * 0.5f + 0.5f) * 720.0f;
+        y = (0.5f - y / ww * 0.5f) * 480.0f;
+        if (x < lo_x) lo_x = x;
+        if (x > hi_x) hi_x = x;
+        if (y < lo_y) lo_y = y;
+        if (y > hi_y) hi_y = y;
+    }
+    cx = (lo_x + hi_x) * 0.5f;
+    cy = (lo_y + hi_y) * 0.5f;
+    if (cy < 100.0f)                         /* top band: crew, food */
+        return cx < 240.0f ? -1 : cx > 480.0f ? 1 : 0;
+    if (cy > 360.0f && cx > 480.0f)          /* bottom right: the compass */
+        return 1;
+    return 0;
+}
+
 static void pirates_front_end(int on)
 {
     if (g_pirates_front != on) {
         g_pirates_front = on;
+        xbox_D3D8SetEdgeTest(pirates_hud_edge);
         xbox_D3D8SetWideFrames(on ? 0 : 1);
     }
 }

@@ -371,3 +371,12 @@ Each one, with the reason it exists:
   new-career nation choice and town taverns); xemu draws them with set 0
   for both textures, and taken literally the lightmap was read with the
   wrong coordinates and the tables came out as a black-patched mosaic.
+
+- **0038-hud-edge-pinning** (`src/d3d/d3d8_device.c`, `d3d8_xbox.h`). Edge
+  pinning (`xbox_D3D8SetEdgeTest`) for a title with its own 16:9 mode whose
+  HUD keeps its 4:3 places: in widescreen the title's test (given the draw's
+  vertex shader handle, stage 0's texture, the vertices and the matrices)
+  moves a draw sideways by the 4:3 layout's margin, to the left or right
+  edge. The game's sea HUD uses it (`recomp_manual.c`): the crew count goes
+  to the left edge, the food and the compass to the right; the date banner,
+  the town labels and the world stay where they are.
