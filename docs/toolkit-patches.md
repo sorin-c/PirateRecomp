@@ -380,3 +380,8 @@ Each one, with the reason it exists:
   edge. The game's sea HUD uses it (`recomp_manual.c`): the crew count goes
   to the left edge, the food and the compass to the right; the date banner,
   the town labels and the world stay where they are.
+
+- **0039-edge-pinning-offset** (`src/d3d/d3d8_device.c`, `d3d8_xbox.h`). The
+  edge test answers how far to move a draw, in the title's pixels, rather
+  than which edge: the game moves each HUD group so its gap to the side edge
+  equals its gap to the top (the compass: the bottom) on screen.

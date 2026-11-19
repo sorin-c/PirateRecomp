@@ -215,12 +215,18 @@ static volatile int g_pirates_front = -1;   /* -1 not said yet */
 
 /* The HUD in widescreen: the game draws it as quads in front of the camera
  * (FVF 0x142) at its 4:3 places, so in 16:9 the crew count, the food and
- * the compass sat inside the middle 4:3. Moved sideways to the picture's
- * edges (xbox_D3D8SetEdgeTest): pieces drawn from the HUD bar (128x32) or
- * the icon and font sheets (256x256) whose middle is in the top band or the
- * bottom-right corner, by which third of the screen they are in. The date
- * banner (bottom middle), the town labels (their own 128x64 boxes) and the
- * world stay where they are. */
+ * the compass sat inside the middle 4:3. Moved sideways towards the
+ * picture's edges (xbox_D3D8SetEdgeTest): pieces drawn from the HUD bar
+ * (128x32) or the icon and font sheets (256x256) whose middle is in the top
+ * band or the bottom-right corner, by which third of the screen they are in.
+ * Each group ends as far from its side edge as it is from the top (the
+ * compass: from the bottom), on screen, so its corner looks square: in the
+ * 720-wide buffer that the 16:9 picture stretches by 1.185, the sword ring's
+ * 41-row top gap is a 35-pixel side gap, the food's the same, the compass's
+ * 35-row bottom gap a 30-pixel one. Measured at sea, widescreen: the ring
+ * edges of the 4:3 layout at buffer x 87 (sword), 676 (food), 678 (compass).
+ * The date banner (bottom middle), the town labels (their own 128x64 boxes)
+ * and the world stay where they are. */
 typedef int (*pirates_edge_test_t)(uint32_t handle, unsigned w, unsigned h, unsigned fmt,
                                    const void *vertices, unsigned stride, unsigned count,
                                    const float *world, const float *view, const float *proj);
@@ -237,6 +243,10 @@ static void pirates_mat_mul(float *o, const float *a, const float *b)
             o[r * 4 + c] = v;
         }
 }
+
+#define PIRATES_HUD_DX_LEFT    (-53)    /* sword ring 87 -> 35 (now 47 -> 35: 40 + 13) */
+#define PIRATES_HUD_DX_RIGHT   (57)     /* food ring 676 -> 720 - 35 */
+#define PIRATES_HUD_DX_COMPASS (64)     /* compass ring 678 -> 720 - 30 */
 
 static int pirates_hud_edge(uint32_t handle, unsigned w, unsigned h, unsigned fmt,
                             const void *vertices, unsigned stride, unsigned count,
@@ -267,9 +277,9 @@ static int pirates_hud_edge(uint32_t handle, unsigned w, unsigned h, unsigned fm
     cx = (lo_x + hi_x) * 0.5f;
     cy = (lo_y + hi_y) * 0.5f;
     if (cy < 100.0f)                         /* top band: crew, food */
-        return cx < 240.0f ? -1 : cx > 480.0f ? 1 : 0;
+        return cx < 240.0f ? PIRATES_HUD_DX_LEFT : cx > 480.0f ? PIRATES_HUD_DX_RIGHT : 0;
     if (cy > 360.0f && cx > 480.0f)          /* bottom right: the compass */
-        return 1;
+        return PIRATES_HUD_DX_COMPASS;
     return 0;
 }
 
