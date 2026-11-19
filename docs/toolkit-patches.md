@@ -392,3 +392,10 @@ Each one, with the reason it exists:
   bindings then give LB the left trigger and RB the right, as LT and RT
   still do, and the Xbox's Black and White keep only their keys (W, Q). This
   game sets it. A bindings file from the launcher overrides the defaults.
+
+- **0041-bumpers-black-white-by-scene** (`src/input/input_bindings.c`,
+  `.h`). With the bumpers-as-triggers defaults (0040), LB and RB are bound
+  twice, to the triggers and to Black and White, and
+  `recomp_bindings_set_bumper_test` lets the title say, at each sample, which
+  job they do now. This game makes them Black and White while sailing (the
+  map overlay and the sails) and the triggers everywhere else.
