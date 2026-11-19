@@ -595,6 +595,544 @@ found with RECOMP_PIRATES_TICK_SITES=1); on the console the Swap then
  * frame_cap other than adaptive or 30 the game keeps its own wait (normal
  * speed, no frames in between there; patch 0016). Without frame
  * interpolation nothing changes. */
+/* ── SEA60 SPIKE (debug, measurement only) ──────────────────────
+ *
+ * RECOMP_PIRATES_SEA_WAIT_MS=N (default 31 = unchanged): with frame
+ * interpolation off, the sea's frame limiter (0x91DE1, 0xA4AEE) passes after
+ * N ms instead of 31, so the gate's one Swap a vblank paces sailing (N <= 16:
+ * 60 a second). Battles, duels and towns keep their waits.
+ *
+ * RECOMP_PIRATES_SEA_LOG=<folder>: at each sea frame's start (0x9190F,
+ * 0xA43FA) append to frames.txt: host ms, game tick, frame counter 0x4D67D8,
+ * then each dword of RECOMP_PIRATES_SEA_WATCH (hex addresses, comma list).
+ * Also keep, over .data (0x400400..0x5083C0), per dword the sum of |delta|
+ * frame to frame (as int and as float) and the count of changes, and write
+ * them to stats_<n>.bin every 10 s (cumulative, with host ms and frames),
+ * and a raw snapshot of the range every RECOMP_PIRATES_SEA_SNAP_MS (0 = off)
+ * to snaps.bin. */
+extern int recomp_config_int(const char *env_name, const char *key, int fallback);
+
+
+/* RECOMP_PIRATES_SEA_WWATCH="a1,a2,..." (hex guest addresses, each a dword):
+ * while sea frames run, the host pages holding them are read-only; a vectored
+ * handler records every write to a watched dword (host RIP, delta), steps it
+ * with the trap flag and protects the page again. Every 10 s the table goes
+ * to wwatch.txt with the lifted function named from the PDB (dbghelp). */
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <dbghelp.h>
+#define WW_MAX 32
+#define WW_SITES 512
+static uint32_t ww_addr[WW_MAX];
+static int ww_n, ww_armed;
+static struct { uint64_t rip; uint32_t addr; int64_t sumd; uint32_t n; int32_t lastd; } ww_site[WW_SITES];
+static int ww_nsite;
+static __declspec(thread) uintptr_t ww_page_pending;
+static __declspec(thread) uint32_t ww_old[WW_MAX];
+static __declspec(thread) uint64_t ww_pending_rip;
+static uintptr_t ww_pages[WW_MAX];
+static int ww_npages;
+
+static LONG CALLBACK ww_handler(EXCEPTION_POINTERS *ep)
+{
+    DWORD code = ep->ExceptionRecord->ExceptionCode;
+    if (code == EXCEPTION_ACCESS_VIOLATION && ep->ExceptionRecord->ExceptionInformation[0] == 1) {
+        uintptr_t fa = (uintptr_t)ep->ExceptionRecord->ExceptionInformation[1];
+        uintptr_t pg = fa & ~(uintptr_t)0xFFF;
+        int i, hit = 0;
+        DWORD old;
+        for (i = 0; i < ww_npages; i++) if (ww_pages[i] == pg) hit = 1;
+        if (!hit) return EXCEPTION_CONTINUE_SEARCH;
+        for (i = 0; i < ww_n; i++)
+            ww_old[i] = *(volatile uint32_t *)((uintptr_t)ww_addr[i] + g_xbox_mem_offset);
+        ww_pending_rip = ep->ContextRecord->Rip;
+        VirtualProtect((void *)pg, 0x1000, PAGE_READWRITE, &old);
+        ww_page_pending = pg;
+        ep->ContextRecord->EFlags |= 0x100;   /* trap after the write */
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    if (code == EXCEPTION_SINGLE_STEP && ww_page_pending) {
+        DWORD old;
+        {
+            int k, i;
+            for (k = 0; k < ww_n; k++) {
+                int32_t d = (int32_t)(*(volatile uint32_t *)((uintptr_t)ww_addr[k] + g_xbox_mem_offset) - ww_old[k]);
+                if (!d) continue;
+                for (i = 0; i < ww_nsite; i++)
+                    if (ww_site[i].rip == ww_pending_rip && ww_site[i].addr == ww_addr[k]) break;
+                if (i == ww_nsite && ww_nsite < WW_SITES) {
+                    ww_site[i].rip = ww_pending_rip; ww_site[i].addr = ww_addr[k]; ww_nsite++;
+                }
+                if (i < WW_SITES) { ww_site[i].n++; ww_site[i].sumd += d; ww_site[i].lastd = d; }
+            }
+        }
+        if (ww_armed)
+            VirtualProtect((void *)ww_page_pending, 0x1000, PAGE_READONLY, &old);
+        ww_page_pending = 0;
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static void ww_arm(int on)
+{
+    int i; DWORD old;
+    if (on == ww_armed) return;
+    ww_armed = on;
+    for (i = 0; i < ww_npages; i++)
+        VirtualProtect((void *)ww_pages[i], 0x1000, on ? PAGE_READONLY : PAGE_READWRITE, &old);
+}
+
+typedef BOOL (WINAPI *ww_syminit_t)(HANDLE, PCSTR, BOOL);
+typedef BOOL (WINAPI *ww_symfrom_t)(HANDLE, DWORD64, PDWORD64, void *);
+typedef BOOL (WINAPI *ww_symline_t)(HANDLE, DWORD64, PDWORD, IMAGEHLP_LINE64 *);
+static void ww_report(const char *dir, uint32_t frames, uint32_t ms)
+{
+    static ww_syminit_t si; static ww_symfrom_t sf; static ww_symline_t sl; static int tried;
+    char fn[512]; FILE *fp; int i;
+    if (!tried) {
+        HMODULE h = LoadLibraryA("dbghelp.dll");
+        tried = 1;
+        if (h) { si = (ww_syminit_t)GetProcAddress(h, "SymInitialize"); sf = (ww_symfrom_t)GetProcAddress(h, "SymFromAddr"); sl = (ww_symline_t)GetProcAddress(h, "SymGetLineFromAddr64"); }
+        if (si) si(GetCurrentProcess(), NULL, TRUE);
+    }
+    snprintf(fn, sizeof fn, "%s/wwatch.txt", dir);
+    if ((fp = fopen(fn, "w")) == NULL) return;
+    fprintf(fp, "# frames %u ms %u\n", frames, ms);
+    for (i = 0; i < ww_nsite; i++) {
+        struct { SYMBOL_INFO si; char name[256]; } s;
+        DWORD64 disp = 0;
+        const char *name = "?";
+        memset(&s, 0, sizeof s);
+        s.si.SizeOfStruct = sizeof(SYMBOL_INFO); s.si.MaxNameLen = 255;
+        IMAGEHLP_LINE64 ln; DWORD ld = 0; const char *file = "?"; unsigned line = 0;
+        memset(&ln, 0, sizeof ln); ln.SizeOfStruct = sizeof ln;
+        if (sf && sf(GetCurrentProcess(), ww_site[i].rip, &disp, &s.si)) name = s.si.Name;
+        if (sl && sl(GetCurrentProcess(), ww_site[i].rip, &ld, &ln)) { file = ln.FileName; line = ln.LineNumber; }
+        { const char *b = strrchr(file, '\\'); if (b) file = b + 1; }
+        fprintf(fp, "%08X %s+0x%llX %s:%u changes %u (%.2f/frame) sum %lld (%.3f/frame) last %d\n",
+                ww_site[i].addr, name, (unsigned long long)disp, file, line, ww_site[i].n,
+                frames ? (double)ww_site[i].n / frames : 0.0, (long long)ww_site[i].sumd,
+                frames ? (double)ww_site[i].sumd / frames : 0.0, ww_site[i].lastd);
+    }
+    fclose(fp);
+}
+
+static void ww_init(void)
+{
+    const char *w = getenv("RECOMP_PIRATES_SEA_WWATCH");
+    int i, j;
+    while (w && *w && ww_n < WW_MAX) {
+        char *e;
+        ww_addr[ww_n++] = (uint32_t)strtoul(w, &e, 16);
+        w = (*e == ',') ? e + 1 : NULL;
+    }
+    for (i = 0; i < ww_n; i++) {
+        uintptr_t pg = ((uintptr_t)ww_addr[i] + g_xbox_mem_offset) & ~(uintptr_t)0xFFF;
+        for (j = 0; j < ww_npages && ww_pages[j] != pg; j++) ;
+        if (j == ww_npages) ww_pages[ww_npages++] = pg;
+    }
+    if (ww_n) {
+        AddVectoredExceptionHandler(1, ww_handler);
+        fprintf(stderr, "[SEA60] write watch on %d dwords, %d pages\n", ww_n, ww_npages);
+    }
+}
+#else
+static void ww_init(void) {}
+static void ww_arm(int on) { (void)on; }
+static void ww_report(const char *d, uint32_t f, uint32_t m) { (void)d; (void)f; (void)m; }
+static int ww_n;
+#endif
+
+/* sea_60 state shown in frames.txt: active, tick, dt, acc3 (set below) */
+static int g_sea60_dbg[4]; static uint32_t g_sea60_dbg_bumps;
+#define SEA60_LO 0x00400400u
+#define SEA60_HI 0x005083C0u
+#define SEA60_N  ((SEA60_HI - SEA60_LO) / 4u)
+static void sea60_frame(uint32_t tick)
+{
+    static int on = -1, nwatch, nstat;
+    static char dir[400];
+    static uint32_t watch[64];
+    static FILE *ff, *fs;
+    static uint32_t *prev, *chg, t0, last_stat, last_snap, frames, snap_ms;
+    static uint64_t *iabs;
+    static double *fabs_;
+    uint32_t now = pirates_host_ms(), i;
+    const uint32_t *cur = (const uint32_t *)((uintptr_t)SEA60_LO + g_xbox_mem_offset);
+
+    if (on < 0) {
+        const char *v = recomp_config_lookup("RECOMP_PIRATES_SEA_LOG", "sea_log");
+        const char *w = getenv("RECOMP_PIRATES_SEA_WATCH");
+        char fn[512];
+        on = v && *v && strcmp(v, "0") != 0;
+        if (!on)
+            return;
+        snprintf(dir, sizeof dir, "%s", v);
+        snap_ms = (uint32_t)recomp_config_int("RECOMP_PIRATES_SEA_SNAP_MS", "sea_snap_ms", 0);
+        while (w && *w && nwatch < 64) {
+            char *e;
+            watch[nwatch++] = (uint32_t)strtoul(w, &e, 16);
+            w = (*e == ',') ? e + 1 : NULL;
+        }
+        snprintf(fn, sizeof fn, "%s/frames.txt", dir);
+        ff = fopen(fn, "w");
+        if (ff) setvbuf(ff, NULL, _IOFBF, 1 << 20);
+        prev = (uint32_t *)malloc(SEA60_N * 4u);
+        chg = (uint32_t *)calloc(SEA60_N, 4u);
+        iabs = (uint64_t *)calloc(SEA60_N, 8u);
+        fabs_ = (double *)calloc(SEA60_N, sizeof(double));
+        memcpy(prev, cur, SEA60_N * 4u);
+        t0 = last_stat = now;
+        fprintf(stderr, "[SEA60] logging to %s, %d watches, snap %u ms\n", dir, nwatch, snap_ms);
+        ww_init();
+#ifdef _WIN32
+        fprintf(stderr, "[SEA60] clock sync host_ms %u tick64 %llu\n", now,
+                (unsigned long long)GetTickCount64());
+#endif
+        return;
+    }
+    if (!on)
+        return;
+    {   /* RECOMP_PIRATES_SEA_PIN="x y ms": back to open water every ms */
+        static int pin = -1, px, py, pms, ph = -1, pv = -1;
+        static uint32_t last_pin;
+        if (pin < 0) {
+            const char *p = getenv("RECOMP_PIRATES_SEA_PIN");
+            pin = p && sscanf(p, "%d %d %d %d %d", &px, &py, &pms, &ph, &pv) >= 3;
+            last_pin = now;
+        }
+        if (pin && now - last_pin >= (uint32_t)pms) {
+            last_pin = now;
+            *(volatile int32_t *)((uintptr_t)0x004564BCu + g_xbox_mem_offset) = px * 4000000;
+            *(volatile int32_t *)((uintptr_t)0x004564C0u + g_xbox_mem_offset) = py * 4000000;
+            if (ph >= 0)   /* "x y ms heading speed": heading (degrees) and speed too */
+                *(volatile uint32_t *)((uintptr_t)0x004564C4u + g_xbox_mem_offset) = (uint32_t)((uint64_t)ph * 0x100000000ull / 360u);
+            if (pv >= 0)
+                *(volatile int32_t *)((uintptr_t)0x004564C8u + g_xbox_mem_offset) = pv;
+            if (ff) fprintf(ff, "# pin\n");
+        }
+    }
+    {   /* RECOMP_PIRATES_SEA_POKE="addr=value@ms,...": set a dword once, ms
+         * after logging began (start a countdown in both runs alike). */
+        static int np = -1;
+        static uint32_t pa[16], pv[16], pt[16], done[16];
+        int k;
+        if (np < 0) {
+            const char *p = getenv("RECOMP_PIRATES_SEA_POKE");
+            np = 0;
+            while (p && *p && np < 16) {
+                unsigned a2, v2, t2;
+                if (sscanf(p, "%x=%u@%u", &a2, &v2, &t2) != 3) break;
+                pa[np] = a2; pv[np] = v2; pt[np] = t2; done[np] = 0; np++;
+                p = strchr(p, ',');
+                if (p) p++;
+            }
+        }
+        for (k = 0; k < np; k++)
+            if (!done[k] && now - t0 >= pt[k]) {
+                done[k] = 1;
+                *(volatile uint32_t *)((uintptr_t)pa[k] + g_xbox_mem_offset) = pv[k];
+                if (ff) fprintf(ff, "# poke %08X=%u\n", pa[k], pv[k]);
+            }
+    }
+    frames++;
+    if (ww_n) ww_arm(1);
+    if (ff) {
+        fprintf(ff, "%u %u %u", now, tick, *(volatile uint32_t *)((uintptr_t)0x004D67D8u + g_xbox_mem_offset));
+        for (i = 0; i < (uint32_t)nwatch; i++)
+            fprintf(ff, " %d", *(volatile int32_t *)((uintptr_t)watch[i] + g_xbox_mem_offset));
+        fprintf(ff, " | %d %d %d %d\n", g_sea60_dbg[0], g_sea60_dbg[1], g_sea60_dbg[2], g_sea60_dbg[3]);
+    }
+    for (i = 0; i < SEA60_N; i++) {
+        uint32_t a = cur[i], b = prev[i];
+        if (a != b) {
+            int32_t d = (int32_t)(a - b);
+            float fa, fb;
+            chg[i]++;
+            iabs[i] += (uint64_t)(d < 0 ? -(int64_t)d : (int64_t)d);
+            memcpy(&fa, &a, 4); memcpy(&fb, &b, 4);
+            if (fa == fa && fb == fb && fa < 1e30f && fa > -1e30f && fb < 1e30f && fb > -1e30f)
+                fabs_[i] += fa > fb ? (double)fa - fb : (double)fb - fa;
+            prev[i] = a;
+        }
+    }
+    if (snap_ms && now - last_snap >= snap_ms) {
+        char fn[512];
+        last_snap = now;
+        if (!fs) { snprintf(fn, sizeof fn, "%s/snaps.bin", dir); fs = fopen(fn, "wb"); }
+        if (fs) {
+            uint32_t hdr[4] = { 0x53454136u, now, frames, SEA60_N };
+            fwrite(hdr, 4, 4, fs); fwrite(cur, 4, SEA60_N, fs); fflush(fs);
+        }
+    }
+    if (now - last_stat >= 10000u) {
+        char fn[512];
+        FILE *fp;
+        last_stat = now;
+        snprintf(fn, sizeof fn, "%s/stats_%03d.bin", dir, nstat++);
+        if ((fp = fopen(fn, "wb")) != NULL) {
+            uint32_t hdr[4] = { 0x53454137u, now - t0, frames, SEA60_N };
+            fwrite(hdr, 4, 4, fp); fwrite(chg, 4, SEA60_N, fp);
+            fwrite(iabs, 8, SEA60_N, fp); fwrite(fabs_, sizeof(double), SEA60_N, fp);
+            fclose(fp);
+        }
+        if (ff) fflush(ff);
+        if (ww_n) ww_report(dir, frames, now - t0);
+    }
+}
+
+/* ── Sid Meier's Pirates!: sailing at 60 frames a second (sea_60) ─────
+ *
+ * sea_60 = 1 (RECOMP_PIRATES_SEA_60, or the F2 menu's "Sailing at 60 fps",
+ * applies at once; off by default) runs the sea's own game logic 60 times a
+ * second at the speed it has at 30. Battles, duels, towns, the map and the
+ * menus keep their pacing. Off, nothing below runs and the game is as before.
+ *
+ * Pacing: the sea's frame wait (sub_001A958A, 0x91DE1 / 0xA4AEE) passes
+ * after SEA60_WAIT_MS instead of 31 and the flip gate's one Swap a vblank
+ * holds it to 60. Frame interpolation is not used at sea then (nothing to
+ * fill); battles and duels still use it when it is on.
+ *
+ * The sea already scales motion by its frame time (0x4C72F8, ms, copied from
+ * the engine's delta at 0x91DBC) but clamps that to 33..100 ms in three
+ * places in sub_00085980, so at 16 ms every step was a 33 ms step: ships
+ * sailed and turned twice as fast, AI ships too. Guest hooks (toolkit patch
+ * 0042, config/hooks/5454008F.json) put the real frame time back after each
+ * clamp (floor SEA60_DT_MIN):
+ *   0x86078  time acceleration 0x40D4C4 (feeds positions and the calendar)
+ *   0x864FE  [esp+0x24], the speed computation's frame time
+ *   0x86588  the turn computation's frame time
+ *
+ * The rest of the sea counts frames. That logic runs on a 30 Hz "logic
+ * tick": a sea frame is a tick frame when the frame time accumulated since
+ * the last tick reaches 33.3 ms. At 30 fps every frame ticks (as before);
+ * at 60 every other one. On a frame that does not tick, each hooked step
+ * below is undone before it runs, so the game sees it at 30 Hz:
+ *   0x9259F  the sea frame counter 0x49C288 (timestamps in 0x4C70F0, ages,
+ *            "every 8th frame" tests)
+ *   0x85BC0  countdown 0x4C72FC (frames)
+ *   0x91C19  countdown 0x4D65B8;  0x91C41  countdown 0x4D6600
+ *   0x79433  ship word +0x4564D6 countdown; 0x87240 ship word +0x45650E
+ *   0x86387  ship word +0x4564D0 count
+ *   0x86891  a ship's speed approaching its target (0x4564C8)
+ *   0x785E7  lifetime of the sea objects in 0x4B6434 (sub_000785C0)
+ * The calendar (0x49C284) advances [0x40D4C4]/100 days' ticks a frame,
+ * dropping the remainder, as the console does at 30: with sea_60 the time
+ * scale is summed over the frames of one logic tick and the ticks happen on
+ * the tick frame (hooks 0x85AAD, and 0x85B73 after the loop and its check
+ * for a 4000-tick boundary, which reads the same value).
+ * Steps that are smooth movement are scaled by the frame time instead:
+ *   0x7860C, 0x78620  the sea objects' 100 units a frame
+ *   0x7FEBB  the angle 0x4D652C advanced by [0x4D6530] a frame */
+#define SEA60_WAIT_MS 15u
+#define SEA60_DT_MIN  8
+#define SEA60_DT_MAX  100
+static struct {
+    int setting;          /* sea_60 as last read */
+    int active;           /* this sea frame runs at 60 */
+    int tick;             /* this sea frame advances the 30 Hz logic */
+    int dt;               /* the frame time the sea uses this frame (ms) */
+    int acc3;             /* ms x3 accumulated toward the next tick (100 = 33.3 ms) */
+    uint32_t last_ms;     /* host ms of the last sea frame start */
+    int32_t cal_acc;      /* time scale summed since the last tick */
+    int32_t cal_saved;    /* 0x40D4C4 while the calendar loop runs */
+    int cal_live;
+    uint32_t ticks, frames;
+    int frac;             /* hundredths of a tick to the next one, <= 0 */
+    uint32_t phase_k;     /* a phase step saved by a hook before its imul */
+    uint32_t ctr_pending; /* frame counter bumped for one test, to put back */
+} g_sea60 = { 0, 0, 1, 33, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+
+/* step * frac: how far a phase built as counter * step is from where 60
+ * frames a second put it (0 on a tick frame). */
+static uint32_t sea60_phase(uint32_t step)
+{
+    return (uint32_t)(int32_t)((int64_t)(int32_t)step * g_sea60.frac / 100);
+}
+
+#define S60_MEM32(a)  (*(volatile int32_t *)((uintptr_t)(a) + g_xbox_mem_offset))
+#define S60_MEM16(a)  (*(volatile int16_t *)((uintptr_t)(a) + g_xbox_mem_offset))
+
+/* Once a sea frame, at its start (the tick read at 0x9190F / 0xA43FA). */
+static void sea60_begin_frame(void)
+{
+    uint32_t now = pirates_host_ms();
+    int dt, gap;
+    const char *v = recomp_config_lookup("RECOMP_PIRATES_SEA_60", "sea_60");
+    int on = v && *v && strcmp(v, "0") != 0;
+
+    if (on != g_sea60.setting) {
+        g_sea60.setting = on;
+        fprintf(stderr, "[SEA60] sailing at %s\n", on ? "60 (sea_60 = 1)" : "30 (sea_60 = 0)");
+        fflush(stderr);
+    }
+    gap = g_sea60.last_ms == 0 || now - g_sea60.last_ms > 250u;
+    /* The last frame's length from the host clock, not the engine's: that
+     * one is whole milliseconds truncated (16.67 ms reads 16, so 60 frames
+     * made 960 ms), while these differences add up to the real time. */
+    dt = gap ? 33 : (int)(now - g_sea60.last_ms);
+    g_sea60.last_ms = now;
+    g_sea60.active = on;
+    if (dt < SEA60_DT_MIN) dt = SEA60_DT_MIN;
+    if (dt > SEA60_DT_MAX) dt = SEA60_DT_MAX;
+    g_sea60.dt = dt;
+    if (!on || gap) {
+        /* Off, or a new stretch of sailing (after a battle, a town, the map,
+         * a menu): this frame is a whole tick and nothing is carried in. */
+        g_sea60.tick = 1;
+        g_sea60.acc3 = 0;
+        g_sea60.cal_acc = 0;
+    } else {
+        g_sea60.acc3 += dt * 3;
+        if (g_sea60.acc3 >= 100) {
+            g_sea60.tick = 1;
+            g_sea60.acc3 -= 100;
+            if (g_sea60.acc3 > 100)          /* a long frame: no double debt */
+                g_sea60.acc3 = 100;
+        } else {
+            g_sea60.tick = 0;
+        }
+    }
+    /* Where this frame sits between two ticks, for phases that are the frame
+     * counter times a step: the counter went up at the end of the last tick
+     * frame, so a frame that does not tick is that far before the next one
+     * (in hundredths of a tick, 0 or negative). */
+    g_sea60.frac = g_sea60.tick ? 0 : g_sea60.acc3 - 100;
+    g_sea60.frames++;
+    g_sea60.ticks += (uint32_t)g_sea60.tick;
+    g_sea60_dbg[0] = g_sea60.active; g_sea60_dbg[1] = g_sea60.tick;
+    g_sea60_dbg[2] = g_sea60.dt;     g_sea60_dbg[3] = g_sea60.acc3;
+}
+
+static int sea60_clamp_dt(void)
+{
+    return g_sea60.dt;
+}
+
+/* The title's guest hooks (toolkit patch 0042): run just before the guest
+ * instruction at va. Each does nothing unless sea_60 is on at sea. */
+void recomp_guest_hook(uint32_t va)
+{
+    int skip;
+
+    {   /* RECOMP_PIRATES_SEA60_HOOKLOG=1: how often each hook runs */
+        static int log = -1;
+        static uint32_t va_seen[64], n_seen[64], last;
+        static int nva;
+        int i;
+        if (log < 0) log = getenv("RECOMP_PIRATES_SEA60_HOOKLOG") != NULL;
+        if (log) {
+            for (i = 0; i < nva && va_seen[i] != va; i++) ;
+            if (i == nva && nva < 64) va_seen[nva++] = va;
+            if (i < 64) n_seen[i]++;
+            if (pirates_host_ms() - last > 10000u) {
+                last = pirates_host_ms();
+                for (i = 0; i < nva; i++)
+                    fprintf(stderr, "[SEA60] hook 0x%08X ran %u times (sea frames %u, ticks %u, bumps %u)\n",
+                            va_seen[i], n_seen[i], g_sea60.frames, g_sea60.ticks, g_sea60_dbg_bumps);
+                fflush(stderr);
+            }
+        }
+    }
+    /* Inside the sea loop: its frame runs from the tick read at 0x9190F
+     * past the frame wait to 0x9267B, so "a sea frame began less than
+     * 250 ms ago" (any other scene stops them). */
+    if (!g_sea60.active || pirates_host_ms() - g_sea60.last_ms > 250u)
+        return;
+    skip = !g_sea60.tick;
+    switch (va) {
+    /* The frame-time clamps: what the clamp left, replaced. */
+    case 0x00086078u: g_eax = (uint32_t)sea60_clamp_dt(); break;
+    case 0x000864FEu: S60_MEM32(g_esp + 0x24u) = sea60_clamp_dt(); break;
+    case 0x00086588u: g_eax = (uint32_t)sea60_clamp_dt(); break;
+
+    /* Frame counts: undone on a frame that does not tick. */
+    case 0x0009259Fu: if (skip) S60_MEM32(0x0049C288u) -= 1; break;  /* inc [0x49C288] */
+    case 0x00085BC0u: if (skip) g_eax += 1; break;                    /* dec eax -> 0x4C72FC */
+    case 0x00091C19u: if (skip) S60_MEM32(0x004D65B8u) += 1; break;  /* dec [0x4D65B8] */
+    case 0x00091C41u: if (skip) g_eax += 1; break;                    /* dec eax -> 0x4D6600 */
+    case 0x00079433u: if (skip) S60_MEM16(g_esi + 0x004564D6u) += 1; break;
+    case 0x00087240u: if (skip) S60_MEM16(g_ebx + 0x0045650Eu) += 1; break;
+    case 0x00086387u: if (skip) S60_MEM16(g_ebx + 0x004564D0u) -= 1; break;
+    case 0x00086891u: if (skip) g_eax = (uint32_t)S60_MEM32(g_ebx + 0x004564C8u); break;
+    case 0x000785E7u: if (skip) g_eax = (g_eax & 0xFFFF0000u) | ((g_eax - 1u) & 0xFFFFu); break;
+
+    /* The calendar: the time scale of a whole tick, applied on the tick. */
+    case 0x00085AADu:
+        g_sea60.cal_acc += S60_MEM32(0x0040D4C4u);
+        g_sea60.cal_saved = S60_MEM32(0x0040D4C4u);
+        g_sea60.cal_live = 1;
+        if (skip) {
+            S60_MEM32(0x0040D4C4u) = 0;          /* no ticks this frame */
+        } else {
+            S60_MEM32(0x0040D4C4u) = g_sea60.cal_acc;
+            g_sea60.cal_acc = 0;                 /* the remainder is dropped, as at 30 */
+        }
+        break;
+    case 0x00085B73u:
+        if (g_sea60.cal_live) {
+            S60_MEM32(0x0040D4C4u) = g_sea60.cal_saved;
+            g_sea60.cal_live = 0;
+        }
+        break;
+
+    /* "Every Nth frame" tests on the frame counter: the counter stays put on
+     * a frame that does not tick, so the test would pass twice. Bit 0 set in
+     * the tested register makes it fail on that frame. */
+    case 0x0008216Bu: if (skip) g_ecx |= 1u; break;   /* test cl, 0x7F  */
+    case 0x00083AF1u: if (skip) g_edx |= 1u; break;   /* test dl, 0x1F  */
+    case 0x00084380u: if (skip) g_edx |= 1u; break;
+    case 0x0008448Au: if (skip) g_edx |= 1u; break;
+    case 0x000845FDu: if (skip) g_eax |= 1u; break;   /* test al, 0x1F  */
+    case 0x00084720u: if (skip) g_eax |= 1u; break;
+    case 0x000848C2u: if (skip) g_edx |= 1u; break;
+    case 0x00087537u: if (skip) g_edx |= 1u; break;   /* and edx, 0x80000007 */
+    /* The same as a memory test: bumped for the test, put back after it. */
+    case 0x0007FE92u:                                  /* test [0x49C288], 0xF */
+    case 0x00086702u: {                                /* test [0x49C288], 7   */
+        uint32_t mask = va == 0x0007FE92u ? 0xFu : 7u;
+        /* Only when the test would pass: a bump elsewhere could make it. */
+        if (skip && !(S60_MEM32(0x0049C288u) & mask)) {
+            S60_MEM32(0x0049C288u) += 1;
+            g_sea60.ctr_pending = 1;
+            g_sea60_dbg_bumps++;
+        }
+        break;
+    }
+    case 0x0007FF16u:
+    case 0x00086711u:
+        if (g_sea60.ctr_pending) { S60_MEM32(0x0049C288u) -= 1; g_sea60.ctr_pending = 0; }
+        break;
+
+    /* Phases made as frame counter x step: on a frame that does not tick,
+     * moved back by the part of a step not reached yet, so they turn
+     * smoothly 60 times a second (the hull's bob among them). */
+    case 0x0007F892u: g_ecx += sea60_phase(0x04444444u); break;  /* after imul ecx, 0x4444444 */
+    case 0x00085202u: g_ecx += sea60_phase(0x04444444u); break;
+    case 0x00083F9Fu: g_ecx += sea60_phase(0x016C16C1u); break;
+    case 0x00081CB6u: case 0x00082233u: case 0x0008272Au:    /* imul eax, [0x49C288] */
+        g_sea60.phase_k = g_eax; break;
+    case 0x00081CBDu: case 0x0008223Au: case 0x00082731u:
+        g_eax += sea60_phase(g_sea60.phase_k); break;
+
+    /* Smooth steps, scaled by the frame time (33.3 ms = one console frame). */
+    case 0x0007860Cu:
+    case 0x00078620u: g_eax = (uint32_t)((int32_t)g_eax * g_sea60.dt * 3 / 100); break;
+    /* 0x40D018 moves 1/32 of the way to its target each frame: that step,
+     * scaled, is close enough to the same curve in time ((1-1/64)^2 for
+     * (1-1/32) at 60). */
+    case 0x0007FE90u: g_eax = (uint32_t)((int32_t)g_eax * g_sea60.dt * 3 / 100); break;
+    default: break;
+    }
+}
+
 extern void sub_001A958A_gen(void);
 extern int recomp_config_int(const char *env_name, const char *key, int fallback);
 extern int recomp_settings_default_frame_interp(void);
@@ -626,6 +1164,7 @@ void sub_001A958A(void)
         g_pirates_world_ms = pirates_host_ms();
         g_pirates_world_seen = 1;
         if (ra == 0x00091DE1u || ra == 0x000A4AEEu) {   /* the sea */
+            if (ww_n) ww_arm(0);                 /* SEA60: frame done */
             g_pirates_sea_ms = g_pirates_world_ms;
             g_pirates_sea_seen = 1;
             g_pirates_in_sea_frame = 0;          /* its frame is drawn */
@@ -634,8 +1173,12 @@ void sub_001A958A(void)
             g_pirates_battle_seen = 1;
         }
     }
-    if (ra == 0x0009190Fu || ra == 0x000A43FAu)  /* a sea frame begins */
+    if (ra == 0x0009190Fu || ra == 0x000A43FAu) { /* a sea frame begins */
         g_pirates_in_sea_frame = 1;
+        if (ra == 0x0009190Fu)
+            sea60_begin_frame();         /* sub_00091170, the sea; 0xA43FA is the town sneak */
+        sea60_frame(g_eax);
+    }
     {   /* RECOMP_PIRATES_TICK_SITES=1: name each new caller once (which
          * limiter a scene uses) */
         static int sites = -1;
@@ -673,6 +1216,30 @@ void sub_001A958A(void)
     }
     /* What is in effect now (frame_interp, or the settings menu since). */
     smooth = hle_frame_interp() >= 2;
+    {   /* SEA60 SPIKE: RECOMP_PIRATES_SEA_WAIT_MS */
+        static int sea_wait = -1;
+        if (sea_wait < 0) {
+            sea_wait = recomp_config_int("RECOMP_PIRATES_SEA_WAIT_MS", "sea_wait_ms", 31);
+            if (sea_wait < 0 || sea_wait > 31) sea_wait = 31;
+            if (sea_wait != 31)
+                fprintf(stderr, "[SEA60] sea frame wait %d ms (RECOMP_PIRATES_SEA_WAIT_MS)\n", sea_wait);
+        }
+        if (!smooth && sea_wait != 31 && (ra == PIRATES_LIMITER_SEA || ra == PIRATES_LIMITER_SEA2))
+            g_eax += (uint32_t)(31 - sea_wait);
+    }
+    /* Sailing at 60 (sea_60): the sea's own wait passes at SEA60_WAIT_MS and
+     * the gate's one Swap a vblank paces it; no interpolation at sea. */
+    /* Only the sea's loop (sub_00091170): the second "sea" wait, 0xA4AEE,
+     * is the town sneak's loop (sub_000A1E10, town.cpp), which keeps 30. */
+    if (g_sea60.active && ra == PIRATES_LIMITER_SEA &&
+        pirates_host_ms() - g_sea60.last_ms <= 250u) {
+        g_eax += 31u - SEA60_WAIT_MS;
+        if (at30) {
+            at30 = 0;
+            xbox_Nv2aFlipGateSetTitleInterval(1);
+        }
+        return;
+    }
     if (!smooth) {
         if (at30) {                       /* turned off in a 30 fps scene */
             at30 = 0;
