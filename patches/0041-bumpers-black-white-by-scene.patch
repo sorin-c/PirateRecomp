@@ -1,0 +1,116 @@
+diff --git a/src/input/input_bindings.c b/src/input/input_bindings.c
+index 722f7d5..014fbf4 100644
+--- a/src/input/input_bindings.c
++++ b/src/input/input_bindings.c
+@@ -151,8 +151,17 @@ typedef struct {
+     short arg;              /* key: virtual-key code; pad: button/axis index;
+                              * mouse: RECOMP_MOUSE_* */
+     signed char sign;       /* axis only */
++    unsigned char role;     /* SRC_ROLE_*: a bumper that changes meaning */
+ } Source;
+ 
++/* A bumper in the bumpers-as-triggers defaults is bound twice: to the
++ * trigger and to Black or White. Which one it drives at a moment is the
++ * title's call (recomp_bindings_set_bumper_test): the triggers unless the
++ * test says Black and White now. Sources from a bindings file are always
++ * SRC_ROLE_ALWAYS. */
++enum { SRC_ROLE_ALWAYS, SRC_ROLE_AS_TRIGGER, SRC_ROLE_AS_BLACK_WHITE };
++static RecompBumperTest g_bumper_test;
++
+ typedef struct {
+     unsigned char count;
+     Source src[MAX_SOURCES];
+@@ -299,6 +308,20 @@ static void bind_add(Binding *b, const char *text, int *bad)
+     b->src[b->count++] = s;
+ }
+ 
++static void bind_add_role(Binding *b, const char *text, int role, int *bad)
++{
++    unsigned char n = b->count;
++
++    bind_add(b, text, bad);
++    if (b->count > n)
++        b->src[n].role = (unsigned char)role;
++}
++
++void recomp_bindings_set_bumper_test(RecompBumperTest test)
++{
++    g_bumper_test = test;
++}
++
+ /* ---- defaults ---------------------------------------------------------- */
+ 
+ static void defaults_for(Controller *c, int port)
+@@ -315,16 +338,19 @@ static void defaults_for(Controller *c, int port)
+         if (k < 0)
+             continue;
+         /* A title can give the bumpers to the triggers: LB pulls the left
+-         * trigger and RB the right, as LT and RT still do, and Black and
+-         * White keep only their keys (recomp_title_bumpers_as_triggers). */
++         * trigger and RB the right, as LT and RT still do
++         * (recomp_title_bumpers_as_triggers). Black and White keep their
++         * keys, and get the bumpers back whenever the title's bumper test
++         * says so (recomp_bindings_set_bumper_test). */
+         if (recomp_title_bumpers_as_triggers()) {
+             if (strcmp(DEFAULTS[i].control, "black") == 0 ||
+-                strcmp(DEFAULTS[i].control, "white") == 0)
++                strcmp(DEFAULTS[i].control, "white") == 0) {
++                bind_add_role(&c->bind[k], pad, SRC_ROLE_AS_BLACK_WHITE, &bad);
+                 pad = NULL;
+-            else if (strcmp(DEFAULTS[i].control, "ltrigger") == 0)
+-                bind_add(&c->bind[k], "pad:lshoulder", &bad);
++            } else if (strcmp(DEFAULTS[i].control, "ltrigger") == 0)
++                bind_add_role(&c->bind[k], "pad:lshoulder", SRC_ROLE_AS_TRIGGER, &bad);
+             else if (strcmp(DEFAULTS[i].control, "rtrigger") == 0)
+-                bind_add(&c->bind[k], "pad:rshoulder", &bad);
++                bind_add_role(&c->bind[k], "pad:rshoulder", SRC_ROLE_AS_TRIGGER, &bad);
+         }
+         if (pad)
+             bind_add(&c->bind[k], pad, &bad);
+@@ -1119,7 +1145,7 @@ int recomp_bindings_sample(unsigned port, XBOX_GAMEPAD *out)
+     Controller *c;
+     KeyCache kc;
+     RecompPadState pad;
+-    int have_pad = 0, i;
++    int have_pad = 0, i, black_white;
+     int axis[4] = { 0, 0, 0, 0 };
+ 
+     if (!out)
+@@ -1143,11 +1169,18 @@ int recomp_bindings_sample(unsigned port, XBOX_GAMEPAD *out)
+     if (c->device == DEV_PAD)
+         have_pad = recomp_pad_read(c->pad, &pad);
+ 
++    {
++        RecompBumperTest test = g_bumper_test;
++        black_white = test && test() ? SRC_ROLE_AS_BLACK_WHITE : SRC_ROLE_AS_TRIGGER;
++    }
+     for (i = 0; i < CONTROL_COUNT; i++) {
+         int mag = 0, s;
+ 
+         for (s = 0; s < c->bind[i].count; s++) {
+-            int m = source_magnitude(&c->bind[i].src[s], &kc, &pad, have_pad,
++            int m;
++            if (c->bind[i].src[s].role && c->bind[i].src[s].role != black_white)
++                continue;               /* a bumper doing the other job now */
++            m = source_magnitude(&c->bind[i].src[s], &kc, &pad, have_pad,
+                                      c->deadzone);
+             if (m > mag)
+                 mag = m;
+diff --git a/src/input/input_bindings.h b/src/input/input_bindings.h
+index e7dd074..8e3646d 100644
+--- a/src/input/input_bindings.h
++++ b/src/input/input_bindings.h
+@@ -45,6 +45,13 @@ unsigned recomp_bindings_present_mask(void);
+  * the port has no device. */
+ int recomp_bindings_sample(unsigned port, XBOX_GAMEPAD *out);
+ 
++/* With the bumpers-as-triggers defaults (recomp_title_bumpers_as_triggers),
++ * the title's test, asked at each sample, says whether LB and RB are the
++ * Black and White buttons right now (non-zero) rather than the triggers.
++ * NULL, the default, keeps them the triggers. Safe from any thread. */
++typedef int (*RecompBumperTest)(void);
++void recomp_bindings_set_bumper_test(RecompBumperTest test);
++
+ /* Rumble on the pad this port reads, 0..65535 per motor as XInputSetState
+  * takes it. Nothing happens for a keyboard port or a pad without motors. */
+ void recomp_bindings_rumble(unsigned port, unsigned short low, unsigned short high);

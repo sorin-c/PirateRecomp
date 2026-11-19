@@ -235,8 +235,8 @@ static volatile int g_pirates_front = -1;   /* -1 not said yet */
  * the game itself, and the test moved them too -- the map's B BACK prompt
  * slid off its box past the right edge, FLEET STORES and the scroll's R
  * button out of place (xemu, widescreen, draws them where they were). Those
- * screens never reach the world's frame waits (sub_001A958A below), so the
- * test answers 0 unless one of those waits ran in the last 150 ms. */
+ * screens never run inside the world's frames (sub_001A958A below), so the
+ * test answers 0 outside them (pirates_hud_scene). */
 #define PIRATES_WORLD_RECENT_MS 150u
 static volatile uint32_t g_pirates_world_ms;   /* host ms of the last world frame wait */
 static volatile int      g_pirates_world_seen;
@@ -248,6 +248,26 @@ static uint32_t pirates_host_ms(void)
         return 0;
     return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
 }
+
+/* At sea the answer is exact, frame by frame: the sea's frame functions read
+ * the tick first thing (0x9190F, 0xA43FA: time since the last frame) and
+ * last (their frame waits, 0x91DE1, 0xA4AEE), and draw the HUD in between;
+ * the pause menu's frames run outside them. A timer alone let the first
+ * menu frames (BACK, the scroll's R) and the first sea frames after it (the
+ * HUD) jump. Battles and duels, which have no such start read, keep the
+ * timer. */
+static volatile int g_pirates_in_sea_frame;
+static volatile int g_pirates_battle_seen;
+static volatile uint32_t g_pirates_battle_ms;
+
+static int pirates_hud_scene(void)
+{
+    if (g_pirates_in_sea_frame)
+        return 1;
+    return g_pirates_battle_seen &&
+           pirates_host_ms() - g_pirates_battle_ms <= PIRATES_WORLD_RECENT_MS;
+}
+
 typedef int (*pirates_edge_test_t)(uint32_t handle, unsigned w, unsigned h, unsigned fmt,
                                    const void *vertices, unsigned stride, unsigned count,
                                    const float *world, const float *view, const float *proj);
@@ -279,7 +299,7 @@ static int pirates_hud_edge(uint32_t handle, unsigned w, unsigned h, unsigned fm
     if (handle != 0x142u || !(fmt == 0x0Fu && w == 128u && h == 32u) &&
         !(fmt == 0x0Eu && w == 256u && h == 256u))
         return 0;
-    if (!g_pirates_world_seen || pirates_host_ms() - g_pirates_world_ms > PIRATES_WORLD_RECENT_MS)
+    if (!pirates_hud_scene())
         return 0;                            /* a menu, not the world */
     pirates_mat_mul(wv, world, view);
     pirates_mat_mul(m, wv, proj);
@@ -306,11 +326,35 @@ static int pirates_hud_edge(uint32_t handle, unsigned w, unsigned h, unsigned fm
     return 0;
 }
 
+/* LB and RB at sea. The game's default bindings give the bumpers to the
+ * triggers (RECOMP_TITLE_BUMPERS_AS_TRIGGERS, patch 0040), which the pause
+ * menu's scroll and the other screens use; but sailing reads Black (the map
+ * overlay) and White (the sails), and has no use for the triggers. So while
+ * the sea's frame wait runs (sub_001A958A, the last 150 ms) LB and RB are
+ * Black and White again, as on a pad with no triggers to spare (toolkit
+ * patch 0041); LT and RT, and the W and Q keys, work everywhere. */
+typedef int (*pirates_bumper_test_t)(void);
+extern void recomp_bindings_set_bumper_test(pirates_bumper_test_t test);
+static volatile uint32_t g_pirates_sea_ms;
+static volatile int      g_pirates_sea_seen;
+
+static int pirates_bumpers_black_white(void)
+{
+    int on = g_pirates_sea_seen && pirates_host_ms() - g_pirates_sea_ms <= PIRATES_WORLD_RECENT_MS;
+    static int said = -1;
+    if (on != said) {
+        said = on;
+        fprintf(stderr, "[PIRATES] LB/RB now %s\n", on ? "Black/White (sailing)" : "LT/RT");
+    }
+    return on;
+}
+
 static void pirates_front_end(int on)
 {
     if (g_pirates_front != on) {
         g_pirates_front = on;
         xbox_D3D8SetEdgeTest(pirates_hud_edge);
+        recomp_bindings_set_bumper_test(pirates_bumpers_black_white);
         xbox_D3D8SetWideFrames(on ? 0 : 1);
     }
 }
@@ -581,7 +625,17 @@ void sub_001A958A(void)
         pirates_front_end(0);            /* sea, battle, duel: the game world */
         g_pirates_world_ms = pirates_host_ms();
         g_pirates_world_seen = 1;
+        if (ra == 0x00091DE1u || ra == 0x000A4AEEu) {   /* the sea */
+            g_pirates_sea_ms = g_pirates_world_ms;
+            g_pirates_sea_seen = 1;
+            g_pirates_in_sea_frame = 0;          /* its frame is drawn */
+        } else {
+            g_pirates_battle_ms = g_pirates_world_ms;
+            g_pirates_battle_seen = 1;
+        }
     }
+    if (ra == 0x0009190Fu || ra == 0x000A43FAu)  /* a sea frame begins */
+        g_pirates_in_sea_frame = 1;
     {   /* RECOMP_PIRATES_TICK_SITES=1: name each new caller once (which
          * limiter a scene uses) */
         static int sites = -1;
