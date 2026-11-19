@@ -1,0 +1,97 @@
+diff --git a/src/d3d/d3d8_device.c b/src/d3d/d3d8_device.c
+index 89e9075..8080466 100644
+--- a/src/d3d/d3d8_device.c
++++ b/src/d3d/d3d8_device.c
+@@ -537,6 +537,13 @@ static BOOL two_d_squeeze(float *k_out, float *cx_out);
+  * the picture. 1 is off. */
+ static float g_3d_vzoom = 1.0f;
+ 
++/* Edge pinning (xbox_D3D8SetEdgeTest): a title with a 16:9 mode of its own
++ * that lays its HUD out for 4:3 can have pieces moved sideways to the edges
++ * of the wider picture. g_edge_side is the draw in hand's: -1 left, +1 right,
++ * 0 where it was. */
++static XboxD3D8EdgeTest g_edge_test;
++static int              g_edge_side;
++
+ /* The vertical zoom for the draw in hand, about cy_out in host pixels of
+  * the scene, or FALSE: off, a screen-space draw, an offscreen target, or a
+  * frame shown at 4:3. */
+@@ -2272,6 +2279,13 @@ static void apply_host_viewport(void)
+         hv.x = cx + (hv.x - cx) * k;
+         hv.width *= k;
+     }
++    if (g_edge_side) {
++        /* The 4:3 layout's margin of the 16:9 buffer, in the title's
++         * pixels: half of what the width has beyond 4:3. */
++        UINT gw = d3d8_GetGuestWidth(), gh = d3d8_GetGuestHeight();
++        if (gw && gh && gw * 3u > gh * 4u)
++            hv.x += (float)g_edge_side * ((float)gw - (float)gh * 4.0f / 3.0f) * 0.5f * sx;
++    }
+ 
+     /* Hor+ for a title that can widen its field of view but not change its
+      * aspect: its wider picture is taller by the same amount, so each 3D
+@@ -2713,8 +2727,40 @@ int xbox_D3D8GetTwoDPlacement(uint32_t *tag)
+ /* Once per screen-space draw, after the shader path has said it is one:
+  * where it goes in widescreen. The title's placement when it gave one,
+  * otherwise the renderer's judgement from the draw's extent. */
++void xbox_D3D8SetEdgeTest(XboxD3D8EdgeTest test)
++{
++    g_edge_test = test;
++}
++
++static void edge_classify(const void *vertices, UINT stride, UINT count)
++{
++    int side = 0;
++
++    if (g_edge_test && vertices && stride && count && !g_cur_rt && d3d8_display_wide_now()) {
++        IDirect3DBaseTexture8 *t = d3d8_GetStageTexture(0);
++        D3D8TextureInfo ti;
++        UINT w = 0, h = 0, f = 0;
++
++        if (t && d3d8_texture_info(t, &ti)) {
++            w = ti.width;
++            h = ti.height;
++            f = (UINT)ti.format;
++        }
++        side = g_edge_test(g_device_state.vertex_shader, w, h, f, vertices, stride, count,
++                           (const float *)&g_device_state.transforms[D3DTS_WORLD],
++                           (const float *)&g_device_state.transforms[D3DTS_VIEW],
++                           (const float *)&g_device_state.transforms[D3DTS_PROJECTION]);
++        side = side < 0 ? -1 : side > 0 ? 1 : 0;
++    }
++    if (side != g_edge_side) {
++        g_edge_side = side;
++        apply_host_viewport();
++    }
++}
++
+ void d3d8_place_2d_draw(const void *vertices, UINT stride, UINT count)
+ {
++    edge_classify(vertices, stride, count);
+     /* A fixed-function draw through the title's projection is 3D to the
+      * shader path. The title may know better: Max Payne draws its HUD, its
+      * menus and its graphic novel as quads at one depth under the camera
+diff --git a/src/d3d/d3d8_xbox.h b/src/d3d/d3d8_xbox.h
+index dce390c..a95ca0f 100644
+--- a/src/d3d/d3d8_xbox.h
++++ b/src/d3d/d3d8_xbox.h
+@@ -1324,6 +1324,19 @@ enum {
+ };
+ void xbox_D3D8SetTwoDPlacement(int placement, uint32_t tag);
+ 
++/* Edge pinning, for a title with a 16:9 mode of its own whose HUD keeps its
++ * 4:3 positions: in widescreen, on the screen, the title's test is asked
++ * about every draw (the vertex shader handle -- an FVF for fixed function --,
++ * stage 0's texture size and format, 0 without one, the vertices and the
++ * world, view and projection matrices, 16 floats each in D3D row order) and
++ * answers -1 to move it left to the picture's edge, +1 right, 0 to leave it.
++ * Moved by the 4:3 layout's margin, half of what the width has beyond 4:3;
++ * horizontally only. */
++typedef int (*XboxD3D8EdgeTest)(DWORD handle, UINT tex_w, UINT tex_h, UINT tex_format,
++                                const void *vertices, UINT stride, UINT count,
++                                const float *world, const float *view, const float *projection);
++void xbox_D3D8SetEdgeTest(XboxD3D8EdgeTest test);
++
+ /* A title's own test for which of its fixed-function draws are screen-space.
+  * The renderer knows two kinds: pre-transformed vertices, and a vertex
+  * program that does not use the projection. A title can draw its 2D a third
