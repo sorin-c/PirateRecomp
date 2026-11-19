@@ -1,0 +1,73 @@
+diff --git a/src/config/recomp_config.c b/src/config/recomp_config.c
+index e44dd04..0bbbb91 100644
+--- a/src/config/recomp_config.c
++++ b/src/config/recomp_config.c
+@@ -411,6 +411,17 @@ int recomp_title_crop_left_wide(void)
+ #endif
+ }
+ 
++/* RECOMP_TITLE_BUMPERS_AS_TRIGGERS=1: the default pad bindings give LB and
++ * RB the triggers (with LT and RT), not the Xbox's Black and White buttons. */
++int recomp_title_bumpers_as_triggers(void)
++{
++#if defined(RECOMP_TITLE_BUMPERS_AS_TRIGGERS)
++    return RECOMP_TITLE_BUMPERS_AS_TRIGGERS;
++#else
++    return 0;
++#endif
++}
++
+ int recomp_title_pixel_offset_scaled(void)
+ {
+ #if defined(RECOMP_TITLE_PIXEL_OFFSET_SCALED)
+diff --git a/src/config/recomp_config.h b/src/config/recomp_config.h
+index 590b6e4..cfe944d 100644
+--- a/src/config/recomp_config.h
++++ b/src/config/recomp_config.h
+@@ -291,6 +291,8 @@ int  recomp_settings_default_frame_interp(void);
+ int  recomp_title_crop_bottom(void);
+ int  recomp_title_crop_left_wide(void);
+ int  recomp_title_pixel_offset_scaled(void);
++/* Default pad bindings: LB and RB as the triggers, not Black and White. */
++int  recomp_title_bumpers_as_triggers(void);
+ 
+ /* Where the title's own settings file (RECOMP_TITLE_SETTINGS_FILE) is, when
+  * not beside the running executable: a release's launcher names the game's
+diff --git a/src/input/input_bindings.c b/src/input/input_bindings.c
+index aaf8b5f..722f7d5 100644
+--- a/src/input/input_bindings.c
++++ b/src/input/input_bindings.c
+@@ -311,9 +311,23 @@ static void defaults_for(Controller *c, int port)
+     c->deadzone = DEADZONE_DEFAULT;
+     for (i = 0; i < (int)(sizeof DEFAULTS / sizeof DEFAULTS[0]); i++) {
+         int k = control_index(DEFAULTS[i].control);
++        const char *pad = DEFAULTS[i].pad;
+         if (k < 0)
+             continue;
+-        bind_add(&c->bind[k], DEFAULTS[i].pad, &bad);
++        /* A title can give the bumpers to the triggers: LB pulls the left
++         * trigger and RB the right, as LT and RT still do, and Black and
++         * White keep only their keys (recomp_title_bumpers_as_triggers). */
++        if (recomp_title_bumpers_as_triggers()) {
++            if (strcmp(DEFAULTS[i].control, "black") == 0 ||
++                strcmp(DEFAULTS[i].control, "white") == 0)
++                pad = NULL;
++            else if (strcmp(DEFAULTS[i].control, "ltrigger") == 0)
++                bind_add(&c->bind[k], "pad:lshoulder", &bad);
++            else if (strcmp(DEFAULTS[i].control, "rtrigger") == 0)
++                bind_add(&c->bind[k], "pad:rshoulder", &bad);
++        }
++        if (pad)
++            bind_add(&c->bind[k], pad, &bad);
+         if (port == 0 && DEFAULTS[i].key)
+             bind_add(&c->bind[k], DEFAULTS[i].key, &bad);
+     }
+@@ -719,6 +733,8 @@ void recomp_bindings_init(void)
+     }
+     for (i = 0; i < PORTS; i++)
+         describe(&g_ctl[i], g_ctl[i].label, sizeof g_ctl[i].label);
++    if (recomp_title_bumpers_as_triggers())
++        fprintf(stderr, "[INPUT] default pad bindings: LB and RB pull the triggers, as LT and RT do\n");
+     fprintf(stderr, "[INPUT] bindings from %s\n",
+             g_have_path ? g_path : "the built-in defaults (no config file)");
+     for (i = 0; i < PORTS; i++)

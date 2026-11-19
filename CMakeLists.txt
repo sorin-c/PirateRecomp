@@ -210,6 +210,9 @@ if(TARGET xbox_config)
         # Frame interpolation off unless pirates.ini or the F2 menu turns it
         # on (frame_interp = 2 shows 60 where the game runs at 30)
         RECOMP_TITLE_DEFAULT_FRAME_INTERP=1
+        # LB and RB pull the triggers in the default pad bindings, as LT and
+        # RT do (Sorin, 19 Nov); Black and White keep their keys (W, Q)
+        RECOMP_TITLE_BUMPERS_AS_TRIGGERS=1
         # Half a host pixel of screen-space offset, not half a game pixel
         # (toolkit patch 0021): the game draws its full-screen 2D from 0, and
         # at a higher resolution_scale the half-game-pixel offset left a line
