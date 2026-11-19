@@ -204,50 +204,26 @@ void sub_000DB7A0(void)
  * setting it before the menu runs is all it takes. */
 extern void sub_00126BC0_gen(void);
 extern void xbox_D3D8SetWideFrames(int wide);
-extern void xbox_D3D8SetFrameFill(int on);
-typedef int (*pirates_backdrop_test_t)(uint32_t handle, unsigned w, unsigned h, unsigned fmt);
-extern void xbox_D3D8SetBackdropTest(pirates_backdrop_test_t test);
 /* The front end in widescreen: the game draws its 4:3 screens (legal text,
- * title, the new-career pages) into the 16:9 buffer with more background
- * either side, so stretched to 16:9 they look wide. From start-up those
- * frames are called 4:3 (the toolkit shows the buffer's centre between bars);
- * the game world calls them 16:9 again -- the sea, battle and duel frame
- * waits and the loading screens (sub_001A958A), the town menu
- * (sub_00021D70).
- *
- * The main menu (sub_00126BC0) fills 16:9 instead: its map, coastline,
- * clouds and the stencil passes under them are the backdrop, zoomed to fill
- * the picture, and the logo, the menu and the swordfighter stay at 4:3 in the
- * middle, where the 4:3 screen has them (xbox_D3D8SetFrameFill). Backdrop by
- * how it is drawn: the map (1024x512) and its coastline (256x64) as
- * position+normal+texture quads, the clouds with a diffuse colour as well,
- * the stencil passes position-only. */
-enum { PIRATES_WORLD = 0, PIRATES_FRONT = 1, PIRATES_MAIN_MENU = 2 };
+ * title, main menu, the new-career pages) into the 16:9 buffer with more
+ * background either side, so stretched to 16:9 they look wide. From start-up
+ * and whenever the main menu runs, frames are called 4:3 (the toolkit shows
+ * the buffer's centre between bars); the game world calls them 16:9 again --
+ * the sea, battle and duel frame waits (sub_001A958A) and the town menu
+ * (sub_00021D70). */
 static volatile int g_pirates_front = -1;   /* -1 not said yet */
-static volatile int g_pirates_menu_seen;
 
-static int pirates_backdrop(uint32_t handle, unsigned w, unsigned h, unsigned fmt)
+static void pirates_front_end(int on)
 {
-    (void)fmt;
-    if (handle == 0x002u || handle == 0x152u)
-        return 1;
-    return handle == 0x112u && ((w == 1024u && h == 512u) || (w == 256u && h == 64u));
-}
-
-static void pirates_front_end(int screen)
-{
-    if (g_pirates_front != screen) {
-        g_pirates_front = screen;
-        xbox_D3D8SetBackdropTest(pirates_backdrop);
-        xbox_D3D8SetWideFrames(screen == PIRATES_FRONT ? 0 : 1);
-        xbox_D3D8SetFrameFill(screen == PIRATES_MAIN_MENU);
+    if (g_pirates_front != on) {
+        g_pirates_front = on;
+        xbox_D3D8SetWideFrames(on ? 0 : 1);
     }
 }
 
 void sub_00126BC0(void)
 {
-    g_pirates_menu_seen = 1;
-    pirates_front_end(PIRATES_MAIN_MENU);
+    pirates_front_end(1);
     static int on = -1;
     if (on < 0) {
         on = recomp_config_bool("RECOMP_PIRATES_MINIGAMES", "minigames", 0);
@@ -286,7 +262,7 @@ extern void sub_000AA3C0(void);
 
 void sub_00021D70(void)
 {
-    pirates_front_end(PIRATES_WORLD);    /* a town: the game world */
+    pirates_front_end(0);                /* a town: the game world */
     static int pieces = -1;
     if (pieces < 0) {
         pieces = recomp_config_int("RECOMP_PIRATES_TREASURE_MAP", "treasure_map", 0);
@@ -505,25 +481,10 @@ void sub_001A958A(void)
     sub_001A958A_gen();
     pirates_test_probe(g_eax);
     if (g_pirates_front < 0)
-        pirates_front_end(PIRATES_FRONT);    /* start-up is the front end */
+        pirates_front_end(1);            /* start-up is the front end */
     if (ra == 0x00091DE1u || ra == 0x000A4AEEu || ra == 0x000C3B4Eu ||
-        ra == 0x00036C60u || ra == 0x0004DF8Fu ||   /* sea, battle, duel */
-        ra == 0x0008AB57u || ra == 0x000E202Fu ||   /* the loading screen */
-        ra == 0x0009190Fu || ra == 0x000BB0E8u)     /* loading a career */
-        pirates_front_end(PIRATES_WORLD);
-    {   /* the main menu's frames end when it stops running. LOAD GAME
-         * (the menu's cursor, 0x004D5D14, at 1) opens the save list, which
-         * the game also shows at sea at 16:9; anything else is another
-         * front-end page (a new career's) */
-        static uint32_t menu_at;
-        if (g_pirates_menu_seen) {
-            g_pirates_menu_seen = 0;
-            menu_at = g_eax;
-        } else if (g_pirates_front == PIRATES_MAIN_MENU && g_eax - menu_at > 300u) {
-            uint32_t cursor = *(volatile uint32_t *)((uintptr_t)0x004D5D14u + g_xbox_mem_offset);
-            pirates_front_end(cursor == 1u ? PIRATES_WORLD : PIRATES_FRONT);
-        }
-    }
+        ra == 0x00036C60u || ra == 0x0004DF8Fu)
+        pirates_front_end(0);            /* sea, battle, duel: the game world */
     {   /* RECOMP_PIRATES_TICK_SITES=1: name each new caller once (which
          * limiter a scene uses) */
         static int sites = -1;
