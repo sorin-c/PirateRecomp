@@ -142,6 +142,7 @@ int xbox_EnvSwitch(const char *name, int default_on);
 /* pirates.ini (src/settings_title.h): the file's line, or the environment
  * variable named, which wins. xboxrecomp/src/config/recomp_config.h. */
 const char *recomp_config_lookup(const char *env_name, const char *key);
+int recomp_config_set(const char *key, const char *value);
 int recomp_config_bool(const char *env_name, const char *key, int fallback);
 int recomp_config_int(const char *env_name, const char *key, int fallback);
 extern void sub_000DB7A0_gen(void);
@@ -819,6 +820,45 @@ static void sea60_frame(uint32_t tick)
             if (ff) fprintf(ff, "# pin\n");
         }
     }
+    {   /* RECOMP_PIRATES_SEA_HOLD="addr=value,...": set every sea frame (debug) */
+        static int nh = -1;
+        static uint32_t ha[8], hv[8];
+        int k;
+        if (nh < 0) {
+            const char *p = getenv("RECOMP_PIRATES_SEA_HOLD");
+            nh = 0;
+            while (p && *p && nh < 8) {
+                unsigned a2, v2;
+                if (sscanf(p, "%x=%u", &a2, &v2) != 2) break;
+                ha[nh] = a2; hv[nh] = v2; nh++;
+                p = strchr(p, ',');
+                if (p) p++;
+            }
+        }
+        for (k = 0; k < nh; k++)
+            *(volatile uint32_t *)((uintptr_t)ha[k] + g_xbox_mem_offset) = hv[k];
+    }
+    {   /* RECOMP_PIRATES_SEA60_FLIP="ms,ms,...": flip sea_60 at those times
+         * after logging began, as the F2 menu does (recomp_config_set) */
+        static int nf = -1, fi;
+        static uint32_t ft[8];
+        if (nf < 0) {
+            const char *p = getenv("RECOMP_PIRATES_SEA60_FLIP");
+            nf = 0;
+            while (p && *p && nf < 8) {
+                ft[nf++] = (uint32_t)strtoul(p, NULL, 10);
+                p = strchr(p, ',');
+                if (p) p++;
+            }
+        }
+        if (fi < nf && now - t0 >= ft[fi]) {
+            const char *v = recomp_config_lookup(NULL, "sea_60");
+            int on = v && *v && strcmp(v, "0") != 0;
+            recomp_config_set("sea_60", on ? "0" : "1");
+            if (ff) fprintf(ff, "# flip sea_60=%d\n", !on);
+            fi++;
+        }
+    }
     if (getenv("RECOMP_PIRATES_SEA_NOSHIPS")) {   /* debug: no AI ships at all */
         int k;
         for (k = 1; k < 128; k++)
@@ -954,7 +994,15 @@ static void sea60_frame(uint32_t tick)
  *
  * 5. The time acceleration 0x40D4C4 (s += (t - s)/16 +- 1 a frame, sometimes
  *    forced to 100, 50 or 1) is run as at 30 on the ticks and stored as this
- *    frame's share of it (0x86078 takes M and s, 0x860B0 stores).
+ *    frame's share of it (0x86078 takes M and s, 0x860B0 stores); a value
+ *    the game sets itself (500 leaving a town, 100, the floor of 150) is a
+ *    30 fps value, and the floor's test compares the 30 fps value (0x84D90).
+ *    Readers that multiply it by the frame time again or cap it at a 30 fps
+ *    limit get the 30 fps value: sub_00077680 (0x7768E) and turning
+ *    (0x86568; with the share, turning near other ships ran at half speed).
+ *    A ship word taking it/100 a frame takes the 30 fps amount on the tick
+ *    (0x86D52). Readers that step by it each frame keep the share: positions
+ *    (0x868DC, 0x86929, sub_00094270), 0x81187.
  *
  * Going to a battle, a town, the map or a menu and back: a sea frame that
  * comes more than 250 ms after the last one starts a fresh tick with nothing
@@ -1201,6 +1249,19 @@ void recomp_guest_hook(uint32_t va)
         g_sea60.ts_last = (int32_t)g_esi;
         break;
     }
+    /* sub_00084AB0 (an event: speed halved) keeps the time acceleration at
+     * 150 or more: compared as the 30 fps value, not this frame's share. */
+    case 0x00084D90u: if (g_sea60.ts_valid) g_ecx = (uint32_t)g_sea60.ts_x; break;
+    /* Readers that want the 30 fps time acceleration, not the frame's share:
+     * they also multiply by the frame time, or cap it at a 30 fps limit. */
+    case 0x0007768Eu: if (g_sea60.ts_valid) g_eax = (uint32_t)g_sea60.ts_x; break; /* sub_00077680: dt x it, cap 400 */
+    case 0x00086568u: if (g_sea60.ts_valid) g_ecx = (uint32_t)g_sea60.ts_x; break; /* turning: min(it, 200|500) x dt */
+    /* A ship word (+0x45650C) taking it/100 off each frame: the 30 fps
+     * amount on the tick, nothing between (integer /100 of half lost most). */
+    case 0x00086D52u:
+        if (g_sea60.ts_valid)
+            g_eax = skip ? 0u : (uint32_t)(g_sea60.ts_x / 100);
+        break;
     /* sub_00077680: one chance in 150 a frame (rand() % 150 == 0). */
     case 0x00077C81u: if (skip) g_edx |= 1u; break;
     default: break;

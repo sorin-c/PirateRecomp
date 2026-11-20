@@ -168,6 +168,22 @@
   {
    "address": "0x000860B0",
    "note": "sea_60: time acceleration stored as the 30 fps value x frame time share"
+  },
+  {
+   "address": "0x00084D90",
+   "note": "sea_60: time acceleration floor (150) compared as the 30 fps value"
+  },
+  {
+   "address": "0x0007768E",
+   "note": "sea_60: sub_00077680 reads the 30 fps time acceleration"
+  },
+  {
+   "address": "0x00086568",
+   "note": "sea_60: turning reads the 30 fps time acceleration"
+  },
+  {
+   "address": "0x00086D52",
+   "note": "sea_60: ship word +0x45650C less time acceleration/100 on the tick"
   }
  ]
 }

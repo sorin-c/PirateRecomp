@@ -46,6 +46,13 @@ switch ($Script) {
       & $d press $k | Out-Null; & $d wait 2.5 | Out-Null; & $d screen ("k{0:D2}" -f $n) | Out-Null
     }
   }
+  "drift" {   # 11 minutes at sea, a screen a minute (the date banner)
+    # A every 30 s, the same in both runs, closes the crew's dialogs
+    foreach ($k in 1..11) {
+      & $d wait 29 | Out-Null; & $d screen ("m{0:D2}a" -f $k) | Out-Null; & $d press a | Out-Null
+      & $d wait 29 | Out-Null; & $d screen ("m{0:D2}b" -f $k) | Out-Null; & $d press a | Out-Null; Mark "m$k"
+    }
+  }
   "idle" { foreach ($k in 1..6) { & $d wait 15 | Out-Null; & $d screen "s$k" | Out-Null } }
   "turns" {
     & $d wait 20 | Out-Null; & $d screen "s1" | Out-Null; Mark "left"
