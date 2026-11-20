@@ -24,11 +24,12 @@ static const struct {
       "# the title movie; 0 plays them all, as the disc does.\n"
       "#                                         [RECOMP_PIRATES_SKIP_INTRO]\n" },
     { "sea_60", "0",
-      "# Sailing at 60 frames a second, at the game's own speed: the sea's\n"
-      "# ships, wind, calendar and timers step 60 times a second as they did\n"
-      "# 30. 0 sails at 30, as the console does (frame interpolation, if on,\n"
-      "# then shows 60). Battles, duels, towns and menus are not changed.\n"
-      "# Applies at once from the F2 menu.            [RECOMP_PIRATES_SEA_60]\n" },
+      "# Experimental: sailing at 60 frames a second, at the game's own speed:\n"
+      "# the sea's ships, wind, calendar and timers step 60 times a second as\n"
+      "# they did 30. 0 (the default) sails at 30, as the console does (frame\n"
+      "# interpolation, if on, then shows 60). Battles, duels, towns and menus\n"
+      "# are not changed. Applies at once from the F2 menu.\n"
+      "#                                              [RECOMP_PIRATES_SEA_60]\n" },
     { "minigames", "0",
       "# The developers' MINIGAMES (*DEBUG!*) entry in the main menu: start a\n"
       "# sword duel, dancing, the town sneak, a land battle and the rest\n"

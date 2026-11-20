@@ -32,7 +32,7 @@ Back pressed alone still reaches the game as usual.
 | Variable refresh | next start |
 | Movies (skip all, skip intro, play all) | next start |
 | Sound | next start |
-| Sailing at 60 fps | at once |
+| Sailing at 60 fps (experimental) | at once |
 
 Every change is written to `pirates.ini` straight away, keeping its comments.
 
@@ -43,8 +43,9 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   off by default) draws the frame in between, so you see 60 while the game
   keeps its original speed; menus, towns and the governor's rooms already
   run at 60. Characters, ships and the camera are all interpolated.
-- **Sailing at 60 fps.** `sea_60 = 1` (off by default; F2 "Sailing at 60
-  fps", applies at once) runs the sea itself 60 times a second instead of
+- **Sailing at 60 fps (experimental).** `sea_60 = 1` (off by default; F2
+  "Sailing at 60 fps (experimental)", applies at once) runs the sea itself
+  60 times a second instead of
   showing in-between frames: ships, the wind's effect, turning, the
   calendar, the crew's timers and the hull's motion step at 60 and keep the
   speed they have at 30 (paired 30/60 test runs agree within a few per
@@ -52,7 +53,9 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   their own pacing. While it is on, sailing does not use frame
   interpolation (there is nothing left to fill in); battles and duels still
   do when `frame_interp` is on. With `sea_60 = 0` the game is exactly as
-  before.
+  before. Experimental: measured against 30 fps in scripted test runs
+  ([sea60-testing.md](sea60-testing.md)), not yet played through many
+  battles and towns.
 - **Widescreen.** `widescreen = 1` turns on the game's own 16:9 mode. The
   front end (legal text, title, menus and the new-career pages) stays at 4:3
   between bars, as it was drawn, and the game world fills the screen.

@@ -415,5 +415,6 @@ Each one, with the reason it exists:
 
 - **0043-settings-menu-title-live-row** (`src/hle/hle_settings_menu.c`). A
   title row that applies at once (`LIVE_TITLE`: the title reads the key with
-  `recomp_config_lookup` while it runs), and the game's "Sailing at 60 fps"
-  row (`sea_60`).
+  `recomp_config_lookup` while it runs), and the game's "Sailing at 60 fps
+  (experimental)" row (`sea_60`). The label column is as wide as the longest
+  label.

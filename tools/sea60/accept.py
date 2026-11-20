@@ -1,13 +1,13 @@
 """sea_60 acceptance: per real second, a 30 fps run against a 60 fps run.
-usage: accept.py RUN30 RUN60   (folders written by sea.ps1 -Script turns|long)
+usage: accept.py RUN30 RUN60   (folders written by sea.ps1 -Script accept)
 
 Reads frames.txt (watched dwords per sea frame), marks.txt (script phases),
 snaps.bin (AI ships, 1 a second) and the run log (sound events). Prints one
 table: quantity, 30-run rate, 60-run rate, ratio."""
 import datetime, math, os, re, struct, sys
 
-# frames.txt columns: host ms, game tick, 0x4D67D8, then the watch list of
-# sea.ps1: 0x4564A0..0x45651C (32), 49C284, 49C28C, 49C298, 4D65E8, 49C288,
+# frames.txt columns (src/sea60_test.c): host ms, 0, 0x4D67D8, then
+# 0x4564A0..0x45651C (32), 49C284, 49C28C, 49C298, 4D65E8, 49C288,
 # 4C72FC, 4D65B8, 4D6600, 40D4C4, 4D652C
 W = {f"{0x4564A0 + 4 * k:06X}": 3 + k for k in range(32)}
 for k, a in enumerate(["49C284", "49C28C", "49C298", "4D65E8", "49C288", "4C72FC",
@@ -80,7 +80,7 @@ def ai_speed(run, t0, t1):
     rec = 16 + 4 * n
     snaps = [(struct.unpack_from("<I", b, o + 4)[0], o + 16) for o in range(0, len(b) - rec + 1, rec)]
     snaps = [s for s in snaps if s32(s[0] - t0) >= 0 and s32(s[0] - t1) < 0]
-    rd = lambda s, va: struct.unpack_from("<i", b, s[1] + va - 0x400400)[0]
+    rd = lambda s, va: struct.unpack_from("<i", b, s[1] + va - 0x4564B0)[0]
     meds = []
     for i in range(1, 128):
         base = 0x4564BC + i * 0x45C
@@ -165,7 +165,7 @@ def main():
     add(f"AI ships median speed (units/s, {ai3[1]}/{ai6[1]} ships)", ai3[0], ai6[0])
     add("sound events (play/stop per s)", sound(r3, os.path.basename(r3), m3["atsea"] + 8000, e3),
         sound(r6, os.path.basename(r6), m6["atsea"] + 8000, e6))
-    # Countdown test (RECOMP_PIRATES_SEA_POKE): seconds from the poke until
+    # Countdown test (sea.ps1 -Poke, RECOMP_PIRATES_SEA60_POKE): seconds from the poke until
     # the poked counter is back to 0.
     def countdown(run):
         rows, n, poked, addr = [], 0, None, None

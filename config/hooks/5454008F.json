@@ -192,6 +192,10 @@
   {
    "address": "0x00092590",
    "note": "sea_60: countdown 0x4D65EC (40 frames)"
+  },
+  {
+   "address": "0x00092681",
+   "note": "sea_60: the sea loop is left here (both exits); the hooks stop acting"
   }
  ]
 }
