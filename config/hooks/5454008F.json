@@ -196,6 +196,10 @@
   {
    "address": "0x00092681",
    "note": "sea_60: the sea loop is left here (both exits); the hooks stop acting"
+  },
+  {
+   "address": "0x00086015",
+   "note": "sea_fps: the time acceleration read back in 30 fps units (cap of 200, forced values)"
   }
  ]
 }

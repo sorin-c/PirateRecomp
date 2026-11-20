@@ -2,12 +2,13 @@
 # then play a fixed script while the test harness (src/sea60_test.c) logs
 # every sea frame. docs/sea60-testing.md says how the runs are compared.
 #
-#   sea.ps1 -Tag t [-Sea60] [-Interp 2] [-Script accept|drift|burst|keys|idle]
+#   sea.ps1 -Tag t [-Rate 60|90|120|144|240|0] [-Sea60] [-Interp 2] [-Script accept|drift|burst|keys|idle]
 #           [-Pin "x y ms [heading speed]"] [-Poke "addr=value@ms,..."]
 #           [-NoShips] [-Flip "ms,..."] [-Keys ...] [-SailFirst s] [-Save dir]
 #           [-Sound] [VAR=value ...]
 #
-#   -Sea60     sail with sea_60 = 1; without it the run is the 30 fps baseline
+#   -Rate N    sail with sea_fps = N (0: unlocked); -Sea60 is -Rate 60; with
+#              neither the run is the 30 fps baseline
 #   -Interp 2  frame interpolation: holds a 30 fps sea at exactly 30.0
 #              (without it the recomp's 30 fps sea runs about 31.3)
 #   -Pin, -Poke, -NoShips, -Flip  the harness switches of the same names
@@ -19,7 +20,7 @@
 #   SEA60_FIXTURE      the UDATA folder of a save at sea (required)
 #   SEA60_RUNS         where each run's folder goes ($env:TEMP\sea60)
 [CmdletBinding(PositionalBinding = $false)]
-param([string]$Tag = "sea", [string]$Script = "accept", [switch]$Sea60, [int]$Interp = 1,
+param([string]$Tag = "sea", [string]$Script = "accept", [switch]$Sea60, [int]$Rate = 30, [int]$Interp = 1,
       [string]$Pin = "", [string]$Poke = "", [switch]$NoShips, [string]$Flip = "",
       [string]$Keys = "", [int]$SailFirst = 0, [string]$Save = "", [switch]$Sound,
       [Parameter(ValueFromRemainingArguments = $true)][string[]]$Env)
@@ -39,11 +40,12 @@ foreach ($x in "UDATA", "TDATA", "CACHE") { Remove-Item -Recurse -Force (Join-Pa
 Copy-Item -Recurse $env:SEA60_FIXTURE (Join-Path $g "UDATA")
 
 $a = @("start", "-Tag", $Tag, "-KeepData", "RECOMP_FRAME_INTERP=$Interp", "RECOMP_PIRATES_SEA60_TEST=$log")
-if ($Sea60)   { $a += "RECOMP_PIRATES_SEA_60=1" } else { $a += "RECOMP_PIRATES_SEA_60=0" }
+if ($Sea60)   { $Rate = 60 }
+$a += "RECOMP_PIRATES_SEA_FPS=$Rate"; $a += "RECOMP_PIRATES_SEA_60=0"
 if ($Pin)     { $a += "RECOMP_PIRATES_SEA60_PIN=$Pin" }
 if ($Poke)    { $a += "RECOMP_PIRATES_SEA60_POKE=$Poke" }
 if ($NoShips) { $a += "RECOMP_PIRATES_SEA60_NOSHIPS=1" }
-if ($Flip)    { $a += "RECOMP_PIRATES_SEA60_FLIP=$Flip"; $a = $a | Where-Object { $_ -notlike "RECOMP_PIRATES_SEA_60=*" } }
+if ($Flip)    { $a += "RECOMP_PIRATES_SEA60_FLIP=$Flip"; $a = $a | Where-Object { $_ -notlike "RECOMP_PIRATES_SEA_*=*" } }
 if ($Sound)   { New-Item -ItemType Directory -Force "$log\audio" | Out-Null; $a += "RECOMP_AUDIO_CAPTURE=$log\audio" }
 $a += $Env
 & $d @a | Out-Null

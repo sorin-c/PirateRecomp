@@ -1,0 +1,99 @@
+diff --git a/src/kernel/xbox_memory_layout.c b/src/kernel/xbox_memory_layout.c
+index a304d55..f54149a 100644
+--- a/src/kernel/xbox_memory_layout.c
++++ b/src/kernel/xbox_memory_layout.c
+@@ -693,6 +693,10 @@ static int           g_flip_gate_title = 1;         /* vblanks per Swap the titl
+ /* RECOMP_FPS_CAP above the vblank rate: Swaps paced by the host clock at
+  * this many a second instead of by the vblank (flip_gate_host_paced). */
+ static int           g_flip_gate_host_hz;
++/* A rate the title sets for one of its scenes (xbox_Nv2aFlipGateSetTitleRate):
++ * > 0 Swaps a second by the host clock, < 0 no wait at all, 0 none. */
++static volatile int  g_flip_gate_title_hz;
++static volatile int64_t g_flip_gate_title_ns;   /* when the title last set it */
+ 
+ /* What the on-screen toggle cycles through: the settings a player picks
+  * between, in that order. A RECOMP_FPS_CAP outside this list still works --
+@@ -2500,11 +2504,68 @@ static void flip_gate_hold_suspended(void)
+     xbox_GuestLockRestore(guest_held);
+ }
+ 
++/* A title's own rate for a scene whose logic keeps time (Pirates!' sea with
++ * sea_fps, recomp_manual.c): in force only while the title says so -- it
++ * renews it every frame and the gate drops it 100 ms after the last time --
++ * over the vblank and over the player's cap, which still decide everywhere
++ * else. */
++void xbox_Nv2aFlipGateSetTitleRate(int hz)
++{
++    g_flip_gate_title_ns = host_time_ns();          /* renewed every frame */
++    if (hz == g_flip_gate_title_hz)
++        return;
++    g_flip_gate_title_hz = hz;
++    if (hz > 0)
++        fprintf(stderr, "  [NV2A] flip gate: the title paces this scene at %d Swaps a second "
++                "by the host clock\n", hz);
++    else if (hz < 0)
++        fprintf(stderr, "  [NV2A] flip gate: the title runs this scene unlocked\n");
++    else
++        fprintf(stderr, "  [NV2A] flip gate: back to the vblank and the frame cap\n");
++    fflush(stderr);
++}
++
++int xbox_Nv2aFlipGateTitleRate(void)
++{
++    return g_flip_gate_title_hz;
++}
++
++static void flip_gate_title_paced(int hz)
++{
++    static host_timer *timer;
++    static int64_t next;
++    int64_t period = 1000000000LL / hz;
++    int64_t now = host_time_ns();
++
++    if (!timer)
++        timer = host_timer_create(HOST_TIMER_ANY);
++    if (next && now < next && timer) {
++        int guest_held = xbox_GuestLockDrop();
++        host_timer_wait_until(timer, next, 250);
++        xbox_GuestLockRestore(guest_held);
++        now = host_time_ns();
++    }
++    next = next && now - next < period ? next + period : now + period;
++}
++
+ void xbox_Nv2aFlipGateArm(void)
+ {
+     static int said;
+ 
+     flip_gate_hold_suspended();
++    if (g_flip_gate_title_hz) {
++        /* Only while the title renews it: a scene that stops renewing (a
++         * dialog, a menu or another scene in its place) is back to the
++         * vblank and the cap after 100 ms. */
++        if (host_time_ns() - g_flip_gate_title_ns > 100000000LL) {
++            xbox_Nv2aFlipGateSetTitleRate(0);
++        } else {
++            int hz = g_flip_gate_title_hz;
++            if (hz > 0)
++                flip_gate_title_paced(hz);
++            return;
++        }
++    }
+     if (flip_gate_effective_divisor() == 0)
+         return;
+     if (g_flip_gate_host_hz) {
+diff --git a/src/kernel/xbox_memory_layout.h b/src/kernel/xbox_memory_layout.h
+index aec280c..1a2789a 100644
+--- a/src/kernel/xbox_memory_layout.h
++++ b/src/kernel/xbox_memory_layout.h
+@@ -311,6 +311,10 @@ void xbox_Nv2aFlipGateRelease(void);
+  * Only with RECOMP_TITLE_INTERVAL=1, which a title's project sets for a game
+  * that steps once a frame; otherwise the request is logged and not applied. */
+ void xbox_Nv2aFlipGateSetTitleInterval(uint32_t interval);
++/* A title's own rate for one scene, over the vblank and the player's cap:
++ * hz > 0 Swaps a second by the host clock, < 0 unlocked, 0 back to normal. */
++void xbox_Nv2aFlipGateSetTitleRate(int hz);
++int xbox_Nv2aFlipGateTitleRate(void);
+ 
+ /* Lend the gate's wait to fn (frame interpolation draws its in-between
+  * frames in it). While the gate holds a Swap, it calls fn with the time now

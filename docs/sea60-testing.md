@@ -1,7 +1,8 @@
-# Sailing at 60: how it was checked, and how to check it again
+# Sailing faster than 30: how it was checked, and how to check it again
 
-`sea_60` (docs/settings.md) runs the sea's game logic 60 times a second at the
-speed it has at 30. How it works is in the comment above
+`sea_fps` (docs/settings.md) runs the sea's game logic 60, 90, 120, 144, 240
+times a second or unlocked, at the speed it has at 30 (`sea_60 = 1`, the
+setting before it, is 60). How it works is in the comment above
 `sea60_begin_frame` in `src/recomp_manual.c`; the hooked instructions are listed
 in `config/hooks/5454008F.json` (toolkit patch 0042), and the build checks the
 list against `recomp_guest_hook` (`tools/check_guest_hooks.py`).
@@ -22,10 +23,12 @@ second of real time. Everything below runs headless (`tools/test/drive.ps1`).
 
 ```
 .\tools\sea60\sea.ps1 -Tag N30 -Interp 2 -Script accept -NoShips -Pin "130 45 5000 90 0" -Poke "4C72FC=150@60000" RECOMP_DSOUND_PLAY_LOG=1
-.\tools\sea60\sea.ps1 -Tag N60 -Sea60    -Script accept -NoShips -Pin "130 45 5000 90 0" -Poke "4C72FC=150@60000" RECOMP_DSOUND_PLAY_LOG=1
+.\tools\sea60\sea.ps1 -Tag N60 -Rate 60  -Script accept -NoShips -Pin "130 45 5000 90 0" -Poke "4C72FC=150@60000" RECOMP_DSOUND_PLAY_LOG=1
 py -3 tools\sea60\accept.py $env:SEA60_RUNS\N30 $env:SEA60_RUNS\N60
 ```
 
+- `-Rate N` is the rate under test: 60, 90, 120, 144, 240, or 0 for
+  unlocked (run each against the same 30 fps baseline).
 - `-Interp 2` holds the 30 fps baseline at exactly 30.0 frames a second (the
   recomp's 30 fps sea without it runs about 31).
 - `-NoShips` empties the AI ship slots every frame and `-Pin` puts our ship
@@ -50,7 +53,7 @@ compare it per ship kind, since each run spawns a different mix.
 
 ```
 .\tools\sea60\sea.ps1 -Tag D30 -Interp 2 -Script drift -NoShips -Pin "130 45 5000 90 0"
-.\tools\sea60\sea.ps1 -Tag D60 -Sea60    -Script drift -NoShips -Pin "130 45 5000 90 0"
+.\tools\sea60\sea.ps1 -Tag D60 -Rate 60  -Script drift -NoShips -Pin "130 45 5000 90 0"
 py -3 tools\sea60\drift.py $env:SEA60_RUNS\D30 $env:SEA60_RUNS\D60
 ```
 
@@ -68,8 +71,8 @@ second in both.
   saves at sea and copies the save folder; load it at the other rate (keep
   only the new save in the folder, the menu lists by name) and compare with
   `savecheck.py` (calendar, position and speed as saved).
-- **Turning it on and off while sailing**: `-Flip "30000,70000"` flips
-  `sea_60` as the F2 menu does; `timeline.py` shows the frames, the calendar
+- **Changing the rate while sailing**: `-Flip "30000=120,70000=30"` sets
+  `sea_fps` at those times as the F2 menu does; `timeline.py` shows the frames, the calendar
   and the time acceleration per 5 s (60 then 30, no jump in the date).
 
 ## The harness
