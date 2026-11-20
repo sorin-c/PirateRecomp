@@ -179,3 +179,115 @@ void sea60_test_frame(int active, int tick, int dt, int acc3)
         }
     }
 }
+
+/*
+ * The battle spike (RECOMP_PIRATES_BTL_TEST=<folder>): at the start of every
+ * ship-battle frame (the tick read at 0xC397A in sub_000C3950), a line in
+ * btl_frames.txt -- host ms, the frame counter 0x4E3960 (battle object
+ * 0x4D6B80 + 0xCDE0), ours 0x4D8F10..+0x60, the enemy 0x4DBE08..+0x60 --
+ * and every second the whole battle object (0x4D6B80..0x4E39C0) in
+ * btl_snaps.bin (16-byte header as snaps.bin).
+ */
+#define BTL_LO 0x004D6B80u
+#define BTL_HI 0x004E39C0u
+/* RECOMP_PIRATES_BTL_WIDE=1: the snapshots cover the game's whole data
+ * (0x400000..0x510000) instead of the battle object. */
+#define BTL_WIDE_LO 0x00400000u
+#define BTL_WIDE_HI 0x00510000u
+void btl_test_frame(int btl_tick, int btl_dt)
+{
+    static int on = -1;
+    static char dir[400];
+    static FILE *ff, *fs, *fb;
+    static uint32_t last_snap, frames;
+    uint32_t now = host_ms(), a;
+
+    if (on < 0) {
+        const char *v = getenv("RECOMP_PIRATES_BTL_TEST");
+        char fn[512];
+        on = v && *v && strcmp(v, "0") != 0;
+        if (!on)
+            return;
+        snprintf(dir, sizeof dir, "%s", v);
+        snprintf(fn, sizeof fn, "%s/btl_frames.txt", dir);
+        if ((ff = fopen(fn, "w")) != NULL)
+            setvbuf(ff, NULL, _IOFBF, 1 << 20);
+        snprintf(fn, sizeof fn, "%s/btl_snaps.bin", dir);
+        fs = fopen(fn, "wb");
+        snprintf(fn, sizeof fn, "%s/btl_frames.bin", dir);
+        if ((fb = fopen(fn, "wb")) != NULL)
+            setvbuf(fb, NULL, _IOFBF, 4 << 20);
+        fprintf(stderr, "[BTL] test harness writing to %s\n", dir);
+        fflush(stderr);
+    }
+    if (!on)
+        return;
+    {   /* RECOMP_PIRATES_BTL_PIN_ENEMY="x y": the enemy (0x4DAC40) held at
+         * x, y (map units, as x / 1000 in the logs) and stopped, every frame:
+         * our ship's runs then match from one to the next. */
+        static int pin = -1, px, py;
+        if (pin < 0) {
+            const char *v = getenv("RECOMP_PIRATES_BTL_PIN_ENEMY");
+            pin = v && sscanf(v, "%d %d", &px, &py) == 2;
+        }
+        static int orset = -1;
+        static unsigned or_addr, or_mask;
+        if (orset < 0) {   /* RECOMP_PIRATES_BTL_OR="addr=mask": bits set every frame */
+            const char *v = getenv("RECOMP_PIRATES_BTL_OR");
+            orset = v && sscanf(v, "%x=%x", &or_addr, &or_mask) == 2;
+        }
+        if (orset)
+            MEM32(or_addr) |= or_mask;
+        static int pino = -1, ox, oy;
+        if (pino < 0) {
+            const char *v = getenv("RECOMP_PIRATES_BTL_PIN_OURS");
+            pino = v && sscanf(v, "%d %d", &ox, &oy) == 2;
+        }
+        if (pino) {       /* RECOMP_PIRATES_BTL_PIN_OURS: the same for our ship */
+            MEM32(0x004D7D48u + 0x11C8u) = (uint32_t)(ox * 1000);
+            MEM32(0x004D7D48u + 0x11CCu) = (uint32_t)(oy * 1000);
+            MEM32(0x004D7D48u + 0x11D4u) = 0;
+            MEM32(0x004D7D48u + 0x11D8u) = 0;
+        }
+        if (pin) {
+            MEM32(0x004DAC40u + 0x11C8u) = (uint32_t)(px * 1000);
+            MEM32(0x004DAC40u + 0x11CCu) = (uint32_t)(py * 1000);
+            MEM32(0x004DAC40u + 0x11D4u) = 0;
+            MEM32(0x004DAC40u + 0x11D8u) = 0;
+        }
+    }
+    frames++;
+    if (fb) {
+        /* btl_frames.bin: a record a frame -- magic, host ms, tick, dt us,
+         * then our ship's struct (0x4D7D48), the enemy's (0x4DAC40), the 40
+         * shot slots (obj+0x408) and the object's counters (obj+0xCD80). */
+        uint32_t hdr[4] = { 0x42544C46u, now, (uint32_t)btl_tick, (uint32_t)btl_dt };
+        fwrite(hdr, 4, 4, fb);
+        fwrite((const void *)((uintptr_t)0x004D7D48u + g_xbox_mem_offset), 1, 0x177C, fb);
+        fwrite((const void *)((uintptr_t)0x004DAC40u + g_xbox_mem_offset), 1, 0x177C, fb);
+        fwrite((const void *)((uintptr_t)(BTL_LO + 0x408u) + g_xbox_mem_offset), 1, 40 * 0x44, fb);
+        fwrite((const void *)((uintptr_t)(BTL_LO + 0xCD80u) + g_xbox_mem_offset), 1, 0x100, fb);
+    }
+    if (ff) {
+        fprintf(ff, "%u %u", now, MEM32(BTL_LO + 0xCDE0u));
+        for (a = 0x004D8F10u; a < 0x004D8F70u; a += 4)
+            fprintf(ff, " %d", (int32_t)MEM32(a));
+        for (a = 0x004DBE08u; a < 0x004DBE68u; a += 4)
+            fprintf(ff, " %d", (int32_t)MEM32(a));
+        fputc('\n', ff);
+    }
+    if (now - last_snap >= 1000u && fs) {
+        static int wide = -1;
+        uint32_t lo, hi, hdr[4];
+        if (wide < 0) wide = getenv("RECOMP_PIRATES_BTL_WIDE") != NULL;
+        lo = wide ? BTL_WIDE_LO : BTL_LO;
+        hi = wide ? BTL_WIDE_HI : BTL_HI;
+        hdr[0] = 0x42544C38u; hdr[1] = now; hdr[2] = frames; hdr[3] = (hi - lo) / 4u;
+        last_snap = now;
+        fwrite(hdr, 4, 4, fs);
+        fwrite((const void *)((uintptr_t)lo + g_xbox_mem_offset), 4, hdr[3], fs);
+        fflush(fs);
+        if (ff) fflush(ff);
+        if (fb) fflush(fb);
+    }
+}

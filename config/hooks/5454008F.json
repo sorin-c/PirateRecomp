@@ -200,6 +200,134 @@
   {
    "address": "0x00086015",
    "note": "sea_fps: the time acceleration read back in 30 fps units (cap of 200, forced values)"
+  },
+  {
+   "address": "0x000C3C5C",
+   "note": "battle_fps: the battle frame's way out"
+  },
+  {
+   "address": "0x000C3B93",
+   "note": "battle_fps: frame counter [obj+CDE0], undone off the tick"
+  },
+  {
+   "address": "0x000C3B9B",
+   "note": "battle_fps: frame counter [obj+CDE8], undone off the tick"
+  },
+  {
+   "address": "0x000C49D4",
+   "note": "battle_fps: [edi+CDD8], counts to 30, undone off the tick"
+  },
+  {
+   "address": "0x000D416E",
+   "note": "battle_fps: ship turn rate eased toward its target"
+  },
+  {
+   "address": "0x000D4177",
+   "note": "battle_fps: ship heading += rate / 2"
+  },
+  {
+   "address": "0x000D419C",
+   "note": "battle_fps: ship heading + rate / 3 (flag)"
+  },
+  {
+   "address": "0x000D422D",
+   "note": "battle_fps: ship heading += rate"
+  },
+  {
+   "address": "0x000D43CD",
+   "note": "battle_fps: ship speed eased toward its target"
+  },
+  {
+   "address": "0x000D4485",
+   "note": "battle_fps: ship x, y += speed along heading"
+  },
+  {
+   "address": "0x000D44C0",
+   "note": "battle_fps: ship drift x step"
+  },
+  {
+   "address": "0x000D44E7",
+   "note": "battle_fps: ship drift y step"
+  },
+  {
+   "address": "0x000D4615",
+   "note": "battle_fps: aground damage, once a tick"
+  },
+  {
+   "address": "0x000D4625",
+   "note": "battle_fps: aground knock, once a tick"
+  },
+  {
+   "address": "0x000C69BD",
+   "note": "battle_fps: ship body x step (sailing)"
+  },
+  {
+   "address": "0x000C69D1",
+   "note": "battle_fps: ship body y step (sailing)"
+  },
+  {
+   "address": "0x000C688F",
+   "note": "battle_fps: ship body x step (touching)"
+  },
+  {
+   "address": "0x000C68A3",
+   "note": "battle_fps: ship body y step (touching)"
+  },
+  {
+   "address": "0x000C69F2",
+   "note": "battle_fps: ship body heading += spin"
+  },
+  {
+   "address": "0x000C68C4",
+   "note": "battle_fps: ship body heading += spin (touching)"
+  },
+  {
+   "address": "0x000C63C4",
+   "note": "battle_fps: ship speed written back from the body"
+  },
+  {
+   "address": "0x000C63F8",
+   "note": "battle_fps: ship sideways speed written back from the body"
+  },
+  {
+   "address": "0x000C6150",
+   "note": "battle_fps: ship body position, truncation to 400-unit cells taken a frame's share at a time"
+  },
+  {
+   "address": "0x000C6601",
+   "note": "battle_fps: touching ships, velocity and spin before the push"
+  },
+  {
+   "address": "0x000C679E",
+   "note": "battle_fps: touching ships, the push a frame's share"
+  },
+  {
+   "address": "0x000CAFA6",
+   "note": "battle_fps: cannonball countdown, once a tick"
+  },
+  {
+   "address": "0x000CB26E",
+   "note": "battle_fps: cannonball x step"
+  },
+  {
+   "address": "0x000CB291",
+   "note": "battle_fps: cannonball y step"
+  },
+  {
+   "address": "0x000CB2B6",
+   "note": "battle_fps: cannonball height from the countdown less the part of a tick gone by"
+  },
+  {
+   "address": "0x000C472C",
+   "note": "battle_fps: wind drift x (obj+0xCDEC)"
+  },
+  {
+   "address": "0x000C4744",
+   "note": "battle_fps: wind drift y (obj+0xCDF0)"
+  },
+  {
+   "address": "0x000FE44A",
+   "note": "battle_fps: short-lived effects' ages (0x4D4E38), a year a tick"
   }
  ]
 }

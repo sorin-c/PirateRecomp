@@ -30,9 +30,16 @@ static const struct {
       "# calendar and timers that many times a second at the speed they have\n"
       "# at 30; 0 is unlocked (as fast as the PC draws it). Above 60 the sea\n"
       "# is paced by the PC's clock, so a monitor that refreshes that fast (or\n"
-      "# variable refresh) shows every frame. Battles, duels, towns and menus\n"
-      "# are not changed. Applies at once from the F2 menu.\n"
+      "# variable refresh) shows every frame. Battles have battle_fps; duels,\n"
+      "# towns and menus are not changed. Applies at once from the F2 menu.\n"
       "#                                             [RECOMP_PIRATES_SEA_FPS]\n" },
+    { "battle_fps", "30",
+      "# Experimental: the frame rate in ship battles, at the game's own\n"
+      "# speed: 30 (the default) as the console; 60, 90, 120, 144 or 240 run\n"
+      "# the battle's ships, cannonballs, wind and timers that many times a\n"
+      "# second at the speed they have at 30 (slow motion included); 0 is\n"
+      "# unlocked. Paced as sea_fps is. Applies at once from the F2 menu.\n"
+      "#                                          [RECOMP_PIRATES_BATTLE_FPS]\n" },
     { "sea_60", "0",
       "# The setting before sea_fps: 1 sails at 60 while sea_fps is 30.\n"
       "#                                              [RECOMP_PIRATES_SEA_60]\n" },

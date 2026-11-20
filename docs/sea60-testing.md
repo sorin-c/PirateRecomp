@@ -83,3 +83,29 @@ the countdowns, the time acceleration, sea_60's tick), `snaps.bin` (the ship
 table once a second) and a clock-sync line in the log for the sound log's
 times. The pin, poke, hold, no-ships and flip switches are described at the
 top of that file.
+
+## Ship battles (battle_fps)
+
+`tools/battle60/battle.ps1` starts a VS MODE battle (no save needed),
+headless, holds our ship in a turn from the start so it circles in open
+water, presses each fire button in turn, and has the harness log every
+battle frame (`RECOMP_PIRATES_BTL_TEST`: `btl_frames.bin`, both ships'
+structs, the shot slots and the battle's counters; `btl_snaps.bin`, the
+battle object once a second, or the game's whole data with
+`RECOMP_PIRATES_BTL_WIDE=1`). `tools/battle60/accept.py` compares runs:
+
+```
+battle.ps1 -Tag b30 -Rate 30 RECOMP_FRAME_INTERP=2 "RECOMP_PIRATES_BTL_PIN_ENEMY=2304 -2296"
+battle.ps1 -Tag b60 -Rate 60 "RECOMP_PIRATES_BTL_PIN_ENEMY=2304 -2296"
+py -3 tools/battle60/accept.py $env:TEMPattle6030 $env:TEMPattle6060
+```
+
+With the enemy pinned, our ship's mean speed and turn rate, its path and
+its turning per second agreed within 2% at 60, 120 and unlocked (two runs at
+30 differ by about as much). With the enemy free, every cannonball flew for
+its frame count at 30 fps (1.67 s for 51.5 frames at 30, 3.38 s for 102.8 at
+60) at 240,000-244,000 units a second at every rate. Slow motion
+(`RECOMP_PIRATES_BTL_OR=49C298=20` holds it on): our ship 35,900 units a
+second at 30 (drawn at 9.9 fps) and 35,800 at 60. The enemy's AI is random:
+two runs at 30 differ by more than 30 and 60 do, so compare it over several
+runs. `RECOMP_PIRATES_BTL_PIN_OURS` holds our ship instead.

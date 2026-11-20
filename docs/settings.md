@@ -33,6 +33,7 @@ Back pressed alone still reaches the game as usual.
 | Movies (skip all, skip intro, play all) | next start |
 | Sound | next start |
 | Sailing frame rate (experimental: 30, 60, 90, 120, 144, 240, unlocked) | at once |
+| Battle frame rate (experimental: 30, 60, 90, 120, 144, 240, unlocked) | at once |
 
 Every change is written to `pirates.ini` straight away, keeping its comments.
 
@@ -53,7 +54,7 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   clock, so it needs a monitor that refreshes at least that fast, or
   variable refresh (`vrr`), to show every frame: the picture is presented in
   step with the monitor, so on a 144 Hz monitor 240 and unlocked show about
-  140 frames a second. Battles, duels, towns, the
+  140 frames a second. Duels, towns, the
   town sneak, the map and the menus keep their own pacing, and the frame
   cap (`frame_cap`) still applies to them. While sailing faster than 30,
   frame interpolation is not used at sea (battles and duels still use it
@@ -61,6 +62,16 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   still sails at 60 while `sea_fps` is 30. Experimental: measured against
   30 fps in scripted test runs ([sea60-testing.md](sea60-testing.md)), not
   yet played through many battles and towns.
+- **Battle frame rate (experimental).** `battle_fps` (F2 "Battle frame
+  rate", applies at once): the same for ship battles. 30, the default, is
+  the console's; 60, 90, 120, 144 or 240 (0 unlocked) run the battle that
+  many times a second with the speed it has at 30: the ships' sailing,
+  turning and drifting, the cannonballs' flight, the wind, the AI's
+  decisions, reloads, fires and other countdowns, and the slow motion
+  (10 a second on the console, still 10 a second of game time). Paced as
+  sailing is. Measured against 30 fps in scripted battles (ships within 2%,
+  every cannonball's flight time the console's); not yet played through
+  many battles. Frame interpolation is not used in a battle faster than 30.
 - **Widescreen.** `widescreen = 1` turns on the game's own 16:9 mode. The
   front end (legal text, title, menus and the new-career pages) stays at 4:3
   between bars, as it was drawn, and the game world fills the screen.
@@ -96,6 +107,8 @@ defaults. Every line names the environment variable that overrides it, so a
 | `resolution_scale` | `1` | Render 1 to 8 times the console's resolution. |
 | `frame_cap` | `adaptive` | `adaptive` (as the console), `60`, `30` or `0` (off). |
 | `frame_interp` | `1` | `1` off, `2` shows 60 where the game runs at 30. |
+| `sea_fps` | `30` | Experimental: frames a second while sailing (`0` unlocked). |
+| `battle_fps` | `30` | Experimental: frames a second in ship battles (`0` unlocked). |
 | `fps_overlay` | `0` | Frame-rate counter. |
 | `fullscreen` | `0` | Fullscreen window. |
 | `anisotropy` | `0` | Texture sharpness: `0` off (the game's own filtering), `1`, `2`, `4`, `8` or `16`. |

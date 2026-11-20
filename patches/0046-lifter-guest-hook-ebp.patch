@@ -1,0 +1,17 @@
+diff --git a/tools/recomp/translator.py b/tools/recomp/translator.py
+index 9665288..f070d60 100644
+--- a/tools/recomp/translator.py
++++ b/tools/recomp/translator.py
+@@ -1625,6 +1625,12 @@ class FunctionTranslator:
+         if has_tail_jump or fallthrough_target is not None:
+             used_regs.add("ebp")
+ 
++        # A guest hook (--guest-hooks) passes ebp through g_ebp both ways, so a
++        # function with one needs the local even if it never touches ebp.
++        hooks = getattr(self.lifter, "guest_hooks", None)
++        if hooks and any(insn.address in hooks for insn in instructions):
++            used_regs.add("ebp")
++
+ 
+         # Ensure ebp is declared if the function talks to the SEH helpers: the
+         # lifter emits a publish before and a read-back after those calls, both
