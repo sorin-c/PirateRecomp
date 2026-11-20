@@ -352,6 +352,18 @@
   {
    "address": "0x000D512D",
    "note": "battle_fps: sinking animation step (second phase), its fraction carried"
+  },
+  {
+   "address": "0x000C3C25",
+   "note": "battle_fps: the battle frame ends (the loop's test)"
+  },
+  {
+   "address": "0x000C3C32",
+   "note": "battle_fps: the battle's other way out (career battles)"
+  },
+  {
+   "address": "0x000C3C38",
+   "note": "battle_fps: the battle ends (the after-battle call)"
   }
  ]
 }

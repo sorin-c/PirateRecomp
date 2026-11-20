@@ -985,7 +985,17 @@ static int btl_guest_hook(uint32_t va)
     int skip = !g_btl.tick;
 
     switch (va) {
-    case 0x000C3C5Cu:                       /* the battle frame's way out */
+    /* The battle frame's ends: the loop's test for another frame (0xC3C25,
+     * every frame), and both ways out of sub_000C3950 -- 0xC3C5C, and the
+     * return at 0xC3C32 when [0x4D67C7] is set, which a career battle
+     * takes. Missing that one left the battle's hooks on after it, with a
+     * stale tick, through the plunder scene and back at sea. */
+    case 0x000C3C25u:
+        g_btl.in_frame = 0;
+        return 1;
+    case 0x000C3C32u:
+    case 0x000C3C38u:
+    case 0x000C3C5Cu:
         g_btl.in_frame = 0;
         if (g_btl.gate_rate)
             btl_set_gate(0);
