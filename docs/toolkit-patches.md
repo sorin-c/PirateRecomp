@@ -418,3 +418,16 @@ Each one, with the reason it exists:
   `recomp_config_lookup` while it runs), and the game's "Sailing at 60 fps
   (experimental)" row (`sea_60`). The label column is as wide as the longest
   label.
+
+- **0044-flip-gate-title-rate** (`src/kernel/xbox_memory_layout.c`, `.h`).
+  `xbox_Nv2aFlipGateSetTitleRate(hz)`: a title's own rate for one scene whose
+  logic keeps time, over the vblank and over the player's frame cap -- hz > 0
+  Swaps a second by the host clock, < 0 no wait (unlocked), 0 back to
+  normal. The title renews it every frame; the gate lets it lapse 100 ms
+  after the last renewal, so a dialog or another scene is paced as before.
+  The game uses it for sailing faster than 60 (`sea_fps`).
+
+- **0045-settings-menu-sailing-rate** (`src/hle/hle_settings_menu.c`). The
+  F2 row for the game's sailing rate: "Sailing frame rate (experimental)",
+  30 (off), 60, 90, 120, 144, 240, unlocked (`sea_fps`), in place of 0043's
+  on/off "Sailing at 60 fps" row.

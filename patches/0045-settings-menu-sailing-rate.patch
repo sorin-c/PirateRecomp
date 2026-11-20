@@ -1,0 +1,16 @@
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index e93a552..8210f1e 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -77,8 +77,9 @@ static const Item TITLE_ITEMS[] = {
+       { "1", "intro", "0" }, { "skip all", "skip intro", "play all" } },
+     { "Sound",               "mute",             "RECOMP_MUTE",          LIVE_NONE, 2,
+       { "0", "1" }, { "on", "off" } },
+-    { "Sailing at 60 fps (experimental)", "sea_60", "RECOMP_PIRATES_SEA_60", LIVE_TITLE, 2,
+-      { "0", "1" }, { "off", "on" } },
++    { "Sailing frame rate (experimental)", "sea_fps", "RECOMP_PIRATES_SEA_FPS", LIVE_TITLE, 7,
++      { "30", "60", "90", "120", "144", "240", "0" },
++      { "30 (off)", "60", "90", "120", "144", "240", "unlocked" } },
+ };
+ #define TITLE_ITEM_COUNT ((int)(sizeof TITLE_ITEMS / sizeof TITLE_ITEMS[0]))
+ 

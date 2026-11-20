@@ -24,8 +24,9 @@
  *   RECOMP_PIRATES_SEA60_NOSHIPS=1                no AI ships (every slot
  *       of the ship table emptied each frame): the world stays the same in
  *       both runs, as AI ships make it diverge
- *   RECOMP_PIRATES_SEA60_FLIP="ms,ms,..."         flip sea_60 at those
- *       times, as the F2 menu does (recomp_config_set)
+ *   RECOMP_PIRATES_SEA60_FLIP="ms=rate,..."       set sea_fps to the rate
+ *       (30 off, 0 unlocked) at those times, as the F2 menu does
+ *       (recomp_config_set)
  */
 #include <stdio.h>
 #include <stdint.h>
@@ -108,7 +109,7 @@ void sea60_test_frame(int active, int tick, int dt, int acc3)
         pin = v && sscanf(v, "%d %d %d %d %d", &px, &py, &pms, &ph, &pv) >= 3;
         npoke = parse_list(getenv("RECOMP_PIRATES_SEA60_POKE"), "%x=%u@%u", 3, poke, 16);
         nhold = parse_list(getenv("RECOMP_PIRATES_SEA60_HOLD"), "%x=%u", 2, hold, 8);
-        nflip = parse_list(getenv("RECOMP_PIRATES_SEA60_FLIP"), "%u", 1, flip, 8);
+        nflip = parse_list(getenv("RECOMP_PIRATES_SEA60_FLIP"), "%u=%u", 2, flip, 8);
         noships = getenv("RECOMP_PIRATES_SEA60_NOSHIPS") != NULL;
         t0 = last_pin = now;
         fprintf(stderr, "[SEA60] test harness writing to %s (RECOMP_PIRATES_SEA60_TEST)\n", dir);
@@ -145,10 +146,10 @@ void sea60_test_frame(int active, int tick, int dt, int acc3)
             if (ff) fprintf(ff, "# poke %08X=%u\n", poke[i][0], poke[i][1]);
         }
     if (flip_next < nflip && now - t0 >= flip[flip_next][0]) {
-        const char *v = recomp_config_lookup(NULL, "sea_60");
-        int was = v && *v && strcmp(v, "0") != 0;
-        recomp_config_set("sea_60", was ? "0" : "1");
-        if (ff) fprintf(ff, "# flip sea_60=%d\n", !was);
+        char v[16];
+        snprintf(v, sizeof v, "%u", flip[flip_next][1]);
+        recomp_config_set("sea_fps", v);
+        if (ff) fprintf(ff, "# flip sea_fps=%s\n", v);
         flip_next++;
     }
 
