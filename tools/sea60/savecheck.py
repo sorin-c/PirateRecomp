@@ -17,13 +17,12 @@ def rows(run):
 
 
 s, l = rows(sys.argv[1]), rows(sys.argv[2])
-# the save: the frame before the first stop longer than 2 s after 20 s of sea
-t0 = s[0][0]
-saved = None
+# the save: the frame before the longest stop (the pause menu, the save)
+saved, longest = None, 0
 for a, b in zip(s, s[1:]):
-    if ((a[0] - t0) & 0xFFFFFFFF) > 20000 and ((b[0] - a[0]) & 0xFFFFFFFF) > 2000:
-        saved = a
-        break
+    g = (b[0] - a[0]) & 0xFFFFFFFF
+    if g > longest:
+        saved, longest = a, g
 loaded = l[0]
 if saved is None:
     sys.exit("no save stop found")

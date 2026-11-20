@@ -1067,12 +1067,21 @@ static void sea60_begin_frame(void)
     if (on && !gap)
         S60_MEM32(0x004C72F8u) = dt;
     if (!on || gap) {
-        /* Off, or a new stretch of sailing (after a battle, a town, the map,
-         * a menu): this frame is a whole tick and nothing is carried in. */
+        /* Off, or a new stretch of sailing (after a dialog, a battle, a town,
+         * the map, a menu): this frame is a whole tick, as at 30, and no part
+         * of a tick is carried in. The time acceleration's 30 fps value and
+         * the calendar's sum stay (a value the game set meanwhile, 500 leaving
+         * a town or 100 after a load, is seen at 0x860B0): restarting them at
+         * every crew dialog made the date fall 1% behind over ten minutes. */
         g_sea60.tick = 1;
         g_sea60.acc3 = 0;
-        g_sea60.cal_acc = 0;
-        g_sea60.ts_valid = 0;
+        if (!on) {
+            /* Turned off while sailing: the game gets its 30 fps value back. */
+            if (g_sea60.ts_valid && !gap && S60_MEM32(0x0040D4C4u) == g_sea60.ts_last)
+                S60_MEM32(0x0040D4C4u) = g_sea60.ts_x;
+            g_sea60.cal_acc = 0;
+            g_sea60.ts_valid = 0;
+        }
     } else {
         g_sea60.acc3 += dt * 3;
         if (g_sea60.acc3 >= 100) {

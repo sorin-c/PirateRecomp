@@ -43,6 +43,7 @@ switch ($Script) {
     foreach ($k in ($Keys -split ',')) {
       $n++
       if ($k -like "wait:*") { & $d wait ([double]$k.Substring(5)) | Out-Null; continue }
+      if ($k -eq "shot") { & $d screen ("k{0:D2}" -f $n) | Out-Null; continue }
       & $d press $k | Out-Null; & $d wait 2.5 | Out-Null; & $d screen ("k{0:D2}" -f $n) | Out-Null
     }
   }
