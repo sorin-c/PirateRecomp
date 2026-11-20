@@ -51,7 +51,9 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   have at 30 (paired test runs agree within a few per cent). At 60 the sea
   is paced by the vblank as the rest of the game is; above 60 by the PC's
   clock, so it needs a monitor that refreshes at least that fast, or
-  variable refresh (`vrr`), to show every frame. Battles, duels, towns, the
+  variable refresh (`vrr`), to show every frame: the picture is presented in
+  step with the monitor, so on a 144 Hz monitor 240 and unlocked show about
+  140 frames a second. Battles, duels, towns, the
   town sneak, the map and the menus keep their own pacing, and the frame
   cap (`frame_cap`) still applies to them. While sailing faster than 30,
   frame interpolation is not used at sea (battles and duels still use it
