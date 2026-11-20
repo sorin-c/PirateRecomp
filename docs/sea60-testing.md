@@ -109,3 +109,15 @@ its frame count at 30 fps (1.67 s for 51.5 frames at 30, 3.38 s for 102.8 at
 second at 30 (drawn at 9.9 fps) and 35,800 at 60. The enemy's AI is random:
 two runs at 30 differ by more than 30 and 60 do, so compare it over several
 runs. `RECOMP_PIRATES_BTL_PIN_OURS` holds our ship instead.
+
+A ship's sinking: `RECOMP_PIRATES_BTL_POKE=4DBE30=300@10000` sets the enemy's
+damage to its most 10 s in; its two sinking animations (+0x122C, +0x122E)
+took 3.93 s and 6.10 s at 30 and 3.87 s and 6.04 s at 120, and the battle
+ended at 24.1 s in both. Every frame drawn: `RECOMP_HLE_D3D8_DUMP=<prefix>
+RECOMP_HLE_D3D8_DUMP_EVERY=1 RECOMP_HLE_D3D8_DUMP_KEEP_LAST=24
+RECOMP_HLE_D3D8_DUMP_MAX=24` keeps the last 24 frames; the ships and their
+wakes must be in all of them (skipping sub_000D4680 or sub_000D5480 off the
+tick left them out of every other frame). `RECOMP_PIRATES_BTL_NOGATE=<bits>`
+runs those of the tick-only calls every frame (1 the wake history, 2 the AI,
+4 and 8 the countdowns, 0x10 and 0x20 a cannonball's smoke and warning), to
+find which one a fault comes from.

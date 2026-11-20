@@ -230,6 +230,17 @@ void btl_test_frame(int btl_tick, int btl_dt)
             const char *v = getenv("RECOMP_PIRATES_BTL_PIN_ENEMY");
             pin = v && sscanf(v, "%d %d", &px, &py) == 2;
         }
+        static int pk = -1, poked;
+        static unsigned pk_addr, pk_val, pk_ms, pk_t0;
+        if (pk < 0) {   /* RECOMP_PIRATES_BTL_POKE="addr=value@ms": once, ms after the battle began */
+            const char *v = getenv("RECOMP_PIRATES_BTL_POKE");
+            pk = v && sscanf(v, "%x=%u@%u", &pk_addr, &pk_val, &pk_ms) == 3;
+            pk_t0 = now;
+        }
+        if (pk && !poked && now - pk_t0 >= pk_ms) {
+            poked = 1;
+            MEM32(pk_addr) = pk_val;
+        }
         static int orset = -1;
         static unsigned or_addr, or_mask;
         if (orset < 0) {   /* RECOMP_PIRATES_BTL_OR="addr=mask": bits set every frame */

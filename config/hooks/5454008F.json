@@ -328,6 +328,30 @@
   {
    "address": "0x000FE44A",
    "note": "battle_fps: short-lived effects' ages (0x4D4E38), a year a tick"
+  },
+  {
+   "address": "0x00078F69",
+   "note": "battle_fps: sail angle eased toward its target (in a battle)"
+  },
+  {
+   "address": "0x00078F9B",
+   "note": "battle_fps: sail angle flutter (in a battle)"
+  },
+  {
+   "address": "0x000D98EE",
+   "note": "battle_fps: a blown-up ship's sinking, once a tick"
+  },
+  {
+   "address": "0x000D4B73",
+   "note": "battle_fps: the rudder as drawn, a step a frame toward its target"
+  },
+  {
+   "address": "0x000D4EED",
+   "note": "battle_fps: sinking animation step, its fraction carried"
+  },
+  {
+   "address": "0x000D512D",
+   "note": "battle_fps: sinking animation step (second phase), its fraction carried"
   }
  ]
 }

@@ -784,6 +784,7 @@ static struct {
     int32_t rem[16];      /* btl_scale's remainders */
     int32_t srem[8][16];  /* btl_step's, a ship (btl_ship) and a kind each */
     float touch_v[3];     /* a body's velocity and spin before a touch's push */
+    double anim_rem[8][2];/* what the sinking's frame-time steps truncated, a ship */
     int touch_live;
 } g_btl;
 
@@ -816,7 +817,7 @@ static int btl_ship(uint32_t p)
 /* A value the console moves from old to new in one frame: this frame's
  * share of the move, remainder kept for that ship and kind. */
 enum { BS_RATE, BS_HEAD, BS_HEAD2, BS_HEAD3, BS_SPEED, BS_X, BS_Y, BS_BHEAD,
-       BS_BSPEED, BS_LAT, BS_KINDS };
+       BS_BSPEED, BS_LAT, BS_RUDDER, BS_KINDS };
 static int32_t btl_step(uint32_t ship, int kind, int32_t old, int32_t nw)
 {
     int32_t *rem = &g_btl.srem[btl_ship(ship)][kind];
@@ -990,7 +991,8 @@ static int btl_guest_hook(uint32_t va)
             btl_set_gate(0);
         return 1;
     }
-    if (!(va >= 0x000C3000u && va < 0x000D6000u) && va != 0x000FE44Au)
+    if (!(va >= 0x000C3000u && va < 0x000DA000u) && va != 0x000FE44Au &&
+        va != 0x00078F69u && va != 0x00078F9Bu)
         return 0;                           /* not the battle's */
     if (!g_btl.active || !g_btl.in_frame)
         return 1;
@@ -1097,6 +1099,36 @@ static int btl_guest_hook(uint32_t va)
     case 0x000CB2B6u:   /* ecx = (2^31 / flight) * countdown; eax = 2^31 / flight */
         g_ecx -= (uint32_t)((uint64_t)g_eax * (uint32_t)g_btl.acc_us / (uint32_t)g_btl.tick_us);
         break;
+
+    /* A sail's angle (sub_00078EC0, the sea's own, here for a battle):
+     * eased a sixteenth of the way to its target a frame, or fluttering by
+     * a random step; ecx the step, this frame's share. */
+    case 0x00078F69u: g_ecx = (uint32_t)btl_scale(4, (int32_t)g_ecx); break;
+    case 0x00078F9Bu: g_ecx = (uint32_t)btl_scale(5, (int32_t)g_ecx); break;
+
+    /* A ship blown up and going down (sub_000D9580): its sinking, +5 a
+     * frame, once a tick. */
+    case 0x000D98EEu: if (skip) g_eax -= 5; break;
+
+    /* The rudder as drawn (sub_000D4680, ebp the ship): a step a frame
+     * toward 16 x the rudder; ecx new. */
+    case 0x000D4B73u:
+        g_ecx = (uint32_t)btl_step(g_ebp, BS_RUDDER, S60_MEM32(g_ebp + 0x11FCu), (int32_t)g_ecx);
+        break;
+
+    /* A ship going down (sub_000D4680): its two animation counters (+0x122C,
+     * +0x122E) step by the frame time x 30, truncated to whole frames -- at
+     * 120 a frame lost 6% of it. The fraction carried a ship. */
+    case 0x000D4EEDu:
+    case 0x000D512Du: {
+        double *rem = &g_btl.anim_rem[btl_ship(g_ebp)][va == 0x000D512Du];
+        double t = *(volatile double *)((uintptr_t)0x004D39F8u + g_xbox_mem_offset) *
+                   (double)S60_MEMF(0x003FF3FCu) + *rem;
+        int32_t n = (int32_t)t;
+        *rem = t - n;
+        g_eax = (g_eax & 0xFFFF0000u) | ((uint32_t)n & 0xFFFFu);
+        break;
+    }
 
     case 0x000D4615u:   /* aground: damage +1 a frame, once a tick */
         if (skip) g_eax -= 1;
@@ -1291,8 +1323,15 @@ void recomp_guest_hook(uint32_t va)
 /* Battle code that runs once a console frame -- decisions, countdowns,
  * effects started -- on the tick only when battles run faster than 30: the
  * call is skipped as if it had run (pop: the callee's own ret N). */
-static int btl_off_tick(uint32_t pop)
+static int btl_off_tick_bit(uint32_t pop, unsigned bit)
 {
+    static int mask = -1;   /* RECOMP_PIRATES_BTL_NOGATE: test switch, bits of calls run every frame */
+    if (mask < 0) {
+        const char *v = getenv("RECOMP_PIRATES_BTL_NOGATE");
+        mask = v ? (int)strtoul(v, NULL, 16) : 0;
+    }
+    if ((unsigned)mask & bit)
+        return 0;
     if (g_btl.active && g_btl.in_frame && !g_btl.tick) {
         g_esp += 4u + pop;
         return 1;
@@ -1300,20 +1339,39 @@ static int btl_off_tick(uint32_t pop)
     return 0;
 }
 
-/* A ship's history (its wake: arrays shifted a place a frame). */
-extern void sub_000D4680_gen(void);
-void sub_000D4680(void) { if (!btl_off_tick(4u)) sub_000D4680_gen(); }
+/* A ship's wake (sub_000D5480, the ship pushed): its history -- arrays at
+ * +0x1244..+0x167C shifted a place a frame, the newest point at the ship --
+ * and the wake drawn from it. Run every frame, since it draws (as its
+ * caller, sub_000D4680, places the ship's model: skipping either left the
+ * ships or their wakes undrawn every other frame); off the tick the history
+ * is put back as it was after the drawing, so it moves once a tick. */
+#define BTL_WAKE_LO 0x1244u
+#define BTL_WAKE_HI 0x1680u
+extern void sub_000D5480_gen(void);
+void sub_000D5480(void)
+{
+    static uint8_t saved[BTL_WAKE_HI - BTL_WAKE_LO];
+    uint32_t ship = (uint32_t)S60_MEM32(g_esp + 4u);
+    int keep = g_btl.active && g_btl.in_frame && !g_btl.tick;
+    void *hist = (void *)((uintptr_t)(ship + BTL_WAKE_LO) + g_xbox_mem_offset);
+
+    if (keep)
+        memcpy(saved, hist, sizeof saved);
+    sub_000D5480_gen();
+    if (keep)
+        memcpy(hist, saved, sizeof saved);
+}
 extern void sub_000D0B90_gen(void);
-void sub_000D0B90(void) { if (!btl_off_tick(0u)) sub_000D0B90_gen(); }  /* the AI's decisions */
+void sub_000D0B90(void) { if (!btl_off_tick_bit(0u, 2u)) sub_000D0B90_gen(); }  /* the AI's decisions */
 extern void sub_000D6270_gen(void);
-void sub_000D6270(void) { if (!btl_off_tick(0u)) sub_000D6270_gen(); }  /* countdowns, damage effects */
+void sub_000D6270(void) { if (!btl_off_tick_bit(0u, 4u)) sub_000D6270_gen(); }  /* countdowns, damage effects */
 extern void sub_000D6340_gen(void);
-void sub_000D6340(void) { if (!btl_off_tick(0u)) sub_000D6340_gen(); }  /* countdowns, fires started */
+void sub_000D6340(void) { if (!btl_off_tick_bit(0u, 8u)) sub_000D6340_gen(); }  /* countdowns, fires started */
 /* A cannonball's launch smoke and its splash warning (sub_000CAF60). */
 extern void sub_000CB030_gen(void);
-void sub_000CB030(void) { if (!btl_off_tick(4u)) sub_000CB030_gen(); }
+void sub_000CB030(void) { if (!btl_off_tick_bit(4u, 0x10u)) sub_000CB030_gen(); }
 extern void sub_000CBEE0_gen(void);
-void sub_000CBEE0(void) { if (!btl_off_tick(4u)) sub_000CBEE0_gen(); }
+void sub_000CBEE0(void) { if (!btl_off_tick_bit(4u, 0x20u)) sub_000CBEE0_gen(); }
 
 extern void sub_001A958A_gen(void);
 extern int recomp_config_int(const char *env_name, const char *key, int fallback);
