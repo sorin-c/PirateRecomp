@@ -968,6 +968,8 @@ static void sea60_frame(uint32_t tick)
  *               0x4C70F0 and ages, which then count at 30 as they should)
  *      0x85BC0, 0x91C19, 0x91C41  countdowns 0x4C72FC, 0x4D65B8, 0x4D6600
  *      0x79433, 0x87240, 0x86387  ship words +0x4564D6, +0x45650E, +0x4564D0
+ *      0x80958  ship word +0x4564FC (a sighting's stage, frames/40)
+ *      0x92590  countdown 0x4D65EC (40 frames)
  *      0x86891  a ship's speed easing toward its target (0x4564C8)
  *      0x785E7  the lifetime of the sea objects in 0x4B6434 (sub_000785C0)
  *      "every Nth frame" tests on the counter, which would pass on both
@@ -1158,6 +1160,8 @@ void recomp_guest_hook(uint32_t va)
     case 0x00079433u: if (skip) S60_MEM16(g_esi + 0x004564D6u) += 1; break;
     case 0x00087240u: if (skip) S60_MEM16(g_ebx + 0x0045650Eu) += 1; break;
     case 0x00086387u: if (skip) S60_MEM16(g_ebx + 0x004564D0u) -= 1; break;
+    case 0x00080958u: if (skip) S60_MEM16(g_ebx + 0x004564FCu) -= 1; break;  /* encounter stage count */
+    case 0x00092590u: if (skip) g_eax += 1; break;                    /* dec eax -> 0x4D65EC (40 frames) */
     case 0x00086891u: if (skip) g_eax = (uint32_t)S60_MEM32(g_ebx + 0x004564C8u); break;
     case 0x000785E7u: if (skip) g_eax = (g_eax & 0xFFFF0000u) | ((g_eax - 1u) & 0xFFFFu); break;
 

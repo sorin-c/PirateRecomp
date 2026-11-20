@@ -184,6 +184,14 @@
   {
    "address": "0x00086D52",
    "note": "sea_60: ship word +0x45650C less time acceleration/100 on the tick"
+  },
+  {
+   "address": "0x00080958",
+   "note": "sea_60: ship word +0x4564FC, the encounter's stage count"
+  },
+  {
+   "address": "0x00092590",
+   "note": "sea_60: countdown 0x4D65EC (40 frames)"
   }
  ]
 }
