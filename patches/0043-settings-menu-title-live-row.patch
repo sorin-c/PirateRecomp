@@ -1,0 +1,58 @@
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index 97338cc..e93a552 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -36,7 +36,9 @@ enum {
+     PAD_START = 0x0010u, PAD_BACK = 0x0020u,
+ };
+ 
+-enum { LIVE_NONE, LIVE_CAP, LIVE_INTERP, LIVE_FPS, LIVE_FULLSCREEN };
++/* LIVE_TITLE: the title reads the key itself while it runs
++ * (recomp_config_lookup returns what the menu set), so it applies at once. */
++enum { LIVE_NONE, LIVE_CAP, LIVE_INTERP, LIVE_FPS, LIVE_FULLSCREEN, LIVE_TITLE };
+ 
+ typedef struct {
+     const char *label;
+@@ -75,6 +77,8 @@ static const Item TITLE_ITEMS[] = {
+       { "1", "intro", "0" }, { "skip all", "skip intro", "play all" } },
+     { "Sound",               "mute",             "RECOMP_MUTE",          LIVE_NONE, 2,
+       { "0", "1" }, { "on", "off" } },
++    { "Sailing at 60 fps (experimental)", "sea_60", "RECOMP_PIRATES_SEA_60", LIVE_TITLE, 2,
++      { "0", "1" }, { "off", "on" } },
+ };
+ #define TITLE_ITEM_COUNT ((int)(sizeof TITLE_ITEMS / sizeof TITLE_ITEMS[0]))
+ 
+@@ -153,6 +157,7 @@ static void change(int dir)
+     case LIVE_INTERP:     hle_set_frame_interp(atoi(it->vals[i])); break;
+     case LIVE_FPS:        hle_set_fps_overlay(i); break;
+     case LIVE_FULLSCREEN: hle_set_fullscreen(i); break;
++    case LIVE_TITLE:      break;
+     default:              g_restart_needed = 1; break;
+     }
+     fprintf(stderr, "[MENU] %s = %s%s\n", it->key, it->vals[i],
+@@ -175,19 +180,22 @@ void hle_settings_menu_toggle(void)
+ 
+ const char *hle_settings_menu_text(void)
+ {
+-    int i, o = 0;
++    int i, o = 0, w = 20;
+ 
+     if (!g_open)
+         return NULL;
+     build_list();
++    for (i = 0; i < g_count; i++)            /* the label column fits the longest */
++        if ((int)strlen(g_items[i]->label) > w)
++            w = (int)strlen(g_items[i]->label);
+ #define ADD(...) do { if (o < (int)sizeof g_text) \
+         o += snprintf(g_text + o, sizeof g_text - (size_t)o, __VA_ARGS__); } while (0)
+     ADD("            SETTINGS\n\n");
+     for (i = 0; i < g_count; i++) {
+         const Item *it = g_items[i];
+         int env = it->env && getenv(it->env) && *getenv(it->env) && it->live == LIVE_NONE;
+-        ADD("%s%s %-20s < %-10s >%s\n", i == g_sel ? "\x01" : "", i == g_sel ? ">" : " ",
+-            it->label, it->names[current_index(it)],
++        ADD("%s%s %-*s < %-10s >%s\n", i == g_sel ? "\x01" : "", i == g_sel ? ">" : " ",
++            w, it->label, it->names[current_index(it)],
+             it->live == LIVE_NONE ? (env ? " *env" : " *") : "");
+     }
+     ADD("%s%s Close\n\n", g_sel == g_count ? "\x01" : "", g_sel == g_count ? ">" : " ");

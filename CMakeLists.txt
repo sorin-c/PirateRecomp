@@ -76,6 +76,7 @@ file(GLOB RECOMP_GEN_SOURCES CONFIGURE_DEPENDS "src/recomp/gen/*.c")
 set(GAME_SOURCES
     src/main.c
     src/recomp_manual.c
+    src/sea60_test.c        # sea_60's test harness (RECOMP_PIRATES_SEA60_TEST)
     # Add game-specific sources here, e.g.:
     # src/asset_loader.c
     # src/custom_renderer.c
@@ -91,6 +92,20 @@ add_executable(${PROJECT_NAME}
     ${GAME_SOURCES}
     ${RECOMP_GEN_SOURCES}
 )
+# The guest hooks: every address in config/hooks/<TITLEID>.json must have its
+# case in recomp_guest_hook (src/recomp_manual.c) and the other way round, or
+# a hook runs no code or a case never runs. Checked on every build when a
+# Python is found (the lift needs one anyway).
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_custom_target(check_guest_hooks ALL
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_guest_hooks.py
+                ${CMAKE_CURRENT_SOURCE_DIR}/config/hooks/5454008F.json
+                ${CMAKE_CURRENT_SOURCE_DIR}/src/recomp_manual.c
+        COMMENT "Guest hooks: config/hooks against recomp_guest_hook"
+        VERBATIM)
+    add_dependencies(${PROJECT_NAME} check_guest_hooks)
+endif()
 # A windowed program on Windows (WinMain, no console); a plain executable
 # elsewhere, whose main() hands the title its own thread (host_main_posix).
 if(WIN32)

@@ -1,0 +1,124 @@
+diff --git a/scripts/recompile.py b/scripts/recompile.py
+index 1bf771d..59eec32 100644
+--- a/scripts/recompile.py
++++ b/scripts/recompile.py
+@@ -212,6 +212,13 @@ def build_commands(args, xbe: Path, analysis_json: Path, stage_xbe: Path = None)
+         lift += ["--game-name", args.game_name]
+     if args.trace_all_entries:
+         lift.append("--trace-all-entries")
++    # Guest hooks: config/hooks/<TITLEID>.json, the title's instructions that
++    # call its recomp_guest_hook() first (tools/recomp --guest-hooks).
++    title = xbe_title_id(xbe)
++    hooks_file = config_file(args, "hooks", title) if title else None
++    if hooks_file and hooks_file.is_file():
++        lift += ["--guest-hooks", str(hooks_file)]
++        print(f"guest hooks: {hooks_file}")
+     # XDK functions with a name-keyed replacement (tools/recomp/hle.py), used
+     # whenever tools.xdk_symbols has been run for this XBE.
+     # getattr: a caller may build the arguments without this option.
+diff --git a/templates/runtime/recomp_types.h b/templates/runtime/recomp_types.h
+index 87ad656..9ca882e 100644
+--- a/templates/runtime/recomp_types.h
++++ b/templates/runtime/recomp_types.h
+@@ -367,6 +367,13 @@ void recomp_guest_backedge_yield(void);
+     } while (0)
+ #endif
+ 
++/* A guest hook (tools/recomp --guest-hooks, config/hooks/<TITLEID>.json):
++ * the title's code, run just before the guest instruction at `va` with the
++ * guest's registers in place. The title defines recomp_guest_hook(); only a
++ * title that lists hooks emits calls to it. */
++void recomp_guest_hook(uint32_t va);
++#define RECOMP_GUEST_HOOK(va) recomp_guest_hook(va)
++
+ #include <setjmp.h>
+ jmp_buf *recomp_setjmp_slot(uint32_t buf_va);
+ int recomp_guest_longjmp(uint32_t buf_va, uint32_t value);
+diff --git a/tools/recomp/__main__.py b/tools/recomp/__main__.py
+index 242baba..3b46aa9 100644
+--- a/tools/recomp/__main__.py
++++ b/tools/recomp/__main__.py
+@@ -336,6 +336,14 @@ def main():
+                         help="JSON list of addresses to emit an entry trace "
+                              "for (RECOMP_TRACE_ENTER). For bring-up: shows "
+                              "which call in an init chain is not returning")
++    parser.add_argument("--guest-hooks", metavar="FILE",
++                        help="JSON file of guest instruction addresses "
++                             "({\"hooks\": [{\"address\": \"0x...\"}]}). Each gets "
++                             "RECOMP_GUEST_HOOK(address) just before it: a call "
++                             "to the title's recomp_guest_hook(), which may read "
++                             "and change registers and memory. For changing what "
++                             "one instruction in a large function sees without "
++                             "replacing the function")
+     parser.add_argument("--trace-all-entries", action="store_true",
+                         help="Emit an entry hook in every function. With "
+                              "RECOMP_TRACE_PROFILE set at run time this reports "
+@@ -427,6 +435,14 @@ def main():
+             "icall_sites.json"),
+     )
+ 
++    if args.guest_hooks:
++        with open(args.guest_hooks, encoding="utf-8") as f:
++            spec = json.load(f)
++        entries = spec.get("hooks", spec) if isinstance(spec, dict) else spec
++        hooks = {int(e["address"] if isinstance(e, dict) else e, 16) for e in entries}
++        translator.translator.lifter.guest_hooks = hooks
++        print(f"Guest hooks: {len(hooks)} from {args.guest_hooks}", file=sys.stderr)
++
+     t_load = time.time() - t0
+     print(f"Loaded {len(translator.func_db)} functions, "
+           f"{len(translator.label_db)} labels, "
+@@ -832,6 +848,31 @@ def main():
+     summary_path = write_summary(stats, output_dir)
+     print(f"\nSummary: {summary_path}", file=sys.stderr)
+ 
++    # A hook that was never emitted sits on an address no lifted function
++    # starts an instruction at (or on the jcc of a fused cmp/jcc): say so,
++    # since the title's code then silently never runs there.
++    # Read back from the files written: functions are lifted in worker
++    # processes, whose lifters do not report back.
++    hooks = getattr(translator.translator.lifter, "guest_hooks", None)
++    if hooks and not args.max_funcs:
++        import glob
++        import re
++        placed = set()
++        out = args.gen_dir or args.output_dir or os.path.join(
++            os.path.dirname(__file__), "output")
++        for path in glob.glob(os.path.join(out, "*.c")):
++            with open(path, encoding="utf-8", errors="replace") as f:
++                placed.update(int(m, 16) for m in
++                              re.findall(r"RECOMP_GUEST_HOOK\((0x[0-9A-Fa-f]+)u\)", f.read()))
++        missing = sorted(hooks - placed)
++        for a in missing:
++            print(f"ERROR: guest hook 0x{a:08X} was not placed: no lifted "
++                  f"instruction starts there, or it is the jump of a fused "
++                  f"cmp/jcc", file=sys.stderr)
++        if missing:
++            sys.exit(1)
++        print(f"Guest hooks placed: {len(hooks)}", file=sys.stderr)
++
+ 
+ if __name__ == "__main__":
+     main()
+diff --git a/tools/recomp/lifter.py b/tools/recomp/lifter.py
+index 34a8752..c8891cd 100644
+--- a/tools/recomp/lifter.py
++++ b/tools/recomp/lifter.py
+@@ -5006,9 +5006,17 @@ def lift_basic_block(lifter, bb, flag_state=None):
+         last_flag_setter = None
+         last_flag_ops = []
+ 
++    hooks = getattr(lifter, "guest_hooks", None)
+     while i < len(insns):
+         curr = insns[i]
+ 
++        # A guest hook (--guest-hooks): the title's code runs just before
++        # this instruction, with the registers as the guest has them. ebp is
++        # a local of the lifted function, so it goes through g_ebp both ways.
++        if hooks and curr.address in hooks:
++            stmts.append(f"g_ebp = ebp; RECOMP_GUEST_HOOK(0x{curr.address:08X}u); "
++                         f"ebp = g_ebp; /* guest hook */")
++
+         # Try cmp/test + jcc pattern first (2-instruction match)
+         match = try_match_cmp_jcc(insns, i, lifter=lifter)
+         if match:

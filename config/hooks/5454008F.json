@@ -1,0 +1,201 @@
+{
+ "comment": "Guest hooks (toolkit patch 0042): each address calls recomp_guest_hook() in src/recomp_manual.c just before that instruction.",
+ "hooks": [
+  {
+   "address": "0x00086078",
+   "note": "sea_60: time acceleration 0x40D4C4, frame time after the 33 ms clamp"
+  },
+  {
+   "address": "0x000864FE",
+   "note": "sea_60: speed computation frame time [esp+0x24] after the clamp"
+  },
+  {
+   "address": "0x00086588",
+   "note": "sea_60: turn computation frame time after the clamp"
+  },
+  {
+   "address": "0x0009259F",
+   "note": "sea_60: sea frame counter 0x49C288 at the 30 Hz logic tick"
+  },
+  {
+   "address": "0x00085BC0",
+   "note": "sea_60: countdown 0x4C72FC"
+  },
+  {
+   "address": "0x00091C19",
+   "note": "sea_60: countdown 0x4D65B8"
+  },
+  {
+   "address": "0x00091C41",
+   "note": "sea_60: countdown 0x4D6600"
+  },
+  {
+   "address": "0x00079433",
+   "note": "sea_60: ship countdown +0x4564D6"
+  },
+  {
+   "address": "0x00087240",
+   "note": "sea_60: ship countdown +0x45650E"
+  },
+  {
+   "address": "0x00086387",
+   "note": "sea_60: ship count +0x4564D0"
+  },
+  {
+   "address": "0x00086891",
+   "note": "sea_60: ship speed approach 0x4564C8"
+  },
+  {
+   "address": "0x000785E7",
+   "note": "sea_60: sea object lifetime (sub_000785C0)"
+  },
+  {
+   "address": "0x00085AAD",
+   "note": "sea_60: calendar, time scale of a whole logic tick"
+  },
+  {
+   "address": "0x00085B73",
+   "note": "sea_60: calendar, time scale put back"
+  },
+  {
+   "address": "0x0007860C",
+   "note": "sea_60: sea object step, scaled by frame time"
+  },
+  {
+   "address": "0x00078620",
+   "note": "sea_60: sea object step, scaled by frame time"
+  },
+  {
+   "address": "0x0008216B",
+   "note": "sea_60: every-128th test on the frame counter"
+  },
+  {
+   "address": "0x00083AF1",
+   "note": "sea_60: every-32nd test"
+  },
+  {
+   "address": "0x00084380",
+   "note": "sea_60: every-32nd test"
+  },
+  {
+   "address": "0x0008448A",
+   "note": "sea_60: every-32nd test"
+  },
+  {
+   "address": "0x000845FD",
+   "note": "sea_60: every-32nd test"
+  },
+  {
+   "address": "0x00084720",
+   "note": "sea_60: every-32nd test"
+  },
+  {
+   "address": "0x000848C2",
+   "note": "sea_60: every-32nd test"
+  },
+  {
+   "address": "0x00087537",
+   "note": "sea_60: every-8th test"
+  },
+  {
+   "address": "0x0007FE92",
+   "note": "sea_60: every-16th memory test, counter bumped"
+  },
+  {
+   "address": "0x0007FF16",
+   "note": "sea_60: counter put back"
+  },
+  {
+   "address": "0x00086702",
+   "note": "sea_60: every-8th memory test, counter bumped"
+  },
+  {
+   "address": "0x00086711",
+   "note": "sea_60: counter put back"
+  },
+  {
+   "address": "0x0007F892",
+   "note": "sea_60: phase counter*0x4444444, smooth"
+  },
+  {
+   "address": "0x00085202",
+   "note": "sea_60: AI ship phase counter*0x4444444, smooth"
+  },
+  {
+   "address": "0x00083F9F",
+   "note": "sea_60: phase counter*0x16C16C1, smooth"
+  },
+  {
+   "address": "0x00081CB6",
+   "note": "sea_60: phase step saved"
+  },
+  {
+   "address": "0x00082233",
+   "note": "sea_60: phase step saved"
+  },
+  {
+   "address": "0x0008272A",
+   "note": "sea_60: phase step saved"
+  },
+  {
+   "address": "0x00081CBD",
+   "note": "sea_60: phase smooth"
+  },
+  {
+   "address": "0x0008223A",
+   "note": "sea_60: phase smooth"
+  },
+  {
+   "address": "0x00082731",
+   "note": "sea_60: phase smooth"
+  },
+  {
+   "address": "0x0007FE90",
+   "note": "sea_60: 0x40D018 smoothing step, scaled by frame time"
+  },
+  {
+   "address": "0x00078F69",
+   "note": "sea_60: sub_00078EC0 easing step 1/16, scaled"
+  },
+  {
+   "address": "0x00078F9B",
+   "note": "sea_60: sub_00078EC0 random easing step 1/8, scaled"
+  },
+  {
+   "address": "0x00077C81",
+   "note": "sea_60: rand()%150 chance a frame, at the logic tick"
+  },
+  {
+   "address": "0x000860B0",
+   "note": "sea_60: time acceleration stored as the 30 fps value x frame time share"
+  },
+  {
+   "address": "0x00084D90",
+   "note": "sea_60: time acceleration floor (150) compared as the 30 fps value"
+  },
+  {
+   "address": "0x0007768E",
+   "note": "sea_60: sub_00077680 reads the 30 fps time acceleration"
+  },
+  {
+   "address": "0x00086568",
+   "note": "sea_60: turning reads the 30 fps time acceleration"
+  },
+  {
+   "address": "0x00086D52",
+   "note": "sea_60: ship word +0x45650C less time acceleration/100 on the tick"
+  },
+  {
+   "address": "0x00080958",
+   "note": "sea_60: ship word +0x4564FC, the encounter's stage count"
+  },
+  {
+   "address": "0x00092590",
+   "note": "sea_60: countdown 0x4D65EC (40 frames)"
+  },
+  {
+   "address": "0x00092681",
+   "note": "sea_60: the sea loop is left here (both exits); the hooks stop acting"
+  }
+ ]
+}

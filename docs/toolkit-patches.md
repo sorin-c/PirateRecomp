@@ -399,3 +399,22 @@ Each one, with the reason it exists:
   `recomp_bindings_set_bumper_test` lets the title say, at each sample, which
   job they do now. This game makes them Black and White while sailing (the
   map overlay and the sails) and the triggers everywhere else.
+
+- **0042-lifter-guest-hooks** (`tools/recomp/lifter.py`, `__main__.py`,
+  `scripts/recompile.py`, `templates/runtime/recomp_types.h`). Guest hooks:
+  `config/hooks/<TITLEID>.json` lists guest instruction addresses
+  (`{"hooks": [{"address": "0x...", "note": "..."}]}`), the pipeline passes
+  it to the lift (`--guest-hooks`), and each listed instruction gets
+  `RECOMP_GUEST_HOOK(address)` just before it: a call to the title's
+  `recomp_guest_hook()`, which may read and change the guest's registers and
+  memory (`ebp` goes through `g_ebp` both ways). A hook that cannot be placed
+  (no lifted instruction starts there, or it is the jump of a fused
+  `cmp`/`jcc`) stops the lift. This changes what one instruction inside a
+  large function sees without replacing the function, and a clean lift
+  reproduces it. The game uses it for sailing at 60 (`sea_60`).
+
+- **0043-settings-menu-title-live-row** (`src/hle/hle_settings_menu.c`). A
+  title row that applies at once (`LIVE_TITLE`: the title reads the key with
+  `recomp_config_lookup` while it runs), and the game's "Sailing at 60 fps
+  (experimental)" row (`sea_60`). The label column is as wide as the longest
+  label.
