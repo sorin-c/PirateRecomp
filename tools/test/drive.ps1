@@ -32,7 +32,7 @@ function Get-Game($s) {
   if (-not $p) { return $null }
   try { $st = $p.StartTime.ToUniversalTime().Ticks; $path = $p.Path } catch { return $null }
   if (-not $s.started -or [long]$s.started -ne $st) { return $null }
-  if ($s.exe -and $path -and $path -ine $s.exe) { return $null }
+  if (-not $s.exe -or -not $path -or $path -ine $s.exe) { return $null }
   $p
 }
 function Clear-Pid { if (Test-Path $state) { (Get-Content $state | Where-Object { $_ -notlike "pid=*" -and $_ -notlike "started=*" }) | Set-Content $state } }

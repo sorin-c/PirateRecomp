@@ -807,10 +807,10 @@ static int pirates_parse_fps(const char *v)
     while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')
         end++;
     if (*end || r < 0) {
-        if (*p) {
-            static const char *said;
-            if (said != v) {
-                said = v;
+        if (*p) {                            /* said once per bad text */
+            static char said[64];
+            if (strncmp(said, v, sizeof said - 1) != 0) {
+                snprintf(said, sizeof said, "%s", v);
                 fprintf(stderr, "[PIRATES] frame rate \"%s\" not understood: 30\n", v);
             }
         }

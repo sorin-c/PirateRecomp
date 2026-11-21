@@ -36,6 +36,15 @@ if (-not $env:SEA60_FIXTURE) { throw "set SEA60_FIXTURE to the UDATA folder of a
 $fix = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:SEA60_FIXTURE).TrimEnd('\', '/')
 $ud = [IO.Path]::GetFullPath((Join-Path $g "UDATA")).TrimEnd('\', '/')
 if (-not (Test-Path -LiteralPath $fix -PathType Container)) { throw "SEA60_FIXTURE is not a folder: $fix" }
+# A junction or symlink could make the two the same folder under other names:
+# refuse one on either path, or on any folder up to the drive root.
+function Get-Reparse($path) {
+  for ($q = $path; $q; $q = Split-Path -Parent $q) {
+    $i = Get-Item -LiteralPath $q -Force -ErrorAction SilentlyContinue
+    if ($i -and ($i.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $q }
+  }
+}
+foreach ($q in $fix, $ud) { $r = Get-Reparse $q; if ($r) { throw "$r is a junction or symlink: give SEA60_FIXTURE and the test game as real folders" } }
 if (-not (Get-ChildItem -LiteralPath $fix -Recurse -File | Select-Object -First 1)) { throw "SEA60_FIXTURE holds no files: $fix" }
 $sep = [IO.Path]::DirectorySeparatorChar
 if ($fix -ieq $ud -or $fix.StartsWith("$ud$sep", [StringComparison]::OrdinalIgnoreCase) -or
