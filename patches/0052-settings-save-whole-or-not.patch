@@ -1,0 +1,117 @@
+diff --git a/src/config/recomp_config.c b/src/config/recomp_config.c
+index 0bbbb91..0c26c2f 100644
+--- a/src/config/recomp_config.c
++++ b/src/config/recomp_config.c
+@@ -950,9 +950,36 @@ const char *recomp_config_lookup(const char *env_name, const char *key)
+  * file rewritten in place, so the comments and every other line stay as
+  * they were. A key the file does not have yet is appended. Returns 1 when
+  * the file was written. */
++/* The whole settings file replaced by `data`, or left as it was: written to
++ * a sibling first, and moved over the file only once every byte reached it
++ * (a full disk, say, leaves the old file whole). Returns 1 when replaced. */
++static int write_replace(const char *path, const char *data, size_t n)
++{
++    char tmp[sizeof g_path + 8];
++    FILE *f;
++    int ok;
++
++    if (snprintf(tmp, sizeof tmp, "%s.tmp", path) >= (int)sizeof tmp)
++        return 0;
++    if (!(f = fopen(tmp, "wb")))
++        return 0;
++    ok = fwrite(data, 1, n, f) == n;
++    ok = fflush(f) == 0 && ok;
++    ok = fclose(f) == 0 && ok;
++#if defined(_WIN32)
++    ok = ok && MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
++#else
++    ok = ok && rename(tmp, path) == 0;
++#endif
++    if (!ok)
++        remove(tmp);
++    return ok;
++}
++
+ int recomp_config_set(const char *key, const char *value)
+ {
+     FILE *f;
++    int ok;
+     char *text = NULL, *out = NULL;
+     long size = 0;
+     size_t klen, cap, o = 0;
+@@ -1013,15 +1040,11 @@ int recomp_config_set(const char *key, const char *value)
+                              o && out[o - 1] != '\n' ? "\n" : "", key, value);
+     free(text);
+     make_parents(g_path);
+-    f = fopen(g_path, "wb");
+-    if (!f) {
+-        free(out);
+-        return 0;
+-    }
+-    fwrite(out, 1, o, f);
+-    fclose(f);
++    ok = write_replace(g_path, out, o);
+     free(out);
+-    return 1;
++    if (!ok)
++        fprintf(stderr, "[CONFIG] could not save %s = %s to %s\n", key, value, g_path);
++    return ok;
+ }
+ 
+ const char *recomp_config_path(void)
+diff --git a/src/config/recomp_config.h b/src/config/recomp_config.h
+index cfe944d..00d6a09 100644
+--- a/src/config/recomp_config.h
++++ b/src/config/recomp_config.h
+@@ -69,7 +69,8 @@ int recomp_make_dirs(const char *path);
+ const char *recomp_config_lookup(const char *env_name, const char *key);
+ /* Change one setting while running: later lookups see `value`, and the
+  * settings file's line for `key` is rewritten (appended if missing).
+- * Returns 1 when the file was written. */
++ * Returns 1 when the file was written; 0 when it was not (the old file is
++ * then left whole, and the new value lasts only for this run). */
+ int recomp_config_set(const char *key, const char *value);
+ 
+ /* The same, parsed, with a fallback for absent or unreadable values.
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index efbe4e4..5a86361 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -92,6 +92,7 @@ static const Item TITLE_ITEMS[] = {
+ static volatile int g_open;
+ static int  g_sel;
+ static int  g_restart_needed;
++static int  g_save_failed;               /* the last change missed the settings file */
+ static int  g_swallow;                   /* Start+Back still down after a toggle */
+ static unsigned g_prev_buttons;
+ static int  g_prev_a, g_prev_b;
+@@ -158,7 +159,7 @@ static void change(int dir)
+         return;
+     it = g_items[g_sel];
+     i = (current_index(it) + dir + it->n) % it->n;
+-    recomp_config_set(it->key, it->vals[i]);
++    g_save_failed = !recomp_config_set(it->key, it->vals[i]);
+     switch (it->live) {
+     case LIVE_CAP:        hle_set_frame_cap(it->names[i]); break;
+     case LIVE_INTERP:     hle_set_frame_interp(atoi(it->vals[i])); break;
+@@ -167,8 +168,9 @@ static void change(int dir)
+     case LIVE_TITLE:      break;
+     default:              g_restart_needed = 1; break;
+     }
+-    fprintf(stderr, "[MENU] %s = %s%s\n", it->key, it->vals[i],
+-            it->live == LIVE_NONE ? " (at the next start)" : "");
++    fprintf(stderr, "[MENU] %s = %s%s%s\n", it->key, it->vals[i],
++            it->live == LIVE_NONE ? " (at the next start)" : "",
++            g_save_failed ? " -- NOT SAVED to the settings file" : "");
+     fflush(stderr);
+ }
+ 
+@@ -207,6 +209,8 @@ const char *hle_settings_menu_text(void)
+     }
+     ADD("%s%s Close\n\n", g_sel == g_count ? "\x01" : "", g_sel == g_count ? ">" : " ");
+     ADD("  * at the next start%s\n", g_restart_needed ? ": restart to apply" : "");
++    if (g_save_failed)
++        ADD("  ! Could not save the settings file: this change lasts until you quit\n");
+     ADD("  Up/Down choose   Left/Right/A change   B/F2 close");
+ #undef ADD
+     return g_text;
