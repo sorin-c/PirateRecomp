@@ -1,0 +1,180 @@
+diff --git a/src/d3d/d3d8_shaders.c b/src/d3d/d3d8_shaders.c
+index 3dd28a0..74031c8 100644
+--- a/src/d3d/d3d8_shaders.c
++++ b/src/d3d/d3d8_shaders.c
+@@ -1246,30 +1246,10 @@ static void ff_vs_prepare_draw(DWORD fvf)
+             }
+             cb->texcoord_index[i] = ts ? ts[D3DTSS_TEXCOORDINDEX] : (UINT)i;
+         }
+-        /* A stage that names a later coordinate set than its own means the
+-         * stages trade sets, and then every stage reads its own. Sid Meier's
+-         * Pirates! draws its rooms (taverns, the governor's, the tables
+-         * behind the new-career nation choice) with the lightmap on stage 0
+-         * at set 1 and the stone or wood on stage 1 at set 0, and xemu
+-         * shows each read with its own set (stage 0 the lightmap atlas,
+-         * stage 1 the tiled texture). Taken at their word, the lightmap was
+-         * read with the tiled coordinates (a mosaic); with only the later
+-         * index clamped (as this used to), both read set 0, the stone and
+-         * wood were smeared over the atlas coordinates and the rooms came
+-         * out darker and blotchier than on the console. A stage that names
+-         * an earlier set still gets it: the same game's characters share
+-         * set 0 between stages 1 and 2 behind a reflection on stage 0. */
+-        {
+-            int trade = 0;
+-            for (i = 0; i < 4; i++)
+-                if ((cb->texcoord_index[i] & 0xFFFF0000u) == 0 &&
+-                    (cb->texcoord_index[i] & 0xFFFFu) > i)
+-                    trade = 1;
+-            if (trade)
+-                for (i = 0; i < 4; i++)
+-                    if ((cb->texcoord_index[i] & 0xFFFF0000u) == 0)
+-                        cb->texcoord_index[i] = (UINT)i;
+-        }
++        /* Each stage reads the set its D3DTSS_TEXCOORDINDEX names. A draw
++         * whose arrays the XDK has already routed by that index (a push
++         * buffer the title runs) gets each stage's own set from the HLE
++         * (hle_d3d8_shadow_apply_states), not a second routing here. */
+ 
+         rhi_buffer_unmap(g_vs_cb);
+     }
+diff --git a/src/hle/hle_d3d8.c b/src/hle/hle_d3d8.c
+index 2e39861..aa56db6 100644
+--- a/src/hle/hle_d3d8.c
++++ b/src/hle/hle_d3d8.c
+@@ -86,6 +86,7 @@ static void held_redraw(void);   /* with the overlay's switches, below */
+ 
+ void hle_d3d8_push_constants_sync(void);   /* hle_d3d8_vertex.c */
+ int  hle_d3d8_pb_walking(void);             /* hle_d3d8_vertex.c */
++void hle_d3d8_set_routed_arrays(int on);  /* hle_d3d8_state.c */
+ void hle_d3d8_apply_pending_textures(void); /* hle_d3d8_texture.c */
+ void hle_d3d8_apply_pending_constants(void); /* hle_d3d8_vertex.c */
+ void hle_d3d8_push_skip(void);
+@@ -4743,7 +4744,9 @@ static void inline_draw(void)
+             o += tsize[t] * 4u;
+         }
+     }
++    hle_d3d8_set_routed_arrays(1);   /* read from v9-v12: already routed */
+     hle_d3d8_shadow_draw(g_inline_xpt, n, buf, stride, 0);
++    hle_d3d8_set_routed_arrays(0);
+     free(buf);
+     g_inline_drawn++;
+ }
+@@ -5117,7 +5120,9 @@ static void push_replay(uint32_t start, uint32_t end)
+                 if (!stride || (n * 4u) % stride) {
+                     g_push_nostride++;
+                 } else {
++                    hle_d3d8_set_routed_arrays(1);   /* inline: attribute order */
+                     hle_d3d8_shadow_draw(prim, n * 4u / stride, data, stride, 0);
++                    hle_d3d8_set_routed_arrays(0);
+                     g_push_draws++;
+                 }
+                 prim = 0;
+diff --git a/src/hle/hle_d3d8_state.c b/src/hle/hle_d3d8_state.c
+index ff82447..a7b2822 100644
+--- a/src/hle/hle_d3d8_state.c
++++ b/src/hle/hle_d3d8_state.c
+@@ -1025,6 +1025,16 @@ static void forward_pixel_shader(IDirect3DDevice8 *dev)
+     }
+ }
+ 
++/* Set around the draws read back from the vertex arrays the XDK or the
++ * title wrote into the push buffer, whose texture coordinate sets are
++ * already routed by D3DTSS_TEXCOORDINDEX (hle_d3d8_shadow_apply_states). */
++static int g_routed_arrays;
++
++void hle_d3d8_set_routed_arrays(int on)
++{
++    g_routed_arrays = on;
++}
++
+ void hle_d3d8_shadow_apply_states(IDirect3DDevice8 *dev)
+ {
+     size_t i;
+@@ -1053,12 +1063,34 @@ void hle_d3d8_shadow_apply_states(IDirect3DDevice8 *dev)
+             uint32_t v = HLE_MEM32(base + 4 * ts_slot(x));
+             DWORD host_value;
+ 
++            /* D3DTSS_TEXCOORDINDEX is carried out by the XDK, not by the
++             * GPU: SetTextureState_TexCoordIndex points vertex attribute
++             * 9 + stage at the set the stage names, and the XDK writes the
++             * vertex arrays through that table. A draw read back from those
++             * arrays -- a push buffer the title runs, arrays it pushed
++             * itself, vertices written inline in attribute order
++             * (hle_d3d8_set_routed_arrays) -- already has each stage's set
++             * in its own attribute, and routed again here it took the other
++             * set. Sid Meier's Pirates! draws its rooms with the
++             * lightmap on stage 0 at set 1 and the stone or wood on stage 1
++             * at set 0, from vertex buffers (the tavern floor) and from
++             * prebuilt push buffers (walls, hearth, the tables behind the
++             * nation choice); taken the same way for both, one kind always
++             * read its lightmap with the tiled coordinates. A generation
++             * mode keeps its index: it reads no set. The cached value
++             * carries the draw's kind in bit 31. */
++            if (x == 28) {
++                if (g_routed_arrays && !(v & 0xFFFF0000u))
++                    v = (uint32_t)s;
++                v |= g_routed_arrays ? 0x80000000u : 0u;
++            }
++
+             /* The host's SetTexture rewrites COLOROP whenever a texture is
+              * bound or unbound, so the operations are set on every draw. */
+             if (g_prev_valid && g_prev_tss[s][x] == v && g_ts_map[i].kind != TS_OP)
+                 continue;
+             g_prev_tss[s][x] = v;
+-            host_value = ts_to_host(g_ts_map[i].kind, v);
++            host_value = ts_to_host(g_ts_map[i].kind, x == 28 ? (v & 0x7FFFFFFFu) : v);
+             host_SetTextureStageState(dev, (DWORD)s,
+                                       (D3DTEXTURESTAGESTATETYPE)g_ts_map[i].host,
+                                       host_value);
+diff --git a/src/hle/hle_d3d8_vertex.c b/src/hle/hle_d3d8_vertex.c
+index f0103d2..9880564 100644
+--- a/src/hle/hle_d3d8_vertex.c
++++ b/src/hle/hle_d3d8_vertex.c
+@@ -216,6 +216,7 @@ static uint8_t *push_gather(uint32_t first, uint32_t vertices, uint32_t *stride)
+ }
+ 
+ uint32_t hle_d3d8_shadow_fvf(void);      /* hle_d3d8.c */
++void hle_d3d8_set_routed_arrays(int on); /* hle_d3d8_state.c */
+ 
+ /* A pushed draw under a fixed-function FVF: the arrays laid out as that FVF
+  * lays a vertex out (position and blend weights, normal, point size, diffuse,
+@@ -859,7 +860,9 @@ static void w_group_end(void)
+         if (gathered && rebased) {
+             for (i = 0; i < g_w_nidx; i++)
+                 rebased[i] = (uint16_t)(g_w_idx[i] - lo);
++            hle_d3d8_set_routed_arrays(1);
+             hle_d3d8_shadow_draw_indexed(g_w_prim, g_w_nidx, rebased, gathered, stride, 0);
++            hle_d3d8_set_routed_arrays(0);
+             g_w_draws++;
+         } else {
+             g_w_failed++;
+@@ -892,7 +895,9 @@ static void w_group_end(void)
+                                     g_w_ninl * 4u / packed, &stride);
+         g_gather_inline = NULL;
+         if (gathered) {
++            hle_d3d8_set_routed_arrays(1);
+             hle_d3d8_shadow_draw(g_w_prim, g_w_ninl * 4u / packed, gathered, stride, 0);
++            hle_d3d8_set_routed_arrays(0);
+             free(gathered);
+             g_w_draws++;
+         } else {
+@@ -1496,7 +1501,9 @@ HLE_EXPORT(D3DDevice_DrawVertices)
+         uint32_t stride;
+         uint8_t *gathered = push_gather(start, count, &stride);
+         if (gathered) {
++            hle_d3d8_set_routed_arrays(1);
+             hle_d3d8_shadow_draw(xpt, count, gathered, stride, 0);
++            hle_d3d8_set_routed_arrays(0);
+             free(gathered);
+             g_push_draws++;
+         } else {
+@@ -1586,7 +1593,9 @@ HLE_EXPORT(D3DDevice_DrawIndexedVertices)
+             if (gathered) {
+                 for (i = 0; i < count; i++)
+                     rebased[i] = (uint16_t)(idx[i] - lo);
++                hle_d3d8_set_routed_arrays(1);
+                 hle_d3d8_shadow_draw_indexed(xpt, count, rebased, gathered, stride, 0);
++                hle_d3d8_set_routed_arrays(0);
+                 g_push_draws++;
+             } else {
+                 g_push_failed++;

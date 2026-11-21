@@ -499,3 +499,19 @@ Each one, with the reason it exists:
   cleanly; otherwise the old file stays whole. The menu then shows "Could
   not save the settings file: this change lasts until you quit", and the log
   says `NOT SAVED`.
+
+- **0053-texcoord-routed-arrays** (`src/hle/hle_d3d8_state.c`,
+  `hle_d3d8_vertex.c`, `src/d3d/d3d8_shaders.c`). Replaces 0049's rule.
+  `D3DTSS_TEXCOORDINDEX` is carried out by the XDK, not by the GPU:
+  `SetTextureState_TexCoordIndex` points vertex attribute 9 + stage at the
+  set the stage names, and the XDK writes the vertex arrays through that
+  table. A draw from a vertex buffer is routed once, by the host, as the
+  index says; a draw read back from arrays already written into the push
+  buffer (a push buffer the title runs, or arrays it pushed itself) has each
+  stage's set in its own attribute, so the HLE gives every stage its own
+  set there. The game draws its rooms both ways with the lightmap on stage 0
+  at set 1: the tavern floor from vertex buffers, the walls, hearth and the
+  tables behind the nation choice from prebuilt push buffers. 0049 read the
+  floor's lightmap with the tiled stone coordinates (a dark, striped floor,
+  the carpet missing); now the tavern, the nation tables and the governor's
+  room match xemu.
