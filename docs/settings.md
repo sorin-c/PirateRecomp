@@ -34,6 +34,7 @@ Back pressed alone still reaches the game as usual.
 | Sound | next start |
 | Sailing frame rate (experimental: 30, 60, 90, 120, 144, 240, unlocked) | at once |
 | Battle frame rate (experimental: 30, 60, 90, 120, 144, 240, unlocked) | at once |
+| Town frame rate (experimental: 33, 60, 90, 120, 144, 240, unlocked) | at once |
 
 Every change is written to `pirates.ini` straight away, keeping its comments.
 
@@ -72,6 +73,12 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   sailing is. Measured against 30 fps in scripted battles (ships within 2%,
   every cannonball's flight time the console's); not yet played through
   many battles. Frame interpolation is not used in a battle faster than 30.
+- **Town frame rate (experimental).** `town_fps` (F2 "Town frame rate"):
+  the tavern, the governor's room and the town's other rooms, which the
+  console draws 33 times a second (a 30 ms wait, frame cap or not). Their
+  characters and camera already run on the game's real-time clock, so 60,
+  90, 120, 144, 240 or 0 (unlocked) only lets the frames come faster, paced
+  as sailing and battles are; the default, 30, keeps the console's 33.
 - **Widescreen.** `widescreen = 1` turns on the game's own 16:9 mode. The
   front end (legal text, title, menus and the new-career pages) stays at 4:3
   between bars, as it was drawn, and the game world fills the screen.
@@ -109,6 +116,7 @@ defaults. Every line names the environment variable that overrides it, so a
 | `frame_interp` | `1` | `1` off, `2` shows 60 where the game runs at 30. |
 | `sea_fps` | `30` | Experimental: frames a second while sailing (`0` unlocked). |
 | `battle_fps` | `30` | Experimental: frames a second in ship battles (`0` unlocked). |
+| `town_fps` | `30` | Experimental: frames a second in a town's rooms, the tavern and the governor's (`0` unlocked). |
 | `fps_overlay` | `0` | Frame-rate counter. |
 | `fullscreen` | `0` | Fullscreen window. |
 | `anisotropy` | `0` | Texture sharpness: `0` off (the game's own filtering), `1`, `2`, `4`, `8` or `16`. |

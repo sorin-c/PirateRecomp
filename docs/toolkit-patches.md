@@ -441,3 +441,7 @@ Each one, with the reason it exists:
 - **0047-settings-menu-battle-rate** (`src/hle/hle_settings_menu.c`). The F2
   row for the game's battle rate: "Battle frame rate (experimental)", 30
   (off), 60, 90, 120, 144, 240, unlocked (`battle_fps`).
+
+- **0048-settings-menu-town-rate** (`src/hle/hle_settings_menu.c`). The F2
+  row "Town frame rate (experimental)": 33 (off), 60, 90, 120, 144, 240,
+  unlocked (`town_fps`).

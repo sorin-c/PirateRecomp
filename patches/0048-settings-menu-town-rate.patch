@@ -1,0 +1,14 @@
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index 2a1bda3..efbe4e4 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -83,6 +83,9 @@ static const Item TITLE_ITEMS[] = {
+     { "Battle frame rate (experimental)", "battle_fps", "RECOMP_PIRATES_BATTLE_FPS", LIVE_TITLE, 7,
+       { "30", "60", "90", "120", "144", "240", "0" },
+       { "30 (off)", "60", "90", "120", "144", "240", "unlocked" } },
++    { "Town frame rate (experimental)", "town_fps", "RECOMP_PIRATES_TOWN_FPS", LIVE_TITLE, 7,
++      { "30", "60", "90", "120", "144", "240", "0" },
++      { "33 (off)", "60", "90", "120", "144", "240", "unlocked" } },
+ };
+ #define TITLE_ITEM_COUNT ((int)(sizeof TITLE_ITEMS / sizeof TITLE_ITEMS[0]))
+ 

@@ -312,3 +312,34 @@ void btl_test_frame(int btl_tick, int btl_dt)
         if (fb) fflush(fb);
     }
 }
+
+/* The tavern spike (RECOMP_PIRATES_TAV_TEST=<folder>): at each tavern / town
+ * scene frame's wait (0x99C4E), every second, the game's data
+ * (0x400000..0x510000) in tav_snaps.bin (16-byte header as snaps.bin). */
+void tav_test_frame(void)
+{
+    static int on = -1;
+    static FILE *fs;
+    static uint32_t last, frames;
+    uint32_t now = host_ms();
+
+    if (on < 0) {
+        const char *v = getenv("RECOMP_PIRATES_TAV_TEST");
+        char fn[512];
+        on = v && *v;
+        if (on) {
+            snprintf(fn, sizeof fn, "%s/tav_snaps.bin", v);
+            fs = fopen(fn, "wb");
+        }
+    }
+    if (!on || !fs)
+        return;
+    frames++;
+    if (now - last >= 1000u) {
+        uint32_t hdr[4] = { 0x54415638u, now, frames, (0x00510000u - 0x00400000u) / 4u };
+        last = now;
+        fwrite(hdr, 4, 4, fs);
+        fwrite((const void *)((uintptr_t)0x00400000u + g_xbox_mem_offset), 4, hdr[3], fs);
+        fflush(fs);
+    }
+}
