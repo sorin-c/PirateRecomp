@@ -445,3 +445,15 @@ Each one, with the reason it exists:
 - **0048-settings-menu-town-rate** (`src/hle/hle_settings_menu.c`). The F2
   row "Town frame rate (experimental)": 33 (off), 60, 90, 120, 144, 240,
   unlocked (`town_fps`).
+
+- **0049-texcoord-traded-sets** (`src/d3d/d3d8_shaders.c`). Replaces 0036's
+  rule. When a fixed-function stage names a later coordinate set than its
+  own, the stages are trading sets, and every stage then reads its own set;
+  a stage that names an earlier set still gets it. The game draws its rooms
+  (taverns, the governor's, the tables behind the nation choice) with the
+  lightmap on stage 0 at set 1 and the stone or wood on stage 1 at set 0,
+  and xemu shows each read with its own set. Under 0036 both read set 0: the
+  lightmap was read with the stone and wood coordinates, and rooms came out
+  darker and blotchier than in xemu (the governor's walls white instead of
+  blue panels). Characters keep set 0 shared by stages 1 and 2 behind a
+  reflection on stage 0.
