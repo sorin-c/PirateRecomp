@@ -945,6 +945,108 @@ static void btl_begin_frame(void)
     }
     g_btl.in_frame = 1;
 }
+/* ---- Town scenes faster than 33 (town_fps, experimental) ----
+ *
+ * The tavern, the governor's room and the other rooms of a town draw their
+ * frames in sub_00099280, which ends waiting until 30 ms have passed since
+ * the frame began (the tick read at 0x99C4E): 33 frames a second, frame cap
+ * or not. Everything in them that moves runs on the engine's clock, real
+ * time (0x4D3A10 advanced 1.00 s a second at 33, 120 and unlocked in
+ * scripted runs), so faster only needs the wait passed -- the flip gate
+ * paces the frames, by the vblank at 60 and the host clock above, as at sea
+ * and in battles -- and the short-lived effects' ages (0x4D4E38, a year a
+ * frame) held to a 33 Hz tick. */
+#define TOWN_TICK_US 30000
+static struct {
+    int setting;          /* the rate as last read (30 = off) */
+    int rate;             /* 60..1000, -1 unlocked */
+    int tick;             /* the coming frame advances a console frame */
+    int acc_us;
+    int64_t last_us;      /* host time of the last frame wait */
+    uint32_t frame_start; /* [0x5061F8] at it: the wait loops, one frame each */
+    int gate_rate;
+} g_town;
+
+/* town_fps (RECOMP_PIRATES_TOWN_FPS): 30 (the default) as the console (33
+ * a second), 60, 90, 120, 144 or 240, 0 unlocked (-1 here). */
+static int town_read_rate(void)
+{
+    const char *v = recomp_config_lookup("RECOMP_PIRATES_TOWN_FPS", "town_fps");
+    int r = v && *v ? atoi(v) : 30;
+
+    if (v && *v && (r == 0 || strcmp(v, "unlocked") == 0))
+        return -1;
+    if (r <= 30)
+        return 30;
+    return r < 60 ? 60 : r > 1000 ? 1000 : r;
+}
+
+/* A town frame's wait has run within the last 100 ms. */
+static int town_active(void)
+{
+    return g_town.rate != 30 && g_town.last_us &&
+           pirates_host_us() - g_town.last_us < 100000;
+}
+
+void xbox_Nv2aFlipGateSetTitleRate(int hz);
+
+/* At every town frame's wait (sub_001A958A, ra 0x99C4E). */
+static void town_frame_wait(void)
+{
+    int64_t now = pirates_host_us();
+    int rate = town_read_rate();
+    int gap = !g_town.last_us || now - g_town.last_us > 250000;
+    extern void tav_test_frame(void);
+
+    tav_test_frame();
+    if (rate != g_town.setting) {
+        g_town.setting = rate;
+        if (rate < 0)
+            fprintf(stderr, "[TOWN60] towns unlocked (town_fps = 0)\n");
+        else
+            fprintf(stderr, "[TOWN60] towns at %d frames a second\n", rate);
+        fflush(stderr);
+    }
+    g_town.rate = rate;
+    if (rate == 30) {
+        if (g_town.gate_rate) {
+            g_town.gate_rate = 0;
+            xbox_Nv2aFlipGateSetTitleRate(0);
+        }
+        g_town.last_us = now;
+        return;
+    }
+    /* The tick for the frame that follows: 30 ms of real time each. The
+     * wait reads the tick in a loop, so once a frame (its start time). */
+    if (!gap && S60_MEM32(0x005061F8u) == (int32_t)g_town.frame_start) {
+        now = g_town.last_us;               /* the same frame's wait again */
+    } else if (gap) {
+        g_town.acc_us = 0;
+        g_town.tick = 1;
+    } else {
+        g_town.acc_us += (int)(now - g_town.last_us);
+        g_town.tick = g_town.acc_us >= TOWN_TICK_US;
+        if (g_town.tick) {
+            g_town.acc_us -= TOWN_TICK_US;
+            if (g_town.acc_us > TOWN_TICK_US)
+                g_town.acc_us = TOWN_TICK_US;
+        }
+    }
+    g_town.last_us = now;
+    g_town.frame_start = (uint32_t)S60_MEM32(0x005061F8u);
+    if (rate == 60) {                      /* 15 ms, then the vblank paces it */
+        g_eax += 30u - SEA60_WAIT_MS;
+        if (g_town.gate_rate) {
+            g_town.gate_rate = 0;
+            xbox_Nv2aFlipGateSetTitleRate(0);
+        }
+    } else {
+        g_eax += 30u;
+        g_town.gate_rate = rate;
+        xbox_Nv2aFlipGateSetTitleRate(rate);
+    }
+}
+
 /* sea_fps (RECOMP_PIRATES_SEA_FPS): 30 (the default) sails as the console
  * does, 60, 90, 120, 144 or 240 frames a second, 0 unlocked. sea_60 = 1, the
  * setting before it, still means 60 while sea_fps is 30. */
@@ -1233,6 +1335,13 @@ void recomp_guest_hook(uint32_t va)
 {
     int skip;
 
+    /* The short-lived effects' ages in a town scene (as btl_guest_hook does
+     * in a battle): a year a tick, never held at 0. */
+    if (va == 0x000FE44Au && !g_btl.in_frame && town_active()) {
+        if (!g_town.tick && S60_MEM16(g_ebx) > 0)
+            S60_MEM16(g_ebx) -= 1;
+        return;
+    }
     if (btl_guest_hook(va))                 /* the battle's */
         return;
 
@@ -1500,6 +1609,8 @@ void sub_001A958A(void)
             }
         }
     }
+    if (ra == 0x00099C4Eu)                /* a town scene's frame wait */
+        town_frame_wait();
     if (ra == 0x000C397Fu) {              /* a battle frame begins */
         btl_begin_frame();
         btl_test_frame(g_btl.tick, g_btl.dt_us);

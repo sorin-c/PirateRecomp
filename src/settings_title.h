@@ -40,6 +40,12 @@ static const struct {
       "# second at the speed they have at 30 (slow motion included); 0 is\n"
       "# unlocked. Paced as sea_fps is. Applies at once from the F2 menu.\n"
       "#                                          [RECOMP_PIRATES_BATTLE_FPS]\n" },
+    { "town_fps", "30",
+      "# Experimental: the frame rate in a town's rooms -- the tavern, the\n"
+      "# governor's -- which the console draws 33 times a second: 30 (the\n"
+      "# default) as the console; 60, 90, 120, 144 or 240, or 0 unlocked,\n"
+      "# draw them that often, at the speed they have on the console. Applies\n"
+      "# at once from the F2 menu.                  [RECOMP_PIRATES_TOWN_FPS]\n" },
     { "sea_60", "0",
       "# The setting before sea_fps: 1 sails at 60 while sea_fps is 30.\n"
       "#                                              [RECOMP_PIRATES_SEA_60]\n" },
