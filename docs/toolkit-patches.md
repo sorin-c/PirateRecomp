@@ -489,7 +489,7 @@ Each one, with the reason it exists:
   The tavern at town_fps unlocked, scale 4: 7.0 to 6.6 ms a frame (about
   137 fps, against the 143 Hz display's ~140).
 
-- **0052-texcoord-routed-arrays** (`src/hle/hle_d3d8_state.c`,
+- **0053-texcoord-routed-arrays** (`src/hle/hle_d3d8_state.c`,
   `hle_d3d8_vertex.c`, `src/d3d/d3d8_shaders.c`). Replaces 0049's rule.
   `D3DTSS_TEXCOORDINDEX` is carried out by the XDK, not by the GPU:
   `SetTextureState_TexCoordIndex` points vertex attribute 9 + stage at the
