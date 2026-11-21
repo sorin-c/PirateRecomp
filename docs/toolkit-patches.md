@@ -432,7 +432,21 @@ Each one, with the reason it exists:
   30 (off), 60, 90, 120, 144, 240, unlocked (`sea_fps`), in place of 0043's
   on/off "Sailing at 60 fps" row.
 
-- **0048-texcoord-traded-sets** (`src/d3d/d3d8_shaders.c`). Replaces 0036's
+- **0046-lifter-guest-hook-ebp** (`tools/recomp/translator.py`). A function
+  with a guest hook (0042) declares its `ebp` local even when its own code
+  never uses ebp: the hook passes ebp through `g_ebp` both ways, and a leaf
+  function without it failed to compile ("'ebp': undeclared identifier";
+  the first was sub_000C6320, a ship's body written back to the ship).
+
+- **0047-settings-menu-battle-rate** (`src/hle/hle_settings_menu.c`). The F2
+  row for the game's battle rate: "Battle frame rate (experimental)", 30
+  (off), 60, 90, 120, 144, 240, unlocked (`battle_fps`).
+
+- **0048-settings-menu-town-rate** (`src/hle/hle_settings_menu.c`). The F2
+  row "Town frame rate (experimental)": 33 (off), 60, 90, 120, 144, 240,
+  unlocked (`town_fps`).
+
+- **0049-texcoord-traded-sets** (`src/d3d/d3d8_shaders.c`). Replaces 0036's
   rule. When a fixed-function stage names a later coordinate set than its
   own, the stages are trading sets, and every stage then reads its own set;
   a stage that names an earlier set still gets it. The game draws its rooms
