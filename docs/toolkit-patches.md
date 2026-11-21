@@ -479,3 +479,12 @@ Each one, with the reason it exists:
   display caps the frame rate. Tavern at town_fps unlocked, scale 4,
   widescreen: 8.3 to 7.0 ms a frame (119 to 135 fps); a VS battle 4.9 to
   4.3 ms.
+
+- **0051-ff-vertex-copy-runs** (`src/hle/hle_d3d8.c`). A fixed-function
+  draw described by a declaration (`ff_from_declaration`) rebuilds every
+  vertex in FVF order (`shadow_expand_vertices`). Inputs already in the form
+  they are drawn in (whole floats, a D3DCOLOR drawn as one) are now copied a
+  whole input at a time with a fixed size, instead of through
+  `ff_read_floats` a vertex at a time; the rest as before. The same bytes.
+  The tavern at town_fps unlocked, scale 4: 7.0 to 6.6 ms a frame (about
+  137 fps, against the 143 Hz display's ~140).
