@@ -101,6 +101,7 @@ switch ($Cmd) {
     $s = Get-State; $p = Get-Game $s
     if ($p) { $p | Stop-Process -Force -ErrorAction SilentlyContinue; $p.WaitForExit(5000) | Out-Null; "stopped $($s.pid)" }
     elseif ($s.pid) { "not running (pid $($s.pid) is gone or another program now)" }
+    else { "not running (nothing started, or already stopped)" }
     Clear-Pid
   }
   "alive" { $s = Get-State; if (Get-Game $s) { "alive" } else { "exited" } }
