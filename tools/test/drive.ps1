@@ -23,6 +23,19 @@ $state = Join-Path $sp "drive_state.txt"
 $runs = Join-Path $sp "runs"; New-Item -ItemType Directory -Force $runs | Out-Null
 
 function Get-State { if (Test-Path $state) { $s = @{}; Get-Content $state | % { $k, $v = $_ -split '=', 2; $s[$k] = $v }; $s } else { @{} } }
+# The game this session started, or $null: the state's pid only counts while
+# that process is still the one started (its start time and executable), so
+# a pid Windows has since given to another program is never stopped.
+function Get-Game($s) {
+  if (-not $s.pid) { return $null }
+  $p = Get-Process -Id $s.pid -ErrorAction SilentlyContinue
+  if (-not $p) { return $null }
+  try { $st = $p.StartTime.ToUniversalTime().Ticks; $path = $p.Path } catch { return $null }
+  if (-not $s.started -or [long]$s.started -ne $st) { return $null }
+  if ($s.exe -and $path -and $path -ine $s.exe) { return $null }
+  $p
+}
+function Clear-Pid { if (Test-Path $state) { (Get-Content $state | Where-Object { $_ -notlike "pid=*" -and $_ -notlike "started=*" }) | Set-Content $state } }
 
 switch ($Cmd) {
   "start" {
@@ -34,7 +47,7 @@ switch ($Cmd) {
         default { if ($Rest[$i]) { $k, $v = $Rest[$i] -split '=', 2; $extra[$k] = $v } }   # an empty @Env splat passes $null
       }
     }
-    $s = Get-State; if ($s.pid) { Stop-Process -Id $s.pid -Force -ErrorAction SilentlyContinue }
+    $s = Get-State; $old = Get-Game $s; if ($old) { $old | Stop-Process -Force -ErrorAction SilentlyContinue; $old.WaitForExit(5000) | Out-Null }
     # One save folder for every run: the runtime keeps the emulated console's
     # identity (console.ini, its MAC address) there, and XAPI signs the game's
     # settings and saves per console. A folder per run is a new console per
@@ -59,7 +72,9 @@ switch ($Cmd) {
     $exe = if ($env:PIRATES_TEST_EXE) { $env:PIRATES_TEST_EXE } else { Join-Path $root "build\Release\pirates_recomp.exe" }
     $p = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) `
          -RedirectStandardError $log -RedirectStandardOutput (Join-Path $runs "$tag.stdout") -PassThru
-    "pid=$($p.Id)`ntag=$tag`nlive=$live`nlog=$log`nreq=$req`nt0=$([DateTime]::Now.Ticks)" | Set-Content $state
+    $started = try { $p.StartTime.ToUniversalTime().Ticks } catch { "" }
+    $exePath = try { $p.Path } catch { "" }
+    "pid=$($p.Id)`nstarted=$started`nexe=$exePath`ntag=$tag`nlive=$live`nlog=$log`nreq=$req`nt0=$([DateTime]::Now.Ticks)" | Set-Content $state
     "started pid $($p.Id) tag $tag$(if ($visible) { ' (visible)' } else { ' (headless)' })"
   }
   "press" {
@@ -83,8 +98,10 @@ switch ($Cmd) {
     if ($pat) { $l | Select-String $pat | Select-Object -Last $n | % { "$_" } } else { $l | Select-Object -Last $n }
   }
   "stop" {
-    $s = Get-State
-    if ($s.pid) { Stop-Process -Id $s.pid -Force -ErrorAction SilentlyContinue; "stopped $($s.pid)" }
+    $s = Get-State; $p = Get-Game $s
+    if ($p) { $p | Stop-Process -Force -ErrorAction SilentlyContinue; $p.WaitForExit(5000) | Out-Null; "stopped $($s.pid)" }
+    elseif ($s.pid) { "not running (pid $($s.pid) is gone or another program now)" }
+    Clear-Pid
   }
-  "alive" { $s = Get-State; if (Get-Process -Id $s.pid -ErrorAction SilentlyContinue) { "alive" } else { "exited" } }
+  "alive" { $s = Get-State; if (Get-Game $s) { "alive" } else { "exited" } }
 }

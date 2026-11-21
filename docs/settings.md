@@ -48,7 +48,8 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
 - **Sailing frame rate (experimental).** `sea_fps` (F2 "Sailing frame
   rate", applies at once): 30, the default, sails as the console does; 60,
   90, 120, 144 or 240 run the sea itself that many times a second, and 0 is
-  unlocked (as fast as the PC draws it). Ships, the wind's effect, turning,
+  unlocked (as fast as the PC draws it; `unlocked` may be written too). A
+  value that is not a number, such as a typo, is read as 30. Ships, the wind's effect, turning,
   the calendar, the crew's timers and the hull's motion keep the speed they
   have at 30 (paired test runs agree within a few per cent). At 60 the sea
   is paced by the vblank as the rest of the game is; above 60 by the PC's

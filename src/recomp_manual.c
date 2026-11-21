@@ -22,7 +22,6 @@
 #include <stdint.h>
 #include <stddef.h>   /* ptrdiff_t: not in stdlib.h off MSVC */
 #include <stdlib.h>   /* getenv, exit: the spin verdict below */
-#include <time.h>     /* timespec_get: the HUD's world-scene test */
 #include <string.h>   /* strcmp: RECOMP_ICALL_FATAL */
 
 /* One diagnostic report, one piece.
@@ -242,12 +241,13 @@ static volatile int g_pirates_front = -1;   /* -1 not said yet */
 static volatile uint32_t g_pirates_world_ms;   /* host ms of the last world frame wait */
 static volatile int      g_pirates_world_seen;
 
+/* The toolkit's monotonic clock (QueryPerformanceCounter on Windows): scene
+ * timing must not jump when the wall clock is set back or forward. */
+extern int64_t host_time_ns(void);
+
 static uint32_t pirates_host_ms(void)
 {
-    struct timespec ts;
-    if (!timespec_get(&ts, TIME_UTC))
-        return 0;
-    return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
+    return (uint32_t)(host_time_ns() / 1000000);
 }
 
 /* At sea the answer is exact, frame by frame: the sea's frame functions read
@@ -779,10 +779,46 @@ static struct {
 
 static int64_t pirates_host_us(void)
 {
-    struct timespec ts;
-    if (!timespec_get(&ts, TIME_UTC))
-        return 0;
-    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+    return host_time_ns() / 1000;
+}
+
+/* A frame-rate setting (sea_fps, battle_fps, town_fps): a whole number, or
+ * "unlocked" (also 0), spaces around it allowed. Anything else -- unset, a
+ * typo, "default" -- is the console's 30, never unlocked by accident.
+ * Returns -1 for unlocked, else the number. */
+static int pirates_parse_fps(const char *v)
+{
+    const char *p = v;
+    char *end;
+    long r;
+
+    if (!p)
+        return 30;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    if (strncmp(p, "unlocked", 8) == 0) {
+        r = 0;
+        end = (char *)p + 8;
+    } else {
+        r = strtol(p, &end, 10);
+        if (end == p)
+            end = (char *)"?";               /* not a number */
+    }
+    while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')
+        end++;
+    if (*end || r < 0) {
+        if (*p) {
+            static const char *said;
+            if (said != v) {
+                said = v;
+                fprintf(stderr, "[PIRATES] frame rate \"%s\" not understood: 30\n", v);
+            }
+        }
+        return 30;
+    }
+    if (r == 0)
+        return -1;
+    return r > 1000 ? 1000 : (int)r;
 }
 
 /* step * frac: how far a phase built as counter * step is from where the
@@ -857,10 +893,9 @@ static struct {
  * 60, 90, 120, 144 or 240, 0 unlocked (-1 here). */
 static int btl_read_rate(void)
 {
-    const char *v = recomp_config_lookup("RECOMP_PIRATES_BATTLE_FPS", "battle_fps");
-    int r = v && *v ? atoi(v) : 30;
+    int r = pirates_parse_fps(recomp_config_lookup("RECOMP_PIRATES_BATTLE_FPS", "battle_fps"));
 
-    if (v && *v && (r == 0 || strcmp(v, "unlocked") == 0))
+    if (r < 0)
         return -1;
     if (r <= 30)
         return 30;
@@ -886,9 +921,11 @@ enum { BS_RATE, BS_HEAD, BS_HEAD2, BS_HEAD3, BS_SPEED, BS_X, BS_Y, BS_BHEAD,
 static int32_t btl_step(uint32_t ship, int kind, int32_t old, int32_t nw)
 {
     int32_t *rem = &g_btl.srem[btl_ship(ship)][kind];
-    int64_t t = (int64_t)(nw - old) * g_btl.dt_us + *rem;
+    /* The guest's own 32-bit wrapping move (a heading crossing 0x80000000
+     * is a small turn), in unsigned arithmetic: no signed overflow. */
+    int64_t t = (int64_t)(int32_t)((uint32_t)nw - (uint32_t)old) * g_btl.dt_us + *rem;
     *rem = (int32_t)(t % g_btl.tick_us);
-    return old + (int32_t)(t / g_btl.tick_us);
+    return (int32_t)((uint32_t)old + (uint32_t)(int32_t)(t / g_btl.tick_us));
 }
 
 /* The same for a float step. */
@@ -971,10 +1008,9 @@ static struct {
  * a second), 60, 90, 120, 144 or 240, 0 unlocked (-1 here). */
 static int town_read_rate(void)
 {
-    const char *v = recomp_config_lookup("RECOMP_PIRATES_TOWN_FPS", "town_fps");
-    int r = v && *v ? atoi(v) : 30;
+    int r = pirates_parse_fps(recomp_config_lookup("RECOMP_PIRATES_TOWN_FPS", "town_fps"));
 
-    if (v && *v && (r == 0 || strcmp(v, "unlocked") == 0))
+    if (r < 0)
         return -1;
     if (r <= 30)
         return 30;
@@ -1052,10 +1088,10 @@ static void town_frame_wait(void)
  * setting before it, still means 60 while sea_fps is 30. */
 static int sea60_read_rate(void)
 {
-    const char *v = recomp_config_lookup("RECOMP_PIRATES_SEA_FPS", "sea_fps");
-    int r = v && *v ? atoi(v) : 30;
+    const char *v;
+    int r = pirates_parse_fps(recomp_config_lookup("RECOMP_PIRATES_SEA_FPS", "sea_fps"));
 
-    if (v && *v && (r == 0 || strcmp(v, "unlocked") == 0))
+    if (r < 0)
         return -1;
     if (r <= 30) {
         v = recomp_config_lookup("RECOMP_PIRATES_SEA_60", "sea_60");
@@ -1171,6 +1207,10 @@ static int btl_guest_hook(uint32_t va)
     if (!(va >= 0x000C3000u && va < 0x000DA000u) && va != 0x000FE44Au &&
         va != 0x00078F69u && va != 0x00078F9Bu)
         return 0;                           /* not the battle's */
+    /* sub_00078EC0's two sail steps are the sea's too: outside a battle
+     * frame they are left to the sea's hooks (sea60_scale 3 and 4). */
+    if ((va == 0x00078F69u || va == 0x00078F9Bu) && !(g_btl.active && g_btl.in_frame))
+        return 0;
     if (!g_btl.active || !g_btl.in_frame)
         return 1;
     switch (va) {
@@ -1597,8 +1637,10 @@ void sub_001A958A(void)
         g_pirates_world_ms = pirates_host_ms();
         g_pirates_world_seen = 1;
         if (ra == 0x00091DE1u || ra == 0x000A4AEEu) {   /* the sea */
-            g_pirates_sea_ms = g_pirates_world_ms;
-            g_pirates_sea_seen = 1;
+            if (ra == 0x00091DE1u) {     /* sailing: LB/RB are Black/White; */
+                g_pirates_sea_ms = g_pirates_world_ms;   /* not in the town sneak */
+                g_pirates_sea_seen = 1;
+            }
             g_pirates_in_sea_frame = 0;          /* its frame is drawn */
         } else {
             g_pirates_battle_ms = g_pirates_world_ms;

@@ -30,14 +30,30 @@ if (-not $env:PIRATES_TEST_EXE) { $env:PIRATES_TEST_EXE = Join-Path $root "build
 $g = $(if ($env:PIRATES_TEST_GAME) { $env:PIRATES_TEST_GAME } else { [IO.Path]::GetFullPath((Join-Path $root "..\testgame")) })
 $out = $(if ($env:PIRATES_TEST_OUT) { $env:PIRATES_TEST_OUT } else { [IO.Path]::GetFullPath((Join-Path $root "..\testrun")) })
 if (-not $env:SEA60_FIXTURE) { throw "set SEA60_FIXTURE to the UDATA folder of a save at sea" }
+# Check the fixture before anything is cleared: it must be a folder with a
+# save in it, and not the test game's UDATA (or inside it, or holding it),
+# which the clean-up below would delete before the copy.
+$fix = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:SEA60_FIXTURE).TrimEnd('\', '/')
+$ud = [IO.Path]::GetFullPath((Join-Path $g "UDATA")).TrimEnd('\', '/')
+if (-not (Test-Path -LiteralPath $fix -PathType Container)) { throw "SEA60_FIXTURE is not a folder: $fix" }
+if (-not (Get-ChildItem -LiteralPath $fix -Recurse -File | Select-Object -First 1)) { throw "SEA60_FIXTURE holds no files: $fix" }
+$sep = [IO.Path]::DirectorySeparatorChar
+if ($fix -ieq $ud -or $fix.StartsWith("$ud$sep", [StringComparison]::OrdinalIgnoreCase) -or
+    $ud.StartsWith("$fix$sep", [StringComparison]::OrdinalIgnoreCase)) {
+  throw "SEA60_FIXTURE ($fix) overlaps the test game's UDATA ($ud): copy the save somewhere else first"
+}
 $runs = $(if ($env:SEA60_RUNS) { $env:SEA60_RUNS } else { Join-Path $env:TEMP "sea60" })
 
 # drive.ps1 sets the run's variables in this PowerShell: clear the last run's
 Get-ChildItem Env: | Where-Object { $_.Name -like "RECOMP_*" } | ForEach-Object { Remove-Item "Env:$($_.Name)" }
 $log = Join-Path $runs $Tag; Remove-Item -Recurse -Force $log -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $log | Out-Null
+# The copy is made beside the old UDATA first, and replaces it only once whole.
+$stage = "$ud.new"; Remove-Item -Recurse -Force -LiteralPath $stage -ErrorAction SilentlyContinue
+Copy-Item -Recurse -LiteralPath $fix $stage -ErrorAction Stop
 foreach ($x in "UDATA", "TDATA", "CACHE") { Remove-Item -Recurse -Force (Join-Path $g $x) -ErrorAction SilentlyContinue }
-Copy-Item -Recurse $env:SEA60_FIXTURE (Join-Path $g "UDATA")
+if (Test-Path -LiteralPath $ud) { throw "could not clear the old save: $ud (is the game still running?)" }
+Move-Item -LiteralPath $stage $ud -ErrorAction Stop
 
 $a = @("start", "-Tag", $Tag, "-KeepData", "RECOMP_FRAME_INTERP=$Interp", "RECOMP_PIRATES_SEA60_TEST=$log")
 if ($Sea60)   { $Rate = 60 }
