@@ -488,3 +488,14 @@ Each one, with the reason it exists:
   `ff_read_floats` a vertex at a time; the rest as before. The same bytes.
   The tavern at town_fps unlocked, scale 4: 7.0 to 6.6 ms a frame (about
   137 fps, against the 143 Hz display's ~140).
+
+- **0052-settings-save-whole-or-not** (`src/config/recomp_config.c`,
+  `src/config/recomp_config.h`, `src/hle/hle_settings_menu.c`). A change in
+  the F2 settings menu rewrote the whole settings file in place (`wb`), and
+  ignored what `fwrite` and `fclose` said: a full disk could leave an empty
+  or cut file and still report success. The new file is now written to
+  `<file>.tmp` beside it, and moved over the old one (`MoveFileExA`,
+  `rename` off Windows) only when every byte was written and the file closed
+  cleanly; otherwise the old file stays whole. The menu then shows "Could
+  not save the settings file: this change lasts until you quit", and the log
+  says `NOT SAVED`.

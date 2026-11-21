@@ -20,6 +20,7 @@ def run(path, t0, t1):
     b = open(path + "/btl_frames.bin", "rb").read()
     n = len(b) // REC
     T0 = None; sv = sr = ev = cnt = 0; path_len = turn = 0.0; last = None; nxt = t0
+    first_t = last_t = None                     # the movement samples' span
     live = {}; done = []; prevcd = {}
     for r in range(n):
         o = r * REC
@@ -48,9 +49,19 @@ def run(path, t0, t1):
                 path_len += math.hypot(x - last[0], y - last[1])
                 turn += abs(((h - last[2] + 2**31) % 2**32) - 2**31)
             last = (x, y, h); nxt += 500
-    dt = (t1 - t0) / 1000
+            if first_t is None:
+                first_t = t
+            last_t = t
+    # Per second of the samples' own span, not the asked window: a battle
+    # that ends before --to has fewer seconds of motion, not slower motion.
+    if cnt == 0 or first_t is None or last_t <= first_t:
+        print(f"{path:30s} not enough frames between {t0} and {t1} ms "
+              f"(at least two samples 0.5 s apart are needed)")
+        return
+    dt = (last_t - first_t) / 1000
     line = (f"{path:30s} ours speed {sv / cnt:6.0f} rate {sr / cnt:6.0f} "
-            f"path/s {path_len / dt:8.0f} turn/s {turn / dt / 2**32 * 360:6.1f}  enemy speed {ev / cnt:6.0f}")
+            f"path/s {path_len / dt:8.0f} turn/s {turn / dt / 2**32 * 360:6.1f}  enemy speed {ev / cnt:6.0f}"
+            f"  over {dt:.1f} s")
     if done:
         sec = sum(d[0] for d in done) / len(done); dist = sum(d[1] for d in done) / len(done)
         frames = sum(d[2] for d in done) / len(done)
