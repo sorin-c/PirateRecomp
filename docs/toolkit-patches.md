@@ -445,3 +445,25 @@ Each one, with the reason it exists:
 - **0048-settings-menu-town-rate** (`src/hle/hle_settings_menu.c`). The F2
   row "Town frame rate (experimental)": 33 (off), 60, 90, 120, 144, 240,
   unlocked (`town_fps`).
+
+- **0049-ack-wake-and-vertex-runs** (`src/kernel/xbox_memory_layout.c`,
+  `src/hle/hle_d3d8_vertex.c`, `src/d3d/d3d8_device.c`). Frame time, no
+  change in what is drawn or how the game runs. (1) The XDK's GPU waits
+  (`CDevice_KickOff`, `D3D_KickOffAndWaitForIdle`, `D3D_BlockOnTime`,
+  `D3D_BlockOnResource`, `D3DResource_BlockUntilNotBusy`) spin on something
+  the NV2A ack thread answers (the PFB flush bit, DMA_GET, the fence mirror).
+  Idle, that thread slept a timer period between passes (about 1 ms, against
+  the 100 us asked), and the game thread spun all that time: 4-7% of it at
+  sea, in battles and in the tavern. The replaced waits now wake it
+  (`xbox_Nv2aAckWake`), and it polls for 200 us; otherwise it behaves as
+  before, at the same CPU (`RECOMP_NV2A_ACK_WAKE=0` for the old timing).
+  Acknowledging the bit from the game thread itself was tried and stalled
+  the game: the ack thread's busy spell after a change is what keeps the
+  waits that follow fast. (2) The push-buffer walk converts a draw's vertex
+  arrays a whole array at a time for float and D3D-colour attributes
+  (`w_convert_run`), instead of a switch per vertex per attribute. (3)
+  `RECOMP_FRAME_WORK=1` prints, every five seconds, each frame's own work
+  apart from the present (mean, 99th percentile, worst): the measure when the
+  display caps the frame rate. Tavern at town_fps unlocked, scale 4,
+  widescreen: 8.3 to 7.0 ms a frame (119 to 135 fps); a VS battle 4.9 to
+  4.3 ms.

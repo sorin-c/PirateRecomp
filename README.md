@@ -91,7 +91,7 @@ Built on [DirectXbox-Recomp](https://github.com/phobos665/DirectXbox-Recomp)
 by phobos665, based on [xboxrecomp](https://github.com/sp00nznet/xboxrecomp)
 by sp00nz, with xemu-derived hardware components. Checked against
 [xemu](https://xemu.app/) and [XboxDevWiki](https://xboxdevwiki.net/).
-Development included assistance from Claude Code. The game needs 40 toolkit
+Development included assistance from Claude Code. The game needs 48 toolkit
 changes, kept in `patches/` and described in
 [docs/toolkit-patches.md](docs/toolkit-patches.md).
 
