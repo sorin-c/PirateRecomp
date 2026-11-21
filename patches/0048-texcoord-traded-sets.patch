@@ -1,0 +1,44 @@
+diff --git a/src/d3d/d3d8_shaders.c b/src/d3d/d3d8_shaders.c
+index 13e15e4..3dd28a0 100644
+--- a/src/d3d/d3d8_shaders.c
++++ b/src/d3d/d3d8_shaders.c
+@@ -1245,15 +1245,30 @@ static void ff_vs_prepare_draw(DWORD fvf)
+                 cb->tex_mat[i][0] = cb->tex_mat[i][5] = cb->tex_mat[i][10] = cb->tex_mat[i][15] = 1.0f;
+             }
+             cb->texcoord_index[i] = ts ? ts[D3DTSS_TEXCOORDINDEX] : (UINT)i;
+-            /* A stage reads a coordinate set no higher than its own number:
+-             * one that names a later set gets its own. Sid Meier's Pirates!
+-             * leaves stage 0 at set 1 while it draws the tavern tables, set 0
+-             * for both of their textures in xemu (as on the console); taken
+-             * at its word, the lightmap was read with the wood's other
+-             * coordinates and the tables came out a mosaic of the atlas. */
+-            if ((cb->texcoord_index[i] & 0xFFFF0000u) == 0 &&
+-                (cb->texcoord_index[i] & 0xFFFFu) > i)
+-                cb->texcoord_index[i] = (UINT)i;
++        }
++        /* A stage that names a later coordinate set than its own means the
++         * stages trade sets, and then every stage reads its own. Sid Meier's
++         * Pirates! draws its rooms (taverns, the governor's, the tables
++         * behind the new-career nation choice) with the lightmap on stage 0
++         * at set 1 and the stone or wood on stage 1 at set 0, and xemu
++         * shows each read with its own set (stage 0 the lightmap atlas,
++         * stage 1 the tiled texture). Taken at their word, the lightmap was
++         * read with the tiled coordinates (a mosaic); with only the later
++         * index clamped (as this used to), both read set 0, the stone and
++         * wood were smeared over the atlas coordinates and the rooms came
++         * out darker and blotchier than on the console. A stage that names
++         * an earlier set still gets it: the same game's characters share
++         * set 0 between stages 1 and 2 behind a reflection on stage 0. */
++        {
++            int trade = 0;
++            for (i = 0; i < 4; i++)
++                if ((cb->texcoord_index[i] & 0xFFFF0000u) == 0 &&
++                    (cb->texcoord_index[i] & 0xFFFFu) > i)
++                    trade = 1;
++            if (trade)
++                for (i = 0; i < 4; i++)
++                    if ((cb->texcoord_index[i] & 0xFFFF0000u) == 0)
++                        cb->texcoord_index[i] = (UINT)i;
+         }
+ 
+         rhi_buffer_unmap(g_vs_cb);

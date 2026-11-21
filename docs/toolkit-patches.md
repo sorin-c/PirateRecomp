@@ -431,3 +431,15 @@ Each one, with the reason it exists:
   F2 row for the game's sailing rate: "Sailing frame rate (experimental)",
   30 (off), 60, 90, 120, 144, 240, unlocked (`sea_fps`), in place of 0043's
   on/off "Sailing at 60 fps" row.
+
+- **0048-texcoord-traded-sets** (`src/d3d/d3d8_shaders.c`). Replaces 0036's
+  rule. When a fixed-function stage names a later coordinate set than its
+  own, the stages are trading sets, and every stage then reads its own set;
+  a stage that names an earlier set still gets it. The game draws its rooms
+  (taverns, the governor's, the tables behind the nation choice) with the
+  lightmap on stage 0 at set 1 and the stone or wood on stage 1 at set 0,
+  and xemu shows each read with its own set. Under 0036 both read set 0: the
+  lightmap was read with the stone and wood coordinates, and rooms came out
+  darker and blotchier than in xemu (the governor's walls white instead of
+  blue panels). Characters keep set 0 shared by stages 1 and 2 behind a
+  reflection on stage 0.
