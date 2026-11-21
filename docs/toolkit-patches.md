@@ -431,3 +431,13 @@ Each one, with the reason it exists:
   F2 row for the game's sailing rate: "Sailing frame rate (experimental)",
   30 (off), 60, 90, 120, 144, 240, unlocked (`sea_fps`), in place of 0043's
   on/off "Sailing at 60 fps" row.
+
+- **0046-lifter-guest-hook-ebp** (`tools/recomp/translator.py`). A function
+  with a guest hook (0042) declares its `ebp` local even when its own code
+  never uses ebp: the hook passes ebp through `g_ebp` both ways, and a leaf
+  function without it failed to compile ("'ebp': undeclared identifier";
+  the first was sub_000C6320, a ship's body written back to the ship).
+
+- **0047-settings-menu-battle-rate** (`src/hle/hle_settings_menu.c`). The F2
+  row for the game's battle rate: "Battle frame rate (experimental)", 30
+  (off), 60, 90, 120, 144, 240, unlocked (`battle_fps`).

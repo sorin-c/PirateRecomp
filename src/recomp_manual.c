@@ -804,10 +804,12 @@ static int32_t sea60_scale(int slot, int32_t step)
 
 #define S60_MEM32(a)  (*(volatile int32_t *)((uintptr_t)(a) + g_xbox_mem_offset))
 #define S60_MEM16(a)  (*(volatile int16_t *)((uintptr_t)(a) + g_xbox_mem_offset))
+#define S60_MEMF(a)   (*(volatile float *)((uintptr_t)(a) + g_xbox_mem_offset))
 
 /* The test harness for sailing faster (src/sea60_test.c, tools/sea60):
  * nothing unless RECOMP_PIRATES_SEA60_TEST names a folder. */
 void sea60_test_frame(int active, int tick, int dt, int acc3);
+void btl_test_frame(int tick, int dt_us);   /* the battle spike, RECOMP_PIRATES_BTL_TEST */
 
 /* The flip gate's pacing for the sea (toolkit patch 0044): hz Swaps a second
  * by the host clock, -1 none, 0 the gate's own (the vblank and the cap). The
@@ -820,6 +822,129 @@ static void sea60_set_gate(int rate)
     xbox_Nv2aFlipGateSetTitleRate(rate);
 }
 
+
+/* ---- Ship battles faster than 30 (battle_fps, experimental) ----
+ *
+ * The battle (sub_000C3950, battle object 0x4D6B80) steps everything once a
+ * frame, at 30 a second (10 in its slow motion, the 100 ms wait). Faster,
+ * its frame runs every frame the PC draws and a logic tick on real time
+ * keeps its timing: g_btl.tick says whether this frame advances a whole
+ * console frame (counters, timers, chances; undone by the hooks otherwise),
+ * and steps that move something continuously take this frame's share of
+ * them (btl_scale). The tick is 33.3 ms, or 100 ms in slow motion. */
+#define BTL_OBJ        0x004D6B80u
+#define BTL_TICK_US    33333
+#define BTL_SLOW_US    100000
+static struct {
+    int setting;          /* the rate as last read (30 = off) */
+    int rate;             /* 60..1000, -1 unlocked */
+    int active;           /* this battle frame runs faster than 30 */
+    int tick;             /* this frame advances a console frame */
+    int tick_us;          /* a console frame now: 33.3 ms, 100 ms slowed */
+    int dt_us;            /* this frame's length */
+    int acc_us;           /* time since the last tick */
+    int64_t last_us;
+    int in_frame;         /* between 0xC397F and the frame's end */
+    int gate_rate;
+    int32_t rem[16];      /* btl_scale's remainders */
+    int32_t srem[8][16];  /* btl_step's, a ship (btl_ship) and a kind each */
+    float touch_v[3];     /* a body's velocity and spin before a touch's push */
+    double anim_rem[8][2];/* what the sinking's frame-time steps truncated, a ship */
+    int touch_live;
+} g_btl;
+
+/* battle_fps (RECOMP_PIRATES_BATTLE_FPS): 30 (the default) as the console,
+ * 60, 90, 120, 144 or 240, 0 unlocked (-1 here). */
+static int btl_read_rate(void)
+{
+    const char *v = recomp_config_lookup("RECOMP_PIRATES_BATTLE_FPS", "battle_fps");
+    int r = v && *v ? atoi(v) : 30;
+
+    if (v && *v && (r == 0 || strcmp(v, "unlocked") == 0))
+        return -1;
+    if (r <= 30)
+        return 30;
+    return r < 60 ? 60 : r > 1000 ? 1000 : r;
+}
+
+/* A step taken once a console frame: this frame's share of it. */
+static int32_t btl_scale(int slot, int32_t step)
+{
+    int64_t t = (int64_t)step * g_btl.dt_us + g_btl.rem[slot];
+    g_btl.rem[slot] = (int32_t)(t % g_btl.tick_us);
+    return (int32_t)(t / g_btl.tick_us);
+}
+/* The ships: 0x177C apart from 0x4D7D48 (side 0 ship 0), two a side. */
+static int btl_ship(uint32_t p)
+{
+    return (int)((p - 0x004D7D48u) / 0x177Cu) & 7;
+}
+/* A value the console moves from old to new in one frame: this frame's
+ * share of the move, remainder kept for that ship and kind. */
+enum { BS_RATE, BS_HEAD, BS_HEAD2, BS_HEAD3, BS_SPEED, BS_X, BS_Y, BS_BHEAD,
+       BS_BSPEED, BS_LAT, BS_RUDDER, BS_KINDS };
+static int32_t btl_step(uint32_t ship, int kind, int32_t old, int32_t nw)
+{
+    int32_t *rem = &g_btl.srem[btl_ship(ship)][kind];
+    int64_t t = (int64_t)(nw - old) * g_btl.dt_us + *rem;
+    *rem = (int32_t)(t % g_btl.tick_us);
+    return old + (int32_t)(t / g_btl.tick_us);
+}
+
+/* The same for a float step. */
+static float btl_scalef(float step)
+{
+    return step * (float)g_btl.dt_us / (float)g_btl.tick_us;
+}
+
+static void btl_set_gate(int rate)
+{
+    g_btl.gate_rate = rate;
+    xbox_Nv2aFlipGateSetTitleRate(rate);
+}
+
+/* Once a battle frame, at its start (the tick read at 0xC397A). */
+static void btl_begin_frame(void)
+{
+    int64_t now = pirates_host_us();
+    int rate = btl_read_rate(), on = rate != 30, gap;
+    int slow = (S60_MEM32(0x0049C298u) & 0x20) != 0;
+
+    if (rate != g_btl.setting) {
+        g_btl.setting = rate;
+        if (rate < 0)
+            fprintf(stderr, "[BTL60] battles unlocked (battle_fps = 0)\n");
+        else
+            fprintf(stderr, "[BTL60] battles at %d frames a second\n", rate);
+        fflush(stderr);
+    }
+    gap = g_btl.last_us == 0 || now - g_btl.last_us > 250000;
+    g_btl.tick_us = slow ? BTL_SLOW_US : BTL_TICK_US;
+    g_btl.dt_us = gap ? g_btl.tick_us : (int)(now - g_btl.last_us);
+    if (g_btl.dt_us > g_btl.tick_us * 3) g_btl.dt_us = g_btl.tick_us * 3;
+    if (g_btl.dt_us < 1) g_btl.dt_us = 1;
+    g_btl.last_us = now;
+    g_btl.rate = rate;
+    g_btl.active = on;
+    if (!on || gap) {
+        g_btl.tick = 1;
+        g_btl.acc_us = 0;
+        g_btl.dt_us = g_btl.tick_us;
+        if (!on && g_btl.gate_rate)
+            btl_set_gate(0);
+    } else {
+        g_btl.acc_us += g_btl.dt_us;
+        if (g_btl.acc_us >= g_btl.tick_us) {
+            g_btl.tick = 1;
+            g_btl.acc_us -= g_btl.tick_us;
+            if (g_btl.acc_us > g_btl.tick_us)
+                g_btl.acc_us = g_btl.tick_us;
+        } else {
+            g_btl.tick = 0;
+        }
+    }
+    g_btl.in_frame = 1;
+}
 /* sea_fps (RECOMP_PIRATES_SEA_FPS): 30 (the default) sails as the console
  * does, 60, 90, 120, 144 or 240 frames a second, 0 unlocked. sea_60 = 1, the
  * setting before it, still means 60 while sea_fps is 30. */
@@ -919,9 +1044,197 @@ static int sea60_clamp_dt(void)
 
 /* The title's guest hooks (toolkit patch 0042): run just before the guest
  * instruction at va. Each does nothing unless sea_60 is on at sea. */
+/* The battle's hooks; 0 for an address that is not one of them. */
+static int btl_guest_hook(uint32_t va)
+{
+    int skip = !g_btl.tick;
+
+    switch (va) {
+    /* The battle frame's ends: the loop's test for another frame (0xC3C25,
+     * every frame), and both ways out of sub_000C3950 -- 0xC3C5C, and the
+     * return at 0xC3C32 when [0x4D67C7] is set, which a career battle
+     * takes. Missing that one left the battle's hooks on after it, with a
+     * stale tick, through the plunder scene and back at sea. */
+    case 0x000C3C25u:
+        g_btl.in_frame = 0;
+        return 1;
+    case 0x000C3C32u:
+    case 0x000C3C38u:
+    case 0x000C3C5Cu:
+        g_btl.in_frame = 0;
+        if (g_btl.gate_rate)
+            btl_set_gate(0);
+        return 1;
+    }
+    if (!(va >= 0x000C3000u && va < 0x000DA000u) && va != 0x000FE44Au &&
+        va != 0x00078F69u && va != 0x00078F9Bu)
+        return 0;                           /* not the battle's */
+    if (!g_btl.active || !g_btl.in_frame)
+        return 1;
+    switch (va) {
+    /* Short-lived effects drawn by the battle (sub_000FDE20: 256 of them at
+     * 0x4D5038, their ages at 0x4D4E38, gone after 5): a year a tick, but
+     * never held at 0 -- at age 0 an effect is set up (its +0x70 call), and
+     * held there it was set up again every frame until the next tick, which
+     * left the characters of every later scene (the plunder deck, the
+     * governor, the tavern) drawn black. */
+    case 0x000FE44Au:                                             /* inc word [ebx] */
+        if (skip && S60_MEM16(g_ebx) > 0)
+            S60_MEM16(g_ebx) -= 1;
+        break;
+
+    /* Frame counts: undone on a frame that does not tick. */
+    case 0x000C3B93u: if (skip) g_ecx -= 1; break;                       /* [obj+CDE0] */
+
+    /* A ship's physics (sub_000D3EC0, ebp the ship): each frame's move,
+     * this frame's share of it. */
+    case 0x000D416Eu:   /* turn rate eased toward its target: ebx new, esi old */
+        g_ebx = (uint32_t)btl_step(g_ebp, BS_RATE, (int32_t)g_esi, (int32_t)g_ebx);
+        break;
+    case 0x000D4177u:   /* heading += rate / 2: ecx new */
+        g_ecx = (uint32_t)btl_step(g_ebp, BS_HEAD, S60_MEM32(g_ebp + 0x11D0u), (int32_t)g_ecx);
+        break;
+    case 0x000D419Cu:   /* and + rate / 3 with flag 1 of +0x123C: eax new, ecx before */
+        g_eax = (uint32_t)btl_step(g_ebp, BS_HEAD2, (int32_t)g_ecx, (int32_t)g_eax);
+        break;
+    case 0x000D422Du:   /* heading = rate + heading: ebx the rate */
+        g_ebx = (uint32_t)btl_step(g_ebp, BS_HEAD3, 0, (int32_t)g_ebx);
+        break;
+    case 0x000D43CDu:   /* speed eased toward its target: edi new */
+        g_edi = (uint32_t)btl_step(g_ebp, BS_SPEED, S60_MEM32(g_ebp + 0x11D4u), (int32_t)g_edi);
+        break;
+    case 0x000D4485u:   /* sailing: x, y += speed along the heading */
+        g_esi = (uint32_t)btl_step(g_ebp, BS_X, S60_MEM32(g_ebp + 0x11C8u), (int32_t)g_esi);
+        g_edi = (uint32_t)btl_step(g_ebp, BS_Y, S60_MEM32(g_ebp + 0x11CCu), (int32_t)g_edi);
+        break;
+    case 0x000D44C0u:   /* stopped: drifting with the wind, eax the x step */
+        g_eax = (uint32_t)btl_step(g_ebp, BS_X, 0, (int32_t)g_eax);
+        break;
+    case 0x000D44E7u:   /* and the y step */
+        g_eax = (uint32_t)btl_step(g_ebp, BS_Y, 0, (int32_t)g_eax);
+        break;
+    /* A ship made a float body (sub_000C60E0, esi the ship): its position
+     * from the one before this frame's physics (+0x1754), in body units of
+     * 400, truncated -- which on the console moves every ship a little each
+     * frame. Exact, less this frame's share of what the truncation takes. */
+    case 0x000C6150u: {
+        float bx = (float)S60_MEM32(g_esi + 0x1754u) / 400.0f + (float)S60_MEM32(0x004CBE94u);
+        float by = (float)S60_MEM32(g_esi + 0x1758u) / 400.0f + (float)S60_MEM32(0x004CBE90u);
+        float tx, ty, f = btl_scalef(1.0f);
+        memcpy(&tx, &g_eax, 4);
+        memcpy(&ty, &g_ecx, 4);
+        tx = bx - f * (bx - tx);
+        ty = by - f * (by - ty);
+        memcpy(&g_eax, &tx, 4);
+        memcpy(&g_ecx, &ty, 4);
+        break;
+    }
+
+    /* The ships' bodies (sub_000C6430): each ship as a float body, moved
+     * from where it was before this frame's physics by its velocity, turned
+     * by its spin, and written back (sub_000C6320). The move and the turn,
+     * this frame's share. */
+    case 0x000C69BDu: S60_MEMF(g_esp + 0x98u) *= btl_scalef(1.0f); break;  /* x += dx (sailing) */
+    case 0x000C69D1u: S60_MEMF(g_esp + 0x9Cu) *= btl_scalef(1.0f); break;  /* y += dy (before it is loaded) */
+    case 0x000C688Fu: S60_MEMF(g_esp + 0x88u) *= btl_scalef(1.0f); break;  /* x += dx (touching) */
+    case 0x000C68A3u: S60_MEMF(g_esp + 0x8Cu) *= btl_scalef(1.0f); break;  /* y += dy (before it is loaded) */
+    case 0x000C69F2u:   /* heading += spin: eax new, [ebp-8] old, [ebp-0x1C] the ship */
+        g_eax = (uint32_t)btl_step((uint32_t)S60_MEM32(g_ebp - 0x1Cu), BS_BHEAD,
+                                   S60_MEM32(g_ebp - 8u), (int32_t)g_eax);
+        break;
+    case 0x000C68C4u:   /* the same, touching: ecx new */
+        g_ecx = (uint32_t)btl_step((uint32_t)S60_MEM32(g_ebp - 0x1Cu), BS_BHEAD,
+                                   S60_MEM32(g_ebp - 8u), (int32_t)g_ecx);
+        break;
+    case 0x000C63C4u:   /* back to the ship: speed along the heading, edx new, edi the ship */
+        g_edx = (uint32_t)btl_step(g_edi, BS_BSPEED, S60_MEM32(g_edi + 0x11D4u), (int32_t)g_edx);
+        break;
+    case 0x000C63F8u:   /* and across it, ecx new */
+        g_ecx = (uint32_t)btl_step(g_edi, BS_LAT, S60_MEM32(g_edi + 0x175Cu), (int32_t)g_ecx);
+        break;
+
+    /* Touching: the push each frame on a body's velocity and spin
+     * (0xC6601 .. 0xC679E), this frame's share of it. */
+    case 0x000C6601u:
+        g_btl.touch_v[0] = S60_MEMF(g_ebp - 0x10u);
+        g_btl.touch_v[1] = S60_MEMF(g_ebp - 0x0Cu);
+        g_btl.touch_v[2] = S60_MEMF(g_ebp - 4u);
+        g_btl.touch_live = 1;
+        break;
+    case 0x000C679Eu:
+        if (g_btl.touch_live) {
+            float f = btl_scalef(1.0f);
+            S60_MEMF(g_ebp - 0x10u) = g_btl.touch_v[0] + (S60_MEMF(g_ebp - 0x10u) - g_btl.touch_v[0]) * f;
+            S60_MEMF(g_ebp - 0x0Cu) = g_btl.touch_v[1] + (S60_MEMF(g_ebp - 0x0Cu) - g_btl.touch_v[1]) * f;
+            S60_MEMF(g_ebp - 4u) = g_btl.touch_v[2] + (S60_MEMF(g_ebp - 4u) - g_btl.touch_v[2]) * f;
+            g_btl.touch_live = 0;
+        }
+        break;
+
+    /* A cannonball in flight (sub_000CAF60, sub_000CB220; esi/edi the
+     * ball): its countdown once a tick, its x, y steps a frame's share, and
+     * its height -- a sine of the countdown -- from the countdown less the
+     * part of a tick gone by, so the arc stays smooth. */
+    case 0x000CAFA6u: if (skip) S60_MEM32(g_edi + 0x38u) += 1; break;   /* dec [edi+0x38] */
+    case 0x000CB26Eu: g_eax = (uint32_t)btl_scale(0, (int32_t)g_eax); break;  /* x += */
+    case 0x000CB291u: g_eax = (uint32_t)btl_scale(1, (int32_t)g_eax); break;  /* y += */
+    case 0x000CB2B6u:   /* ecx = (2^31 / flight) * countdown; eax = 2^31 / flight */
+        g_ecx -= (uint32_t)((uint64_t)g_eax * (uint32_t)g_btl.acc_us / (uint32_t)g_btl.tick_us);
+        break;
+
+    /* A sail's angle (sub_00078EC0, the sea's own, here for a battle):
+     * eased a sixteenth of the way to its target a frame, or fluttering by
+     * a random step; ecx the step, this frame's share. */
+    case 0x00078F69u: g_ecx = (uint32_t)btl_scale(4, (int32_t)g_ecx); break;
+    case 0x00078F9Bu: g_ecx = (uint32_t)btl_scale(5, (int32_t)g_ecx); break;
+
+    /* A ship blown up and going down (sub_000D9580): its sinking, +5 a
+     * frame, once a tick. */
+    case 0x000D98EEu: if (skip) g_eax -= 5; break;
+
+    /* The rudder as drawn (sub_000D4680, ebp the ship): a step a frame
+     * toward 16 x the rudder; ecx new. */
+    case 0x000D4B73u:
+        g_ecx = (uint32_t)btl_step(g_ebp, BS_RUDDER, S60_MEM32(g_ebp + 0x11FCu), (int32_t)g_ecx);
+        break;
+
+    /* A ship going down (sub_000D4680): its two animation counters (+0x122C,
+     * +0x122E) step by the frame time x 30, truncated to whole frames -- at
+     * 120 a frame lost 6% of it. The fraction carried a ship. */
+    case 0x000D4EEDu:
+    case 0x000D512Du: {
+        double *rem = &g_btl.anim_rem[btl_ship(g_ebp)][va == 0x000D512Du];
+        double t = *(volatile double *)((uintptr_t)0x004D39F8u + g_xbox_mem_offset) *
+                   (double)S60_MEMF(0x003FF3FCu) + *rem;
+        int32_t n = (int32_t)t;
+        *rem = t - n;
+        g_eax = (g_eax & 0xFFFF0000u) | ((uint32_t)n & 0xFFFFu);
+        break;
+    }
+
+    case 0x000D4615u:   /* aground: damage +1 a frame, once a tick */
+        if (skip) g_eax -= 1;
+        break;
+    case 0x000D4625u:   /* and its knock every 20th: not off the tick */
+        if (skip) g_edx = 0;
+        break;
+    case 0x000C3B9Bu: if (skip) S60_MEM32(BTL_OBJ + 0xCDE8u) -= 1; break; /* inc [obj+CDE8] */
+    /* A point drifting against the wind, 20 a frame (sub_000C4700, obj
+     * +0xCDEC, +0xCDF0: the clouds' or the sea's scroll): a frame's share. */
+    case 0x000C472Cu: g_eax = (uint32_t)btl_scale(2, (int32_t)g_eax); break;
+    case 0x000C4744u: g_eax = (uint32_t)btl_scale(3, (int32_t)g_eax); break;
+    case 0x000C49D4u: if (skip) S60_MEM32(g_edi + 0xCDD8u) -= 1; break;   /* inc [edi+CDD8] (to 30) */
+    default: break;
+    }
+    return 1;
+}
+
 void recomp_guest_hook(uint32_t va)
 {
     int skip;
+
+    if (btl_guest_hook(va))                 /* the battle's */
+        return;
 
     /* The sea loop's frame runs from the tick read at 0x9190F past its
      * frame wait to 0x9267B; it leaves through 0x92681 (both of its exits).
@@ -1086,6 +1399,64 @@ void recomp_guest_hook(uint32_t va)
     }
 }
 
+
+/* ---- Ship battles faster than 30 (battle_fps): calls run once a console frame ---- */
+
+/* Battle code that runs once a console frame -- decisions, countdowns,
+ * effects started -- on the tick only when battles run faster than 30: the
+ * call is skipped as if it had run (pop: the callee's own ret N). */
+static int btl_off_tick_bit(uint32_t pop, unsigned bit)
+{
+    static int mask = -1;   /* RECOMP_PIRATES_BTL_NOGATE: test switch, bits of calls run every frame */
+    if (mask < 0) {
+        const char *v = getenv("RECOMP_PIRATES_BTL_NOGATE");
+        mask = v ? (int)strtoul(v, NULL, 16) : 0;
+    }
+    if ((unsigned)mask & bit)
+        return 0;
+    if (g_btl.active && g_btl.in_frame && !g_btl.tick) {
+        g_esp += 4u + pop;
+        return 1;
+    }
+    return 0;
+}
+
+/* A ship's wake (sub_000D5480, the ship pushed): its history -- arrays at
+ * +0x1244..+0x167C shifted a place a frame, the newest point at the ship --
+ * and the wake drawn from it. Run every frame, since it draws (as its
+ * caller, sub_000D4680, places the ship's model: skipping either left the
+ * ships or their wakes undrawn every other frame); off the tick the history
+ * is put back as it was after the drawing, so it moves once a tick. */
+#define BTL_WAKE_LO 0x1244u
+#define BTL_WAKE_HI 0x1680u
+extern void sub_000D5480_gen(void);
+void sub_000D5480(void)
+{
+    static uint8_t saved[BTL_WAKE_HI - BTL_WAKE_LO];
+    uint32_t ship = (uint32_t)S60_MEM32(g_esp + 4u);
+    int keep = g_btl.active && g_btl.in_frame && !g_btl.tick;
+    void *hist = (void *)((uintptr_t)(ship + BTL_WAKE_LO) + g_xbox_mem_offset);
+
+    if (keep)
+        memcpy(saved, hist, sizeof saved);
+    sub_000D5480_gen();
+    if (keep)
+        memcpy(hist, saved, sizeof saved);
+}
+extern void sub_000D0B90_gen(void);
+void sub_000D0B90(void) { if (!btl_off_tick_bit(0u, 2u)) sub_000D0B90_gen(); }  /* the AI's decisions */
+extern void sub_000D6270_gen(void);
+void sub_000D6270(void) { if (!btl_off_tick_bit(0u, 4u)) sub_000D6270_gen(); }  /* countdowns, damage effects */
+extern void sub_000D6340_gen(void);
+void sub_000D6340(void) { if (!btl_off_tick_bit(0u, 8u)) sub_000D6340_gen(); }  /* countdowns, fires started */
+/* A cannonball's splash warning (sub_000CAF60). Not its launch smoke,
+ * sub_000CB030, which the console runs every frame of the launch: held to
+ * the tick, it left the particle emitters it feeds (0x4E6B80, 0x4E66A0)
+ * so that every later scene drew its characters black (the plunder
+ * deck, the governor, the tavern). */
+extern void sub_000CBEE0_gen(void);
+void sub_000CBEE0(void) { if (!btl_off_tick_bit(4u, 0x20u)) sub_000CBEE0_gen(); }
+
 extern void sub_001A958A_gen(void);
 extern int recomp_config_int(const char *env_name, const char *key, int fallback);
 extern int recomp_settings_default_frame_interp(void);
@@ -1128,6 +1499,10 @@ void sub_001A958A(void)
                 g_pirates_ship_battle_seen = 1;
             }
         }
+    }
+    if (ra == 0x000C397Fu) {              /* a battle frame begins */
+        btl_begin_frame();
+        btl_test_frame(g_btl.tick, g_btl.dt_us);
     }
     if (ra == 0x0009190Fu || ra == 0x000A43FAu) { /* a sea frame begins */
         g_pirates_in_sea_frame = 1;
@@ -1181,6 +1556,25 @@ void sub_001A958A(void)
      * above 60 (and unlocked) the wait passes at once and the gate paces it
      * by the host clock at the rate (toolkit patch 0044) for as long as sea
      * frames keep coming. No interpolation at sea either way. */
+    /* Battles faster than 30 (battle_fps): the battle's wait (31 ms, 100 in
+     * slow motion) passes at once and the gate paces the frames, by the
+     * vblank at 60 and the host clock above it, as the sea does. */
+    if (g_btl.active && g_btl.in_frame && ra == PIRATES_LIMITER_BTL) {
+        uint32_t wait = (S60_MEM32(PIRATES_SLOW_FLAGS) & 0x20) ? 100u : 31u;
+        if (g_btl.rate == 60) {
+            g_eax += wait - SEA60_WAIT_MS;
+            if (g_btl.gate_rate)
+                btl_set_gate(0);
+        } else {
+            g_eax += wait;
+            btl_set_gate(g_btl.rate);
+        }
+        if (at30) {
+            at30 = 0;
+            xbox_Nv2aFlipGateSetTitleInterval(1);
+        }
+        return;
+    }
     if (g_sea60.active && g_sea60.in_loop && ra == PIRATES_LIMITER_SEA) {
         if (g_sea60.rate == 60) {
             g_eax += 31u - SEA60_WAIT_MS;
