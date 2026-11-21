@@ -326,6 +326,18 @@
    "note": "battle_fps: wind drift y (obj+0xCDF0)"
   },
   {
+   "address": "0x000C45CF",
+   "note": "battle_fps: the camera's new x, y, height (ebx, edi, esi), a tick's step drawn a share a frame"
+  },
+  {
+   "address": "0x000C462B",
+   "note": "battle_fps: the camera's sideways offset, sin 90 deg read past the sine table's end"
+  },
+  {
+   "address": "0x000C467E",
+   "note": "battle_fps: the view set; the console's camera put back"
+  },
+  {
    "address": "0x000FE44A",
    "note": "battle_fps: short-lived effects' ages (0x4D4E38), a year a tick"
   },

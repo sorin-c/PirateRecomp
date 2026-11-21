@@ -342,6 +342,35 @@ static int pirates_hud_battle_dx(unsigned handle, unsigned w, unsigned h, unsign
     return 0;
 }
 
+/* RECOMP_PIRATES_CAM_LOG=<file> (test): in a ship battle, the camera -- the
+ * view matrix of the first HUD draw of each battle frame -- with the host
+ * time, a line a frame: "us m00 .. m33 | ..." (btl_cam_extra has the rest).
+ * Needs widescreen (the HUD's edge test). Set by btl_begin_frame. */
+static volatile int g_cam_new_frame;
+static void btl_cam_extra(FILE *f);
+static void pirates_cam_log(const float *view)
+{
+    static int on = -1;
+    static FILE *f;
+    if (on < 0) {
+        const char *v = getenv("RECOMP_PIRATES_CAM_LOG");
+        on = v && *v && (f = fopen(v, "w")) != NULL;
+        if (f) setvbuf(f, NULL, _IOFBF, 1 << 20);
+    }
+    if (on && view) {
+        struct timespec ts;
+        int i;
+        timespec_get(&ts, TIME_UTC);
+        fprintf(f, "%lld", (long long)ts.tv_sec * 1000000 + ts.tv_nsec / 1000);
+        for (i = 0; i < 16; i++)
+            fprintf(f, " %.4f", view[i]);
+        /* then the battle camera's own centre and height (sub_000C4220),
+         * whether this frame ticked, and its length */
+        btl_cam_extra(f);
+        fflush(f);   /* the test stops the game without closing it */
+    }
+}
+
 static int pirates_hud_edge(uint32_t handle, unsigned w, unsigned h, unsigned fmt,
                             const void *vertices, unsigned stride, unsigned count,
                             const float *world, const float *view, const float *proj)
@@ -351,6 +380,10 @@ static int pirates_hud_edge(uint32_t handle, unsigned w, unsigned h, unsigned fm
     unsigned i;
 
     battle = pirates_hud_battle();
+    if (battle && g_cam_new_frame) {
+        g_cam_new_frame = 0;
+        pirates_cam_log(view);
+    }
     if (!battle && (handle != 0x142u || !(fmt == 0x0Fu && w == 128u && h == 32u) &&
                     !(fmt == 0x0Eu && w == 256u && h == 256u)))
         return 0;
@@ -887,6 +920,10 @@ static struct {
     float touch_v[3];     /* a body's velocity and spin before a touch's push */
     double anim_rem[8][2];/* what the sinking's frame-time steps truncated, a ship */
     int touch_live;
+    int cam_have;         /* cam_prev/cam_cur hold the last two ticks' camera */
+    int32_t cam_prev[3], cam_cur[3];  /* x, y, height (0x49C26C, 0x49C268, 0x49C260) */
+    int32_t cam_out[3];   /* the camera drawn this frame (the camera log's) */
+    int cam_unlogged;     /* battle frames the camera log missed (no widescreen) */
 } g_btl;
 
 /* battle_fps (RECOMP_PIRATES_BATTLE_FPS): 30 (the default) as the console,
@@ -900,6 +937,18 @@ static int btl_read_rate(void)
     if (r <= 30)
         return 30;
     return r < 60 ? 60 : r > 1000 ? 1000 : r;
+}
+
+/* The camera log's tail (pirates_cam_log): "| x y height tick dt_us view
+ * x y z drawn x y height" -- the console's camera (sub_000C4220), whether
+ * this frame ticked, the view's position as set (sub_000DCC50) and the
+ * camera drawn this frame (battle_fps, the C45CF hook). */
+static void btl_cam_extra(FILE *f)
+{
+    fprintf(f, " | %d %d %d %d %d", S60_MEM32(0x0049C26Cu), S60_MEM32(0x0049C268u),
+            S60_MEM32(0x0049C260u), g_btl.tick, g_btl.dt_us);
+    fprintf(f, " view %d %d %d drawn %d %d %d\n", S60_MEM32(0x0040E8A4u), S60_MEM32(0x004D6748u),
+            S60_MEM32(0x004D674Cu), g_btl.cam_out[0], g_btl.cam_out[1], g_btl.cam_out[2]);
 }
 
 /* A step taken once a console frame: this frame's share of it. */
@@ -981,6 +1030,12 @@ static void btl_begin_frame(void)
         }
     }
     g_btl.in_frame = 1;
+    /* The camera log is written from the HUD's edge test, which the toolkit
+     * runs only in widescreen: say so once, rather than leave it empty. */
+    if (g_cam_new_frame && ++g_btl.cam_unlogged == 300 && getenv("RECOMP_PIRATES_CAM_LOG"))
+        fprintf(stderr, "[PIRATES] RECOMP_PIRATES_CAM_LOG missed 300 battle frames: it is "
+                        "written only in widescreen (RECOMP_WIDESCREEN=1)\n");
+    g_cam_new_frame = 1;
 }
 /* ---- Town scenes faster than 33 (town_fps, experimental) ----
  *
@@ -1211,8 +1266,10 @@ static int btl_guest_hook(uint32_t va)
      * frame they are left to the sea's hooks (sea60_scale 3 and 4). */
     if ((va == 0x00078F69u || va == 0x00078F9Bu) && !(g_btl.active && g_btl.in_frame))
         return 0;
-    if (!g_btl.active || !g_btl.in_frame)
+    if (!g_btl.active || !g_btl.in_frame) {
+        g_btl.cam_have = 0;                 /* start the camera afresh when it is on again */
         return 1;
+    }
     switch (va) {
     /* Short-lived effects drawn by the battle (sub_000FDE20: 256 of them at
      * 0x4D5038, their ages at 0x4D4E38, gone after 5): a year a tick, but
@@ -1366,6 +1423,65 @@ static int btl_guest_hook(uint32_t va)
     case 0x000C472Cu: g_eax = (uint32_t)btl_scale(2, (int32_t)g_eax); break;
     case 0x000C4744u: g_eax = (uint32_t)btl_scale(3, (int32_t)g_eax); break;
     case 0x000C49D4u: if (skip) S60_MEM32(g_edi + 0xCDD8u) -= 1; break;   /* inc [edi+CDD8] (to 30) */
+
+    /* The camera (sub_000C4220): each frame it heads for the middle of the
+     * ships (x 0x49C26C, y 0x49C268) at up to 30 a frame and for a height
+     * (0x49C260) that keeps them all in view, at up to 80, and takes them
+     * once within that. All three are whole numbers worked out from the
+     * ships' box in coarse steps -- the height in steps of about 3 -- so a
+     * frame faster than 30 moved by 0, 3, 6 or 10 at random and the view
+     * jolted. The camera keeps the console's step once a tick (from the
+     * ships where they are then), and each frame is drawn that far into the
+     * move from the tick before to it: a tick's lag, and smooth. At 0xC45CF
+     * the new camera is in ebx, edi and esi (stored after, at 0xC45D6),
+     * x and y already stored; on a cut (obj+0xCE36) it is taken at once.
+     * At 0xC467E, once the view is set (sub_000DCC50), the console's camera
+     * is put back for the next frame to step from. */
+    case 0x000C45CFu: {
+        int32_t now[3] = { (int32_t)g_ebx, (int32_t)g_edi, (int32_t)g_esi }, out[3];
+        double f;
+        int k;
+        if (!skip || !g_btl.cam_have) {
+            int cut = *(volatile uint8_t *)((uintptr_t)(uint32_t)S60_MEM32(g_esp + 0x20u) + 0xCE36u +
+                                            g_xbox_mem_offset) != 0;
+            for (k = 0; k < 3; k++) {
+                g_btl.cam_prev[k] = g_btl.cam_have && !cut ? g_btl.cam_cur[k] : now[k];
+                g_btl.cam_cur[k] = now[k];
+            }
+            g_btl.cam_have = 1;
+        }
+        f = (double)g_btl.acc_us / g_btl.tick_us;
+        if (f > 1.0) f = 1.0;
+        for (k = 0; k < 3; k++) {
+            double v = g_btl.cam_prev[k] + (g_btl.cam_cur[k] - g_btl.cam_prev[k]) * f;
+            out[k] = (int32_t)(v >= 0 ? v + 0.5 : v - 0.5);
+        }
+        memcpy(g_btl.cam_out, out, sizeof out);
+        g_ebx = (uint32_t)out[0];
+        g_edi = (uint32_t)out[1];
+        g_esi = (uint32_t)out[2];
+        S60_MEM32(0x0049C26Cu) = out[0];
+        S60_MEM32(0x0049C268u) = out[1];
+        break;
+    }
+    /* And its offset back from the ships, [esp+0x20] (the height x sin 60),
+     * times sin 90 (sub_00103A90): the sine table (0x4D26B8) has 256
+     * entries to 90 degrees, and the 90 itself reads the word after it
+     * (0x4D2AB8, a value the battle changes as it goes), overflowing into a
+     * factor up to 1.6% off 1 that wraps whenever that word passes a
+     * multiple of 1024: a hop of up to 40 in one frame. Between 15-25 a
+     * frame at 30 it passes; at 120 it was the remaining jolt. The last
+     * entry, 65535, as the table means. */
+    case 0x000C462Bu:
+        g_eax = (uint32_t)(int32_t)(((int64_t)S60_MEM32(g_esp + 0x20u) * 65535) >> 16);
+        break;
+    case 0x000C467Eu:
+        if (g_btl.cam_have) {
+            S60_MEM32(0x0049C26Cu) = g_btl.cam_cur[0];
+            S60_MEM32(0x0049C268u) = g_btl.cam_cur[1];
+            S60_MEM32(0x0049C260u) = g_btl.cam_cur[2];
+        }
+        break;
     default: break;
     }
     return 1;

@@ -70,7 +70,10 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   many times a second with the speed it has at 30: the ships' sailing,
   turning and drifting, the cannonballs' flight, the wind, the AI's
   decisions, reloads, fires and other countdowns, and the slow motion
-  (10 a second on the console, still 10 a second of game time). Paced as
+  (10 a second on the console, still 10 a second of game time). The camera
+  takes the console's step once every 30th of a second and is drawn a
+  share of the way into it each frame, so it glides rather than jolting
+  (it trails the console's by at most that 30th of a second). Paced as
   sailing is. Measured against 30 fps in scripted battles (ships within 2%,
   every cannonball's flight time the console's); not yet played through
   many battles. Frame interpolation is not used in a battle faster than 30.
