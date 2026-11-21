@@ -1,0 +1,51 @@
+diff --git a/src/hle/hle_d3d8.c b/src/hle/hle_d3d8.c
+index 22db014..2e39861 100644
+--- a/src/hle/hle_d3d8.c
++++ b/src/hle/hle_d3d8.c
+@@ -6601,12 +6601,44 @@ static uint8_t *shadow_expand_vertices(const void *verts, UINT vertices, UINT *s
+             *failed = 1;
+             return NULL;
+         }
+-        for (v = 0; v < vertices; v++) {
++        /* An input stored as it is drawn (whole floats, or a D3DCOLOR
++         * drawn as one) is a plain copy: done an input at a time, the size
++         * fixed, rather than through ff_read_floats a vertex at a time.
++         * The same bytes either way. */
++        uint32_t copied = 0;
++        for (k = 0; k < g_ff.count; k++) {
++            uint32_t fmt = g_ff.format[k], n = fmt >> 4, bytes = 0;
++            const uint8_t *at = src[k] + g_ff.offset[k];
++            uint8_t *dst = out + g_ff.out[k];
++
++            if (g_ff.as_color[k] && fmt == 0x40)
++                bytes = 4;
++            else if (!g_ff.as_color[k] && (fmt & 0x0F) == 0x2 && fmt != 0x72 &&
++                     n >= 1 && (int)n <= 4 && g_ff.floats[k] == (int)n)
++                bytes = 4 * n;
++            if (!bytes)
++                continue;
++            copied |= 1u << k;
++#define FF_COPY(nb) for (v = 0; v < vertices; v++) \
++                memcpy(dst + (size_t)v * out_stride, at + (size_t)v * sst[k], nb)
++            switch (bytes) {
++            case 4:  FF_COPY(4);  break;
++            case 8:  FF_COPY(8);  break;
++            case 12: FF_COPY(12); break;
++            default: FF_COPY(16); break;
++            }
++#undef FF_COPY
++        }
++        for (v = 0; v < vertices && copied != (1u << g_ff.count) - 1u; v++) {
+             uint8_t *dst = out + (size_t)v * out_stride;
+             for (k = 0; k < g_ff.count; k++) {
+                 const uint8_t *at = src[k] + (size_t)v * sst[k] + g_ff.offset[k];
+                 float f[4];
+-                int c = ff_read_floats(g_ff.format[k], at, f);
++                int c;
++
++                if (copied & (1u << k))
++                    continue;
++                c = ff_read_floats(g_ff.format[k], at, f);
+ 
+                 if (g_ff.as_color[k]) {
+                     if (g_ff.format[k] == 0x40) {
