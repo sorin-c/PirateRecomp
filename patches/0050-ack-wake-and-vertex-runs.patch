@@ -1,0 +1,250 @@
+diff --git a/src/d3d/d3d8_device.c b/src/d3d/d3d8_device.c
+index 34fe174..198c460 100644
+--- a/src/d3d/d3d8_device.c
++++ b/src/d3d/d3d8_device.c
+@@ -2981,6 +2981,63 @@ void xbox_D3D8SetPresentInterval(UINT interval)
+     g_present_interval = interval;
+ }
+ 
++/* RECOMP_FRAME_WORK=1, for measuring: what a frame costs the thread that
++ * draws it, apart from the present. Every five seconds, to stderr: frames,
++ * the mean frame, the mean time blocked in the present, and the frame's own
++ * work (the time from one present's return to the next present's call):
++ * mean, 99th percentile and worst. A display that refreshes slower than the
++ * PC draws makes the present block; the work is what the PC needed. */
++static int frame_work_on(void)
++{
++    static int on = -1;
++    if (on < 0) {
++        const char *e = getenv("RECOMP_FRAME_WORK");
++        on = e && *e && *e != '0';
++    }
++    return on;
++}
++
++static void frame_work_note(long long before, long long after)
++{
++    static long long last_after, window_start, freq;
++    static double work_us[8192];
++    static unsigned n;
++    static double present_sum, work_sum;
++
++    if (!freq) {
++        LARGE_INTEGER f; QueryPerformanceFrequency(&f); freq = f.QuadPart;
++        window_start = before;
++    }
++    if (last_after && n < 8192u) {
++        double w = (double)(before - last_after) * 1e6 / (double)freq;
++        work_us[n++] = w;
++        work_sum += w;
++        present_sum += (double)(after - before) * 1e6 / (double)freq;
++    }
++    last_after = after;
++    if (after - window_start >= freq * 5 && n) {
++        /* 99th percentile by partial selection: count above a threshold */
++        double worst = 0, p99 = 0, secs = (double)(after - window_start) / (double)freq;
++        unsigned i, k = n / 100u, above;
++        for (i = 0; i < n; i++) if (work_us[i] > worst) worst = work_us[i];
++        {   double lo = 0, hi = worst;
++            int it;
++            for (it = 0; it < 30; it++) {
++                double mid = (lo + hi) / 2;
++                for (above = 0, i = 0; i < n; i++) if (work_us[i] > mid) above++;
++                if (above > k) lo = mid; else hi = mid;
++            }
++            p99 = hi;
++        }
++        fprintf(stderr, "[FRAMEWORK] %u frames in %.1fs (%.1f fps): present %.2f ms, "
++                "work mean %.2f ms p99 %.2f ms worst %.2f ms\n",
++                n, secs, n / secs, present_sum / n / 1000.0, work_sum / n / 1000.0,
++                p99 / 1000.0, worst / 1000.0);
++        fflush(stderr);
++        n = 0; present_sum = work_sum = 0; window_start = after;
++    }
++}
++
+ static HRESULT __stdcall dev_Swap(IDirect3DDevice8 *self, DWORD Flags)
+ {
+     (void)self; (void)Flags;
+@@ -2996,7 +3053,15 @@ static HRESULT __stdcall dev_Swap(IDirect3DDevice8 *self, DWORD Flags)
+     }
+ 
+     present_resolve();
+-    return (HRESULT)rhi_present(g_present_interval);
++    {
++        HRESULT hr;
++        LARGE_INTEGER a, b;
++        int on = frame_work_on();
++        if (on) QueryPerformanceCounter(&a);
++        hr = (HRESULT)rhi_present(g_present_interval);
++        if (on) { QueryPerformanceCounter(&b); frame_work_note(a.QuadPart, b.QuadPart); }
++        return hr;
++    }
+ }
+ 
+ /* ================================================================
+diff --git a/src/hle/hle_d3d8_vertex.c b/src/hle/hle_d3d8_vertex.c
+index a47ccce..f0103d2 100644
+--- a/src/hle/hle_d3d8_vertex.c
++++ b/src/hle/hle_d3d8_vertex.c
+@@ -717,6 +717,35 @@ static void w_convert(uint32_t fmt, const uint8_t *src, float out[4])
+     memcpy(out, v, sizeof v);
+ }
+ 
++/* w_convert over `count` vertices `stride` bytes apart, into out[v][reg]:
++ * the format decided once rather than once a vertex, for the formats a
++ * draw's arrays mostly are (whole floats and D3D colours). The same values
++ * as w_convert, which the rest still go through. */
++static void w_convert_run(uint32_t fmt, const uint8_t *src, size_t stride, uint32_t count,
++                          float (*out)[16][4], uint32_t reg)
++{
++    uint32_t type = fmt & 0xFu, n = (fmt >> 4) & 0xFu, v;
++
++    if (type == 2u && n >= 1u && n <= 4u) {                /* F */
++        for (v = 0; v < count; v++, src += stride) {
++            float *o = out[v][reg];
++            o[0] = 0.0f; o[1] = 0.0f; o[2] = 0.0f; o[3] = 1.0f;
++            memcpy(o, src, 4u * n);
++        }
++        return;
++    }
++    if (type == 0u && n == 4u) {                           /* UB_D3D: B, G, R, A */
++        for (v = 0; v < count; v++, src += stride) {
++            float *o = out[v][reg];
++            o[0] = src[2] / 255.0f; o[1] = src[1] / 255.0f;
++            o[2] = src[0] / 255.0f; o[3] = src[3] / 255.0f;
++        }
++        return;
++    }
++    for (v = 0; v < count; v++, src += stride)
++        w_convert(fmt, src, out[v][reg]);
++}
++
+ /* `vertices` vertices from `first` as sixteen input registers, from the walk's
+  * arrays (or the packed inline vertices when `inl`). NULL when an array cannot
+  * be read. */
+@@ -748,16 +777,15 @@ static float (*w_gather_regs(uint32_t first, uint32_t vertices, const uint8_t *i
+         if (!(g_w_known & (1u << i)) || !(fmt & 0xF0u) || !(size = vsdt_bytes(fmt & 0xFFu)))
+             continue;
+         if (inl) {
+-            for (v = 0; v < vertices; v++)
+-                w_convert(fmt, inl + (size_t)(first + v) * packed + at[i], out[v][i]);
++            w_convert_run(fmt, inl + (size_t)first * packed + at[i], packed, vertices, out, i);
+             continue;
+         }
+         if (!guest_readable(va, (uint64_t)(first + vertices - 1u) * stride + size)) {
+             free(out);
+             return NULL;
+         }
+-        for (v = 0; v < vertices; v++)
+-            w_convert(fmt, (const uint8_t *)HLE_PTR(va + (first + v) * stride), out[v][i]);
++        w_convert_run(fmt, (const uint8_t *)HLE_PTR(va + first * stride), stride, vertices,
++                      out, i);
+     }
+     return out;
+ }
+@@ -1355,6 +1383,7 @@ RECOMP_TLS int g_hle_original_depth;
+  * whose writes that replacement accounts for itself (g_hle_original_depth).
+  * RECOMP_HLE_D3D8_PB_SYNC_WAITS=0 leaves them alone. */
+ static unsigned long g_wait_syncs;
++void xbox_Nv2aAckWake(void);            /* kernel: the ack thread, now */
+ 
+ static void wait_point(const char *name, int *seen)
+ {
+@@ -1371,6 +1400,10 @@ static void wait_point(const char *name, int *seen)
+         g_wait_syncs++;
+         hle_d3d8_push_constants_sync();
+     }
++    /* Each of these spins next on something the kernel's ack thread
++     * answers (a busy bit, DMA_GET, the fence mirror): have it look now
++     * rather than after its idle sleep. */
++    xbox_Nv2aAckWake();
+ }
+ 
+ HLE_ORIGINAL(CDevice_KickOff);
+diff --git a/src/kernel/xbox_memory_layout.c b/src/kernel/xbox_memory_layout.c
+index f54149a..81f49e0 100644
+--- a/src/kernel/xbox_memory_layout.c
++++ b/src/kernel/xbox_memory_layout.c
+@@ -516,6 +516,35 @@ int xbox_Nv2aMirrorCounter(uint32_t device_ptr_va,
+  * so the thread can tell a quiet spell from a busy one (nv2a_ack_wait). */
+ static LONG g_ack_activity;
+ 
++/* The ack thread's wake-up (xbox_Nv2aAckWake): set while it sleeps between
++ * idle passes, so a kick can cut the sleep short; and until when it polls
++ * for the bit the kick is about to set. */
++static HANDLE           g_ack_wake;
++static volatile LONG    g_ack_sleeping;
++static volatile int64_t g_ack_expect_ns;
++#define ACK_EXPECT_NS 200000            /* 200 us: the kick sets its bit at once */
++
++/* A push-buffer kick is coming (the HLE's CDevice_KickOff,
++ * hle_d3d8_vertex.c): the title is about to set a busy bit and spin until it
++ * clears. Asleep between idle passes, the thread used to see it a timer
++ * period later (about 1 ms here, against the 100 us asked), and the title
++ * spun all that time: 4-7% of Pirates!' game thread at sea, in battles and
++ * in the tavern. Woken now, it polls for up to ACK_EXPECT_NS and clears the
++ * bit within microseconds; after that it carries on as it always did (busy
++ * for a millisecond after a change, then idle), so it costs no more CPU than
++ * before. RECOMP_NV2A_ACK_WAKE=0 leaves kicks to the timer. */
++void xbox_Nv2aAckWake(void)
++{
++    static int on = -1;
++    if (on < 0)
++        on = xbox_EnvSwitch("RECOMP_NV2A_ACK_WAKE", 1);
++    if (!on || !g_ack_wake)
++        return;
++    g_ack_expect_ns = host_time_ns() + ACK_EXPECT_NS;
++    if (InterlockedCompareExchange(&g_ack_sleeping, 0, 0))
++        SetEvent(g_ack_wake);
++}
++
+ static void counter_mirrors_tick(void)
+ {
+     for (int i = 0; i < g_counter_mirror_count; i++) {
+@@ -2870,6 +2899,13 @@ static void nv2a_ack_wait(void)
+             st.cpu_ns = cpu;
+         }
+     }
++    if (g_ack_expect_ns && host_time_ns() < g_ack_expect_ns) {
++        /* A kick is setting its bit (xbox_Nv2aAckWake): look again now. */
++        Sleep(0);
++        last_wait = ACK_YIELDED;
++        st.yields++;
++        return;
++    }
+     if (now.QuadPart - quiet_since < qpf / 1000) {
+         /* Busy: a waiter may be spinning on another core. */
+         if (busy_us && ++busy_quiet_passes > ACK_BUSY_YIELDS
+@@ -2889,8 +2925,20 @@ static void nv2a_ack_wait(void)
+         st.yields++;
+         return;
+     }
+-    if (host_timer_wait_us_coarse(timer, idle_us, 50) == HOST_WAIT_NOT_ARMED)
+-        Sleep(1);
++    {
++        int r;
++        if (g_ack_wake) {
++            InterlockedExchange(&g_ack_sleeping, 1);
++            /* A wake between the test above and here set no event. */
++            r = host_time_ns() < g_ack_expect_ns ? HOST_WAIT_EVENT
++                : host_timer_wait_us_or_event(timer, idle_us, g_ack_wake, 50);
++            InterlockedExchange(&g_ack_sleeping, 0);
++        } else {
++            r = host_timer_wait_us_coarse(timer, idle_us, 50);
++        }
++        if (r == HOST_WAIT_NOT_ARMED)
++            Sleep(1);
++    }
+     last_wait = ACK_SLEPT_IDLE;
+     st.idle_sleeps++;
+ }
+@@ -3062,6 +3110,8 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
+ static void xbox_Nv2aAckStart(void)
+ {
+     g_nv2a_ack_stop = 0;
++    if (!g_ack_wake)
++        g_ack_wake = CreateEventW(NULL, FALSE, FALSE, NULL);
+     g_nv2a_ack_thread = CreateThread(NULL, 0, nv2a_ack_thread,
+                                      g_nv2a_memory, 0, NULL);
+     if (g_nv2a_ack_thread) {
