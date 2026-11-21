@@ -1073,8 +1073,15 @@ static int btl_guest_hook(uint32_t va)
         return 1;
     switch (va) {
     /* Short-lived effects drawn by the battle (sub_000FDE20: 256 of them at
-     * 0x4D5038, their ages at 0x4D4E38, gone after 5): a year a tick. */
-    case 0x000FE44Au: if (skip) S60_MEM16(g_ebx) -= 1; break;   /* inc word [ebx] */
+     * 0x4D5038, their ages at 0x4D4E38, gone after 5): a year a tick, but
+     * never held at 0 -- at age 0 an effect is set up (its +0x70 call), and
+     * held there it was set up again every frame until the next tick, which
+     * left the characters of every later scene (the plunder deck, the
+     * governor, the tavern) drawn black. */
+    case 0x000FE44Au:                                             /* inc word [ebx] */
+        if (skip && S60_MEM16(g_ebx) > 0)
+            S60_MEM16(g_ebx) -= 1;
+        break;
 
     /* Frame counts: undone on a frame that does not tick. */
     case 0x000C3B93u: if (skip) g_ecx -= 1; break;                       /* [obj+CDE0] */
@@ -1442,9 +1449,11 @@ extern void sub_000D6270_gen(void);
 void sub_000D6270(void) { if (!btl_off_tick_bit(0u, 4u)) sub_000D6270_gen(); }  /* countdowns, damage effects */
 extern void sub_000D6340_gen(void);
 void sub_000D6340(void) { if (!btl_off_tick_bit(0u, 8u)) sub_000D6340_gen(); }  /* countdowns, fires started */
-/* A cannonball's launch smoke and its splash warning (sub_000CAF60). */
-extern void sub_000CB030_gen(void);
-void sub_000CB030(void) { if (!btl_off_tick_bit(4u, 0x10u)) sub_000CB030_gen(); }
+/* A cannonball's splash warning (sub_000CAF60). Not its launch smoke,
+ * sub_000CB030, which the console runs every frame of the launch: held to
+ * the tick, it left the particle emitters it feeds (0x4E6B80, 0x4E66A0)
+ * so that every later scene drew its characters black (the plunder
+ * deck, the governor, the tavern). */
 extern void sub_000CBEE0_gen(void);
 void sub_000CBEE0(void) { if (!btl_off_tick_bit(4u, 0x20u)) sub_000CBEE0_gen(); }
 

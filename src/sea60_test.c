@@ -249,6 +249,16 @@ void btl_test_frame(int btl_tick, int btl_dt)
         }
         if (orset)
             MEM32(or_addr) |= or_mask;
+        static int pnear = -1, nx, ny, nms;
+        if (pnear < 0) {   /* RECOMP_PIRATES_BTL_PIN_NEAR="dx dy [ms]": the enemy held at our ship + dx, dy (from ms on) */
+            const char *v = getenv("RECOMP_PIRATES_BTL_PIN_NEAR");
+            pnear = v && sscanf(v, "%d %d %d", &nx, &ny, &nms) >= 2;
+        }
+        if (pnear && now - pk_t0 >= (uint32_t)nms) {
+            MEM32(0x004DAC40u + 0x11C8u) = MEM32(0x004D7D48u + 0x11C8u) + (uint32_t)(nx * 1000);
+            MEM32(0x004DAC40u + 0x11CCu) = MEM32(0x004D7D48u + 0x11CCu) + (uint32_t)(ny * 1000);
+            MEM32(0x004DAC40u + 0x11D4u) = 0;
+        }
         static int pino = -1, ox, oy;
         if (pino < 0) {
             const char *v = getenv("RECOMP_PIRATES_BTL_PIN_OURS");

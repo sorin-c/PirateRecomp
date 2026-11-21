@@ -119,5 +119,5 @@ RECOMP_HLE_D3D8_DUMP_MAX=24` keeps the last 24 frames; the ships and their
 wakes must be in all of them (skipping sub_000D4680 or sub_000D5480 off the
 tick left them out of every other frame). `RECOMP_PIRATES_BTL_NOGATE=<bits>`
 runs those of the tick-only calls every frame (1 the wake history, 2 the AI,
-4 and 8 the countdowns, 0x10 and 0x20 a cannonball's smoke and warning), to
+4 and 8 the countdowns, 0x20 a cannonball's splash warning), to
 find which one a fault comes from.
