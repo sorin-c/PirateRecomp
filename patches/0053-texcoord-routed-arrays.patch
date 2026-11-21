@@ -37,8 +37,40 @@ index 3dd28a0..74031c8 100644
  
          rhi_buffer_unmap(g_vs_cb);
      }
+diff --git a/src/hle/hle_d3d8.c b/src/hle/hle_d3d8.c
+index 2e39861..aa56db6 100644
+--- a/src/hle/hle_d3d8.c
++++ b/src/hle/hle_d3d8.c
+@@ -86,6 +86,7 @@ static void held_redraw(void);   /* with the overlay's switches, below */
+ 
+ void hle_d3d8_push_constants_sync(void);   /* hle_d3d8_vertex.c */
+ int  hle_d3d8_pb_walking(void);             /* hle_d3d8_vertex.c */
++void hle_d3d8_set_routed_arrays(int on);  /* hle_d3d8_state.c */
+ void hle_d3d8_apply_pending_textures(void); /* hle_d3d8_texture.c */
+ void hle_d3d8_apply_pending_constants(void); /* hle_d3d8_vertex.c */
+ void hle_d3d8_push_skip(void);
+@@ -4743,7 +4744,9 @@ static void inline_draw(void)
+             o += tsize[t] * 4u;
+         }
+     }
++    hle_d3d8_set_routed_arrays(1);   /* read from v9-v12: already routed */
+     hle_d3d8_shadow_draw(g_inline_xpt, n, buf, stride, 0);
++    hle_d3d8_set_routed_arrays(0);
+     free(buf);
+     g_inline_drawn++;
+ }
+@@ -5117,7 +5120,9 @@ static void push_replay(uint32_t start, uint32_t end)
+                 if (!stride || (n * 4u) % stride) {
+                     g_push_nostride++;
+                 } else {
++                    hle_d3d8_set_routed_arrays(1);   /* inline: attribute order */
+                     hle_d3d8_shadow_draw(prim, n * 4u / stride, data, stride, 0);
++                    hle_d3d8_set_routed_arrays(0);
+                     g_push_draws++;
+                 }
+                 prim = 0;
 diff --git a/src/hle/hle_d3d8_state.c b/src/hle/hle_d3d8_state.c
-index ff82447..6f59689 100644
+index ff82447..a7b2822 100644
 --- a/src/hle/hle_d3d8_state.c
 +++ b/src/hle/hle_d3d8_state.c
 @@ -1025,6 +1025,16 @@ static void forward_pixel_shader(IDirect3DDevice8 *dev)
@@ -58,7 +90,7 @@ index ff82447..6f59689 100644
  void hle_d3d8_shadow_apply_states(IDirect3DDevice8 *dev)
  {
      size_t i;
-@@ -1053,12 +1063,33 @@ void hle_d3d8_shadow_apply_states(IDirect3DDevice8 *dev)
+@@ -1053,12 +1063,34 @@ void hle_d3d8_shadow_apply_states(IDirect3DDevice8 *dev)
              uint32_t v = HLE_MEM32(base + 4 * ts_slot(x));
              DWORD host_value;
  
@@ -66,10 +98,11 @@ index ff82447..6f59689 100644
 +             * GPU: SetTextureState_TexCoordIndex points vertex attribute
 +             * 9 + stage at the set the stage names, and the XDK writes the
 +             * vertex arrays through that table. A draw read back from those
-+             * arrays -- a push buffer the title runs, or arrays it pushed
-+             * itself (hle_d3d8_set_routed_arrays) -- already has each stage's
-+             * set in its own attribute, and routed again here it took the
-+             * other set. Sid Meier's Pirates! draws its rooms with the
++             * arrays -- a push buffer the title runs, arrays it pushed
++             * itself, vertices written inline in attribute order
++             * (hle_d3d8_set_routed_arrays) -- already has each stage's set
++             * in its own attribute, and routed again here it took the other
++             * set. Sid Meier's Pirates! draws its rooms with the
 +             * lightmap on stage 0 at set 1 and the stone or wood on stage 1
 +             * at set 0, from vertex buffers (the tavern floor) and from
 +             * prebuilt push buffers (walls, hearth, the tables behind the
