@@ -887,6 +887,7 @@ static struct {
     int cam_have;         /* cam_prev/cam_cur hold the last two ticks' camera */
     int32_t cam_prev[3], cam_cur[3];  /* x, y, height (0x49C26C, 0x49C268, 0x49C260) */
     int32_t cam_out[3];   /* the camera drawn this frame (the camera log's) */
+    int cam_unlogged;     /* battle frames the camera log missed (no widescreen) */
 } g_btl;
 
 /* battle_fps (RECOMP_PIRATES_BATTLE_FPS): 30 (the default) as the console,
@@ -992,6 +993,11 @@ static void btl_begin_frame(void)
         }
     }
     g_btl.in_frame = 1;
+    /* The camera log is written from the HUD's edge test, which the toolkit
+     * runs only in widescreen: say so once, rather than leave it empty. */
+    if (g_cam_new_frame && ++g_btl.cam_unlogged == 300 && getenv("RECOMP_PIRATES_CAM_LOG"))
+        fprintf(stderr, "[PIRATES] RECOMP_PIRATES_CAM_LOG missed 300 battle frames: it is "
+                        "written only in widescreen (RECOMP_WIDESCREEN=1)\n");
     g_cam_new_frame = 1;
 }
 /* ---- Town scenes faster than 33 (town_fps, experimental) ----
