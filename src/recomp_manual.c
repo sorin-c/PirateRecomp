@@ -392,11 +392,16 @@ static int pirates_hud_edge(uint32_t handle, unsigned w, unsigned h, unsigned fm
      * moves). So a piece moves only where the HUD's own are: in the top
      * band the rings (y 32..82, 43..71), the bars and the counts (44..67,
      * 45..67) -- at most four digits, 16 vertices, where a town's name is 5
-     * letters or more; the compass, single quads inside 566..632 x 366..456. */
+     * letters or more; the compass, single quads centred on its middle
+     * (599, 411 in the buffer: its four pieces, 566..632 x 378..444,
+     * 572..626 x 400..420, 576..623 x 387..434, 589..611 x 366..456). A
+     * town's name is drawn in one call, 4 vertices a letter, so never as a
+     * single quad, and would also have to sit exactly on that middle. */
     if (lo_y >= 30.0f && lo_y <= 47.0f && hi_y >= 65.0f && hi_y <= 84.0f && count <= 16u &&
         hi_x - lo_x <= 130.0f)               /* top band: crew, food */
         return cx < 240.0f ? PIRATES_HUD_DX_LEFT : cx > 480.0f ? PIRATES_HUD_DX_RIGHT : 0;
-    if (count == 4u && lo_x >= 560.0f && hi_x <= 640.0f && lo_y >= 360.0f && hi_y <= 462.0f)
+    if (count == 4u && cx > 596.0f && cx < 603.0f && cy > 407.0f && cy < 414.0f &&
+        lo_x >= 560.0f && hi_x <= 640.0f && lo_y >= 360.0f && hi_y <= 462.0f)
         return PIRATES_HUD_DX_COMPASS;       /* bottom right: the compass */
     return 0;
 }
