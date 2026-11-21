@@ -261,12 +261,22 @@ static volatile int g_pirates_in_sea_frame;
 static volatile int g_pirates_battle_seen;
 static volatile uint32_t g_pirates_battle_ms;
 
+static volatile uint32_t g_pirates_ship_battle_ms;  /* a ship battle's frame wait (0xC3B4E) */
+static volatile int      g_pirates_ship_battle_seen;
+
 static int pirates_hud_scene(void)
 {
     if (g_pirates_in_sea_frame)
         return 1;
     return g_pirates_battle_seen &&
            pirates_host_ms() - g_pirates_battle_ms <= PIRATES_WORLD_RECENT_MS;
+}
+
+/* A ship battle's HUD, not a duel's or a land battle's. */
+static int pirates_hud_battle(void)
+{
+    return !g_pirates_in_sea_frame && g_pirates_ship_battle_seen &&
+           pirates_host_ms() - g_pirates_ship_battle_ms <= PIRATES_WORLD_RECENT_MS;
 }
 
 typedef int (*pirates_edge_test_t)(uint32_t handle, unsigned w, unsigned h, unsigned fmt,
@@ -290,15 +300,61 @@ static void pirates_mat_mul(float *o, const float *a, const float *b)
 #define PIRATES_HUD_DX_RIGHT   (57)     /* food ring 676 -> 720 - 35 */
 #define PIRATES_HUD_DX_COMPASS (64)     /* compass ring 678 -> 720 - 30 */
 
+/* A ship battle's HUD (pirates_hud_battle), in widescreen: drawn from the
+ * HUD sheet (256x128), the bars' fills (untextured), the font (256x256) and
+ * the flags (cloth meshes, FVF 0x152, 128x128, 60 vertices), as quads in
+ * front of the camera at their 4:3 places, the 720-wide buffer stretched
+ * 1.185 to 16:9. Moved sideways only, each group as far from its side as
+ * from the top (or bottom) on screen -- a gap of g rows is g / 1.185
+ * columns: the two bars with their flags, dots, ammo and crew counts (top
+ * gap 40 rows: 34 columns; their outer edges at x 89 and 631), the ammo
+ * ring (bottom gap 40: 34; at x 83), and the compass, bottom middle on the
+ * console, into the bottom-right corner (bottom gap 33: 28; its right edge
+ * at 393). A second enemy's bar (bottom right, x 431..631) sits just left
+ * of the compass, 10 columns clear. Text boxes and prompts in the middle
+ * rows stay where they are. */
+#define PIRATES_BTL_DX_TOP_LEFT     (-55)   /* 89 -> 34 */
+#define PIRATES_BTL_DX_TOP_RIGHT    (55)    /* 631 -> 686 */
+#define PIRATES_BTL_DX_RING         (-49)   /* 83 -> 34 */
+#define PIRATES_BTL_DX_COMPASS      (299)   /* 327..393 -> 626..692 */
+#define PIRATES_BTL_DX_BOTTOM_RIGHT (-15)   /* 631 -> 616, 10 left of the compass */
+
+static int pirates_hud_battle_dx(unsigned handle, unsigned w, unsigned h, unsigned fmt,
+                                 unsigned count, float cx, float cy, float lo_x, float hi_x)
+{
+    int sheet = handle == 0x142u && ((w == 256u && h == 128u && fmt == 0x06u) ||
+                                     (w == 0u && h == 0u) ||
+                                     (w == 256u && h == 256u && fmt == 0x0Eu));
+    int flag = handle == 0x152u && w == 128u && h == 128u && fmt == 0x0Cu && count == 60u;
+
+    if (!sheet && !flag)
+        return 0;
+    if (cy < 140.0f)                                     /* the two bars' groups */
+        return cx < 360.0f ? PIRATES_BTL_DX_TOP_LEFT : PIRATES_BTL_DX_TOP_RIGHT;
+    if (flag || cy < 330.0f)
+        return 0;                                        /* the middle: dialogs */
+    if (cx < 240.0f)
+        return PIRATES_BTL_DX_RING;
+    if (lo_x > 320.0f && hi_x < 400.0f)
+        return PIRATES_BTL_DX_COMPASS;
+    if (cx > 420.0f)
+        return PIRATES_BTL_DX_BOTTOM_RIGHT;
+    return 0;
+}
+
 static int pirates_hud_edge(uint32_t handle, unsigned w, unsigned h, unsigned fmt,
                             const void *vertices, unsigned stride, unsigned count,
                             const float *world, const float *view, const float *proj)
 {
+    int battle;
     float wv[16], m[16], lo_x = 1e9f, hi_x = -1e9f, lo_y = 1e9f, hi_y = -1e9f, cx, cy;
     unsigned i;
 
-    if (handle != 0x142u || !(fmt == 0x0Fu && w == 128u && h == 32u) &&
-        !(fmt == 0x0Eu && w == 256u && h == 256u))
+    battle = pirates_hud_battle();
+    if (!battle && (handle != 0x142u || !(fmt == 0x0Fu && w == 128u && h == 32u) &&
+                    !(fmt == 0x0Eu && w == 256u && h == 256u)))
+        return 0;
+    if (battle && handle != 0x142u && handle != 0x152u)
         return 0;
     if (!pirates_hud_scene())
         return 0;                            /* a menu, not the world */
@@ -320,6 +376,15 @@ static int pirates_hud_edge(uint32_t handle, unsigned w, unsigned h, unsigned fm
     }
     cx = (lo_x + hi_x) * 0.5f;
     cy = (lo_y + hi_y) * 0.5f;
+    if (battle && handle == 0x152u) {
+        /* A flag: the HUD's are just in front of the camera (w about 720),
+         * the ships' far out (5000 and more). */
+        const float *v = (const float *)vertices;
+        if (!(v[0] * m[3] + v[1] * m[7] + v[2] * m[11] + m[15] < 1500.0f))
+            return 0;
+    }
+    if (battle)
+        return pirates_hud_battle_dx(handle, w, h, fmt, count, cx, cy, lo_x, hi_x);
     if (cy < 100.0f)                         /* top band: crew, food */
         return cx < 240.0f ? PIRATES_HUD_DX_LEFT : cx > 480.0f ? PIRATES_HUD_DX_RIGHT : 0;
     if (cy > 360.0f && cx > 480.0f)          /* bottom right: the compass */
@@ -1420,6 +1485,10 @@ void sub_001A958A(void)
         } else {
             g_pirates_battle_ms = g_pirates_world_ms;
             g_pirates_battle_seen = 1;
+            if (ra == 0x000C3B4Eu) {     /* a ship battle */
+                g_pirates_ship_battle_ms = g_pirates_world_ms;
+                g_pirates_ship_battle_seen = 1;
+            }
         }
     }
     if (ra == 0x000C397Fu) {              /* a battle frame begins */
