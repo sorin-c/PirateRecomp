@@ -446,7 +446,7 @@ Each one, with the reason it exists:
   row "Town frame rate (experimental)": 33 (off), 60, 90, 120, 144, 240,
   unlocked (`town_fps`).
 
-- **0049-ack-wake-and-vertex-runs** (`src/kernel/xbox_memory_layout.c`,
+- **0050-ack-wake-and-vertex-runs** (`src/kernel/xbox_memory_layout.c`,
   `src/hle/hle_d3d8_vertex.c`, `src/d3d/d3d8_device.c`). Frame time, no
   change in what is drawn or how the game runs. (1) The XDK's GPU waits
   (`CDevice_KickOff`, `D3D_KickOffAndWaitForIdle`, `D3D_BlockOnTime`,
