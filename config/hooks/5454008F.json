@@ -2,6 +2,10 @@
  "comment": "Guest hooks (toolkit patch 0042): each address calls recomp_guest_hook() in src/recomp_manual.c just before that instruction.",
  "hooks": [
   {
+   "address": "0x000420A0",
+   "note": "town_fps: a town room dialog loop's Sleep(10) a pass (the governor's), Sleep(0) when faster than 33"
+  },
+  {
    "address": "0x00086078",
    "note": "sea_60: time acceleration 0x40D4C4, frame time after the 33 ms clamp"
   },

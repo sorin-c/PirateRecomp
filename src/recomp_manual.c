@@ -1514,6 +1514,19 @@ void recomp_guest_hook(uint32_t va)
             S60_MEM16(g_ebx) -= 1;
         return;
     }
+    /* The dialog loop of a town's rooms (the governor's, sub_00041xxx: one
+     * frame of the room a pass) sleeps 10 ms a pass (Sleep at 0x420A0) on
+     * top of the room's 30 ms frame wait, which the console's 33 a second
+     * hides. With town_fps faster than that the wait is passed, and the
+     * sleep -- 10 ms or more on the PC's timer -- held the governor's room
+     * to 55-60 frames a second where the tavern (another loop) ran
+     * unlocked. Its speech and its people run on the engine's clock, so
+     * the pass only yields (Sleep(0)). */
+    if (va == 0x000420A0u) {
+        if (town_active())
+            S60_MEM32(g_esp) = 0;
+        return;
+    }
     if (btl_guest_hook(va))                 /* the battle's */
         return;
 
