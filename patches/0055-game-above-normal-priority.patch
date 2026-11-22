@@ -1,8 +1,8 @@
 diff --git a/src/hle/hle_d3d8.c b/src/hle/hle_d3d8.c
-index aa56db6..94789bd 100644
+index aa56db6..b1ecd6f 100644
 --- a/src/hle/hle_d3d8.c
 +++ b/src/hle/hle_d3d8.c
-@@ -706,6 +706,22 @@ static DWORD WINAPI shadow_window_thread(LPVOID param)
+@@ -706,6 +706,26 @@ static DWORD WINAPI shadow_window_thread(LPVOID param)
                                          (int)(sizeof wide / sizeof wide[0])) > 0)
              SetWindowTextW(req->hwnd, wide);
      }
@@ -16,10 +16,14 @@ index aa56db6..94789bd 100644
 +     * (`priority` in the title's settings): 1 above normal, 0 normal. */
 +    {
 +        const char *bgp = getenv("RECOMP_WINDOW_BACKGROUND");
++        const char *pe = getenv("RECOMP_PRIORITY");
 +        int scripted = recomp_headless() || (bgp && *bgp && strcmp(bgp, "0") != 0);
++        /* A test run reads only the variable: a pirates.ini written while
++         * playing must not raise it. */
++        int on = scripted ? (pe && *pe && strcmp(pe, "0") != 0)
++                          : recomp_config_bool("RECOMP_PRIORITY", "priority", 1);
 +
-+        if (recomp_config_bool("RECOMP_PRIORITY", "priority", !scripted) &&
-+                SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS))
++        if (on && SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS))
 +            fprintf(stderr, "[STARTUP] above normal priority (RECOMP_PRIORITY=0 for normal)\n");
 +    }
      if (!req->hwnd)
