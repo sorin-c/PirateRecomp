@@ -1,0 +1,13 @@
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index 5a86361..a6f655b 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -75,6 +75,8 @@ static const Item ITEMS[] = {
+ static const Item TITLE_ITEMS[] = {
+     { "Movies",              "skip_intro",       NULL,                   LIVE_NONE, 3,
+       { "1", "intro", "0" }, { "skip all", "skip intro", "play all" } },
++    { "Legal screen",        "skip_legal",       "RECOMP_PIRATES_SKIP_LEGAL", LIVE_NONE, 2,
++      { "1", "0" }, { "skip", "show" } },
+     { "Sound",               "mute",             "RECOMP_MUTE",          LIVE_NONE, 2,
+       { "0", "1" }, { "on", "off" } },
+     { "Sailing frame rate (experimental)", "sea_fps", "RECOMP_PIRATES_SEA_FPS", LIVE_TITLE, 7,

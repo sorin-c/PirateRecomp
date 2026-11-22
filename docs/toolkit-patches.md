@@ -515,3 +515,7 @@ Each one, with the reason it exists:
   floor's lightmap with the tiled stone coordinates (a dark, striped floor,
   the carpet missing); now the tavern, the nation tables and the governor's
   room match xemu.
+
+- **0054-settings-menu-legal-screen** (`src/hle/hle_settings_menu.c`). The
+  F2 row "Legal screen": skip, show (`skip_legal`), after "Movies". Applies
+  at the next start.

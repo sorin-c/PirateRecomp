@@ -23,6 +23,11 @@ static const struct {
       "# and the story movies of a new game); intro skips only the logos and\n"
       "# the title movie; 0 plays them all, as the disc does.\n"
       "#                                         [RECOMP_PIRATES_SKIP_INTRO]\n" },
+    { "skip_legal", "1",
+      "# The legal screen at boot (the copyright lines, the ESRB notice and the\n"
+      "# Bink and Miles logos): 1 skips it, 0 shows it as the disc does (five\n"
+      "# seconds, longer if the main menu is still loading).\n"
+      "#                                         [RECOMP_PIRATES_SKIP_LEGAL]\n" },
     { "sea_fps", "30",
       "# Experimental: the frame rate while sailing, at the game's own speed:\n"
       "# 30 (the default) sails as the console does (frame interpolation, if\n"
