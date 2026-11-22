@@ -1,0 +1,99 @@
+diff --git a/src/d3d/d3d8_menu.cpp b/src/d3d/d3d8_menu.cpp
+index 24b3210..b8dc652 100644
+--- a/src/d3d/d3d8_menu.cpp
++++ b/src/d3d/d3d8_menu.cpp
+@@ -11,8 +11,8 @@
+  * drawn and reported back as actions.
+  *
+  * The look: a dark sea-blue panel with brass, tabs along the top, the rows
+- * on the left with "applies now" or "after restart" under each, and the
+- * selected row's description on the right.
++ * on the left, and the selected row's description on the right, which is
++ * also where a setting that needs a restart says so.
+  *
+  * Drawing goes through rhi.h like the rest of the renderer, so it is the
+  * same on D3D11 and Vulkan: one dynamic vertex and index buffer, the font
+@@ -102,7 +102,6 @@ const Rgba kBrassDim  = hex(0x9C7C43);
+ const Rgba kText      = hex(0xEBE4D4);
+ const Rgba kBodyText  = hex(0xCFD6DC);
+ const Rgba kMuted     = hex(0x9AA6B2);
+-const Rgba kNow       = hex(0x7FC8A9);
+ const Rgba kRestart   = hex(0xE0A66A);
+ const Rgba kExp       = hex(0xC79BE0);
+ const Rgba kWarn      = hex(0xE5736A);
+@@ -509,17 +508,21 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
+         if (sel)
+             dl->AddRect(ImVec2(b.x0, b.y0), ImVec2(b.x1, b.y1), col(kBrass), 6 * u, 0, 1.5f * u);
+ 
+-        /* Label and its tags. */
+-        text(g.body_bold, b.x0 + 12 * u, y + 8 * u, kText, r.label);
++        /* Label and its tags. When it takes effect is not a tag: the
++         * description says when a restart is needed. A row with no tag
++         * shows its label centred. */
+         {
+-            float tx2 = b.x0 + 12 * u, ty = y + 32 * u;
+             struct { int bit; const char *s; Rgba c; } tags[] = {
+-                { D3D8_MENU_TAG_NOW, "Applies now", kNow },
+-                { D3D8_MENU_TAG_RESTART, "After restart", kRestart },
+                 { D3D8_MENU_TAG_EXPERIMENTAL, "Experimental", kExp },
+                 { D3D8_MENU_TAG_CHANGED, "Changed", kBrass },
+                 { D3D8_MENU_TAG_ENV, "Set by environment", kWarn },
+             };
++            bool any = false;
++            for (auto &t : tags)
++                if (r.tags & t.bit) any = true;
++            text(g.body_bold, b.x0 + 12 * u,
++                 any ? y + 8 * u : y + (row_h - g.body_bold->FontSize) * 0.5f, kText, r.label);
++            float tx2 = b.x0 + 12 * u, ty = y + 32 * u;
+             for (auto &t : tags) {
+                 if (!(r.tags & t.bit)) continue;
+                 text(g.small, tx2, ty, t.c, t.s);
+@@ -587,7 +590,7 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
+         if (m.info_text[0])
+             iy += text_wrapped(g.body, ix, iy, iw, kBodyText, m.info_text) + 14 * u;
+         struct { const char *k, *v; } dl_rows[] = {
+-            { "Default", m.info_default }, { "Takes effect", m.info_when }, { "Options", m.info_options },
++            { "Default", m.info_default }, { "Options", m.info_options },
+         };
+         const float kw = 100 * u;
+         for (auto &d : dl_rows) {
+@@ -595,6 +598,11 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
+             text(g.small, ix, iy, kMuted, d.k);
+             iy += text_wrapped(g.small, ix + kw, iy, iw - kw, kText, d.v) + 6 * u;
+         }
++        if (m.info_when[0]) {
++            /* Only a setting that needs a restart has one. */
++            iy += 8 * u;
++            iy += text_wrapped(g.small_bold, ix, iy, iw, kRestart, m.info_when) + 6 * u;
++        }
+         if (m.warning[0]) {
+             iy += 8 * u;
+             text_wrapped(g.small, ix, iy, iw, kWarn, m.warning);
+diff --git a/src/d3d/d3d8_overlay.h b/src/d3d/d3d8_overlay.h
+index 09905a9..ed17e9c 100644
+--- a/src/d3d/d3d8_overlay.h
++++ b/src/d3d/d3d8_overlay.h
+@@ -99,7 +99,7 @@ typedef struct {
+     char info_title[48];
+     char info_text[400];
+     char info_default[40];
+-    char info_when[48];
++    char info_when[48];            /* set only when a restart is needed */
+     char info_options[160];
+     char status[96];              /* e.g. "2 changes apply at the next start" */
+     char warning[112];            /* e.g. the settings file could not be written */
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index d554966..4a8112f 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -603,8 +603,8 @@ static void publish(void)
+         snprintf(m.info_title, sizeof m.info_title, "%s", it->label);
+         snprintf(m.info_text, sizeof m.info_text, "%s", it->help);
+         snprintf(m.info_default, sizeof m.info_default, "%s", it->names[default_index(it)]);
+-        snprintf(m.info_when, sizeof m.info_when, "%s",
+-                 it->live == LIVE_NONE ? "Next time the game starts" : "At once");
++        if (it->live == LIVE_NONE)
++            snprintf(m.info_when, sizeof m.info_when, "Restart the game for this to take effect.");
+         for (k = 0; k < it->n && o < (int)sizeof m.info_options; k++)
+             o += snprintf(m.info_options + o, sizeof m.info_options - (size_t)o, "%s%s",
+                           k ? ", " : "", it->names[k]);
