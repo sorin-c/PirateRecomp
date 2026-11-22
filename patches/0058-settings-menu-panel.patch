@@ -96,10 +96,10 @@ index 55009c0..fdc738b 100644
  # Vulkan loader or DXC: volk finds the loader and rhi_vulkan_dxc.cpp finds
 diff --git a/src/d3d/d3d8_menu.cpp b/src/d3d/d3d8_menu.cpp
 new file mode 100644
-index 0000000..aff5a99
+index 0000000..24b3210
 --- /dev/null
 +++ b/src/d3d/d3d8_menu.cpp
-@@ -0,0 +1,849 @@
+@@ -0,0 +1,874 @@
 +/*
 + * d3d8_menu.cpp -- the in-game settings menu, drawn as a panel.
 + *
@@ -170,12 +170,16 @@ index 0000000..aff5a99
 +    g_act_count++;
 +}
 +
-+/* The pointer, written by the window's thread. */
-+volatile int g_ptr_x = -1, g_ptr_y = -1, g_ptr_inside;
-+volatile int g_ptr_down;
-+volatile unsigned g_ptr_presses;        /* left-button downs so far */
-+volatile int g_ptr_press_x, g_ptr_press_y;
-+volatile int g_wheel;                   /* WHEEL_DELTA units not yet used */
++/* The pointer, written by the window's thread and read by the presenting
++ * one, both under g_lock; layout_and_draw takes one snapshot of it. */
++struct Pointer {
++    int x = -1, y = -1, inside = 0;
++    int down = 0;
++    unsigned presses = 0;               /* left-button downs so far */
++    int press_x = 0, press_y = 0;       /* where the last one was */
++    int wheel = 0;                      /* WHEEL_DELTA units not yet used */
++};
++Pointer g_ptr;                          /* under g_lock */
 +
 +/* ---- the look ----------------------------------------------------------- */
 +
@@ -492,20 +496,24 @@ index 0000000..aff5a99
 +    const float u = U;
 +    const float x0 = px0, y0 = py0, x1 = px0 + PANEL_W * u, y1 = py0 + PANEL_H * u;
 +
-+    /* The pointer, as of this frame. */
-+    const bool ptr_in = g_ptr_inside != 0;
-+    const float mx = (float)g_ptr_x, my = (float)g_ptr_y;
-+    unsigned presses = g_ptr_presses;
++    /* The pointer, as of this frame: one consistent snapshot. */
++    Pointer p;
++    {
++        std::lock_guard<std::mutex> hold(g_lock);
++        p = g_ptr;
++        g_ptr.wheel = 0;
++    }
++    const bool ptr_in = p.inside != 0;
++    const float mx = (float)p.x, my = (float)p.y;
 +    bool clicked = false;
 +    float cx = 0, cy = 0;
-+    if (presses != g_seen_presses) {
++    if (p.presses != g_seen_presses) {
 +        clicked = true;
-+        cx = (float)g_ptr_press_x;
-+        cy = (float)g_ptr_press_y;
-+        g_seen_presses = presses;
++        cx = (float)p.press_x;
++        cy = (float)p.press_y;
++        g_seen_presses = p.presses;
 +    }
-+    int wheel = g_wheel;
-+    g_wheel = 0;                        /* a notch landing in between is lost: harmless */
++    const int wheel = p.wheel;
 +
 +    /* Dim the game, then the panel. */
 +    dl->AddRectFilled(ImVec2(0, 0), ImVec2(W, H), col(kDim));
@@ -754,20 +762,33 @@ index 0000000..aff5a99
 +    return true;
 +}
 +
-+void submit(ImDrawData *dd, RhiView *out, unsigned w, unsigned h)
++/* A map that failed: this frame falls back to the text panel. Said once. */
++bool map_failed(const char *what)
 +{
-+    if (!dd || dd->TotalVtxCount <= 0) return;
++    static bool said;
++    if (!said) {
++        said = true;
++        fprintf(stderr, "D3D8 menu: mapping %s failed; this frame shows the text panel\n", what);
++        fflush(stderr);
++    }
++    return false;
++}
++
++/* True when the panel was drawn. */
++bool submit(ImDrawData *dd, RhiView *out, unsigned w, unsigned h)
++{
++    if (!dd || dd->TotalVtxCount <= 0) return false;
 +    if (!ensure_buffer(&g.vb, &g.vb_cap, (uint32_t)dd->TotalVtxCount, sizeof(ImDrawVert), RHI_BIND_VERTEX) ||
 +        !ensure_buffer(&g.ib, &g.ib_cap, (uint32_t)dd->TotalIdxCount, sizeof(ImDrawIdx), RHI_BIND_INDEX)) {
 +        gpu_fail("the vertex buffers");
-+        return;
++        return false;
 +    }
 +    ImDrawVert *vtx = (ImDrawVert *)rhi_buffer_map(g.vb, RHI_MAP_WRITE_DISCARD);
 +    ImDrawIdx *idx = (ImDrawIdx *)rhi_buffer_map(g.ib, RHI_MAP_WRITE_DISCARD);
 +    if (!vtx || !idx) {
 +        if (vtx) rhi_buffer_unmap(g.vb);
 +        if (idx) rhi_buffer_unmap(g.ib);
-+        return;
++        return map_failed("the vertex buffers");
 +    }
 +    for (int n = 0; n < dd->CmdListsCount; n++) {
 +        const ImDrawList *cl = dd->CmdLists[n];
@@ -780,7 +801,7 @@ index 0000000..aff5a99
 +    rhi_buffer_unmap(g.ib);
 +
 +    float *c = (float *)rhi_buffer_map(g.cb, RHI_MAP_WRITE_DISCARD);
-+    if (!c) return;
++    if (!c) return map_failed("the constant buffer");
 +    c[0] = 2.0f / (float)w;
 +    c[1] = -2.0f / (float)h;
 +    c[2] = -1.0f;
@@ -833,6 +854,7 @@ index 0000000..aff5a99
 +     * leave the whole target open for anything drawn after this. */
 +    RhiRect all = { 0, 0, (int32_t)w, (int32_t)h };
 +    rhi_set_scissor(&all);
++    return true;
 +}
 +
 +} /* namespace */
@@ -863,24 +885,27 @@ index 0000000..aff5a99
 +
 +extern "C" void d3d8_menu_pointer(int x, int y, int in)
 +{
-+    g_ptr_x = x;
-+    g_ptr_y = y;
-+    g_ptr_inside = in;
++    std::lock_guard<std::mutex> hold(g_lock);
++    g_ptr.x = x;
++    g_ptr.y = y;
++    g_ptr.inside = in;
 +}
 +
 +extern "C" void d3d8_menu_pointer_button(int down)
 +{
-+    if (down && !g_ptr_down) {
-+        g_ptr_press_x = g_ptr_x;
-+        g_ptr_press_y = g_ptr_y;
-+        g_ptr_presses = g_ptr_presses + 1;
++    std::lock_guard<std::mutex> hold(g_lock);
++    if (down && !g_ptr.down) {
++        g_ptr.press_x = g_ptr.x;
++        g_ptr.press_y = g_ptr.y;
++        g_ptr.presses++;
 +    }
-+    g_ptr_down = down;
++    g_ptr.down = down;
 +}
 +
 +extern "C" void d3d8_menu_pointer_wheel(int delta)
 +{
-+    g_wheel = g_wheel + delta;
++    std::lock_guard<std::mutex> hold(g_lock);
++    g_ptr.wheel += delta;
 +}
 +
 +extern "C" int d3d8_menu_present(RhiView *out, unsigned w, unsigned h,
@@ -890,7 +915,7 @@ index 0000000..aff5a99
 +    {
 +        std::lock_guard<std::mutex> hold(g_lock);
 +        if (!g_menu_set) {
-+            g_seen_presses = g_ptr_presses;     /* a click before it opened is not one in it */
++            g_seen_presses = g_ptr.presses;     /* a click before it opened is not one in it */
 +            return 0;
 +        }
 +        m = g_menu;
@@ -924,9 +949,9 @@ index 0000000..aff5a99
 +
 +    RhiOutputState saved;
 +    rhi_output_save(&saved);
-+    submit(ImGui::GetDrawData(), out, w, h);
++    bool drawn = submit(ImGui::GetDrawData(), out, w, h);
 +    rhi_output_restore(&saved);
-+    return g.failed ? 0 : 1;
++    return drawn && !g.failed ? 1 : 0;
 +}
 +
 +extern "C" void d3d8_menu_shutdown(void)
@@ -1237,7 +1262,7 @@ index 2cd92b5..f7bef41 100644
   * person and any script: Start+Back on port 1 opens or closes the menu, and
   * while it is open (or the combination is still held) the sample is the
 diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
-index a6f655b..22c303c 100644
+index a6f655b..18b7c24 100644
 --- a/src/hle/hle_settings_menu.c
 +++ b/src/hle/hle_settings_menu.c
 @@ -2,21 +2,27 @@
@@ -1277,19 +1302,44 @@ index a6f655b..22c303c 100644
   * reaches the game, and the Start+Back that opened or closed it is held back
   * from the game until both are released.
   */
-@@ -28,8 +34,11 @@
+@@ -28,8 +34,36 @@
  #include "hle_settings.h"
  #include "input_model.h"
  #include "input_host.h"
 +#include "input_bindings.h"
  #include "recomp_config.h"
 +#include "d3d8_overlay.h"
- 
++
++#if defined(_WIN32)
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#include <windows.h>
++#else
++#include <pthread.h>
++#endif
++
 +extern void xbox_HostExit(const char *why);
+ 
++/* One lock over the whole menu: pad input arrives on the input thread, the
++ * keyboard and the pointer's actions on the presenting thread, and both
++ * change the same selection and rows. Every public entry takes it; the
++ * static functions below run with it held. Quitting is done after it is
++ * released (xbox_HostExit does not come back). */
++#if defined(_WIN32)
++static SRWLOCK g_menu_lock = SRWLOCK_INIT;
++static void menu_lock(void)   { AcquireSRWLockExclusive(&g_menu_lock); }
++static void menu_unlock(void) { ReleaseSRWLockExclusive(&g_menu_lock); }
++#else
++static pthread_mutex_t g_menu_lock = PTHREAD_MUTEX_INITIALIZER;
++static void menu_lock(void)   { pthread_mutex_lock(&g_menu_lock); }
++static void menu_unlock(void) { pthread_mutex_unlock(&g_menu_lock); }
++#endif
++static int g_quit;                       /* Quit game chosen: exit once unlocked */
  
  enum {
      PAD_UP = 0x0001u, PAD_DOWN = 0x0002u, PAD_LEFT = 0x0004u, PAD_RIGHT = 0x0008u,
-@@ -38,81 +47,147 @@ enum {
+@@ -38,81 +72,147 @@ enum {
  
  /* LIVE_TITLE: the title reads the key itself while it runs
   * (recomp_config_lookup returns what the menu set), so it applies at once. */
@@ -1377,22 +1427,6 @@ index a6f655b..22c303c 100644
 +    { TAB_DISPLAY, "Frame rate by scene", "Towns and rooms", "town_fps", "RECOMP_PIRATES_TOWN_FPS", LIVE_TITLE, 1, 1, 7,
 +      FPS_VALS, { "33 (off)", "60", "90", "120", "144", "240", "Unlocked" },
 +      "Taverns, the governor's mansion and the other rooms in a town. 33 is the original pacing." },
-+
-+    /* Game: the title's own lines */
-+    { TAB_GAME, "Start-up", "Movies", "skip_intro", "RECOMP_PIRATES_SKIP_INTRO", LIVE_NONE, 1, 0, 3,
-+      { "1", "intro", "0" }, { "Skip all", "Skip intro", "Play all" },
-+      "Which of the game's movies play. Skip intro skips the logos and the title movie and "
-+      "still plays the story movies." },
-+    { TAB_GAME, "Start-up", "Legal screen", "skip_legal", "RECOMP_PIRATES_SKIP_LEGAL", LIVE_NONE, 1, 0, 2,
-+      { "1", "0" }, { "Skip", "Show" },
-+      "The copyright, ESRB and middleware notice shown when the game starts." },
-+    { TAB_GAME, "Sound", "Sound", "mute", "RECOMP_MUTE", LIVE_NONE, 1, 0, 2,
-+      { "0", "1" }, { "On", "Off" },
-+      "Turns all of the game's sound off." },
-+    { TAB_GAME, "System", "Game priority", "priority", "RECOMP_PRIORITY", LIVE_NONE, 0, 0, 2,
-+      { "0", "1" }, { "Normal", "Above normal" },
-+      "Gives the game more processor time than programs in the background, which keeps "
-+      "sailing smooth while something else is busy." },
  
 -/* The title's own lines, if its settings header has them: movies and sound.
 - * Shown only when the file (or the defaults) know the key. */
@@ -1412,6 +1446,22 @@ index a6f655b..22c303c 100644
 -    { "Town frame rate (experimental)", "town_fps", "RECOMP_PIRATES_TOWN_FPS", LIVE_TITLE, 7,
 -      { "30", "60", "90", "120", "144", "240", "0" },
 -      { "33 (off)", "60", "90", "120", "144", "240", "unlocked" } },
++    /* Game: the title's own lines */
++    { TAB_GAME, "Start-up", "Movies", "skip_intro", "RECOMP_PIRATES_SKIP_INTRO", LIVE_NONE, 1, 0, 3,
++      { "1", "intro", "0" }, { "Skip all", "Skip intro", "Play all" },
++      "Which of the game's movies play. Skip intro skips the logos and the title movie and "
++      "still plays the story movies." },
++    { TAB_GAME, "Start-up", "Legal screen", "skip_legal", "RECOMP_PIRATES_SKIP_LEGAL", LIVE_NONE, 1, 0, 2,
++      { "1", "0" }, { "Skip", "Show" },
++      "The copyright, ESRB and middleware notice shown when the game starts." },
++    { TAB_GAME, "Sound", "Sound", "mute", "RECOMP_MUTE", LIVE_NONE, 1, 0, 2,
++      { "0", "1" }, { "On", "Off" },
++      "Turns all of the game's sound off." },
++    { TAB_GAME, "System", "Game priority", "priority", "RECOMP_PRIORITY", LIVE_NONE, 0, 0, 2,
++      { "0", "1" }, { "Normal", "Above normal" },
++      "Gives the game more processor time than programs in the background, which keeps "
++      "sailing smooth while something else is busy." },
++
 +    /* Controls */
 +    { TAB_CONTROLS, "Pad", "Vibration strength", "vibration", "RECOMP_VIBRATION", LIVE_VIBRATION, 0, 0, 7,
 +      { "0", "25", "50", "75", "100", "125", "150" },
@@ -1485,7 +1535,7 @@ index a6f655b..22c303c 100644
  }
  
  /* The value shown: what is in effect for a live setting, the file's (or the
-@@ -126,10 +201,8 @@ static int current_index(const Item *it)
+@@ -126,10 +226,8 @@ static int current_index(const Item *it)
      switch (it->live) {
      case LIVE_CAP:
          v = hle_frame_cap();
@@ -1498,7 +1548,7 @@ index a6f655b..22c303c 100644
      case LIVE_INTERP:
          snprintf(buf, sizeof buf, "%d", hle_frame_interp());
          v = buf;
-@@ -140,35 +213,111 @@ static int current_index(const Item *it)
+@@ -140,35 +238,112 @@ static int current_index(const Item *it)
      case LIVE_FULLSCREEN:
          v = hle_fullscreen() ? "1" : "0";
          break;
@@ -1546,10 +1596,11 @@ index a6f655b..22c303c 100644
 +                 rhi_backend_name() ? rhi_backend_name() : "-");
 +        ROW(D3D8_MENU_ROW_INFO, -1, "Settings file");
 +        if (path) {
-+            const char *base = strrchr(path, '\\');
-+            const char *b2 = strrchr(path, '/');
-+            if (b2 > base) base = b2;
-+            snprintf(g_rows[g_row_count - 1].value, sizeof g_rows[0].value, "%s", base ? base + 1 : path);
++            const char *base = path, *c;
++            for (c = path; *c; c++)          /* after the last separator of either kind */
++                if (*c == '\\' || *c == '/')
++                    base = c + 1;
++            snprintf(g_rows[g_row_count - 1].value, sizeof g_rows[0].value, "%s", base);
 +        } else {
 +            snprintf(g_rows[g_row_count - 1].value, sizeof g_rows[0].value, "none");
 +        }
@@ -1622,7 +1673,7 @@ index a6f655b..22c303c 100644
      }
      fprintf(stderr, "[MENU] %s = %s%s%s\n", it->key, it->vals[i],
              it->live == LIVE_NONE ? " (at the next start)" : "",
-@@ -176,6 +325,56 @@ static void change(int dir)
+@@ -176,68 +351,329 @@ static void change(int dir)
      fflush(stderr);
  }
  
@@ -1652,7 +1703,14 @@ index a6f655b..22c303c 100644
 +    fflush(stderr);
 +    g_open = 0;
 +    d3d8_menu_set(NULL);
-+    xbox_HostExit("Quit game, from the settings menu");
++    g_quit = 1;                          /* the caller exits, unlocked */
++}
++
++/* After a public entry has released the lock. */
++static void quit_if_asked(void)
++{
++    if (g_quit)
++        xbox_HostExit("Quit game, from the settings menu");
 +}
 +
 +/* Up and down: through the settings, then onto the footer's buttons. */
@@ -1679,7 +1737,10 @@ index a6f655b..22c303c 100644
  int hle_settings_menu_open(void)
  {
      return g_open;
-@@ -185,39 +384,179 @@ void hle_settings_menu_toggle(void)
+ }
+ 
+-void hle_settings_menu_toggle(void)
++static void toggle(void)
  {
      build_list();
      g_open = !g_open;
@@ -1696,9 +1757,17 @@ index a6f655b..22c303c 100644
      fflush(stderr);
  }
  
+-const char *hle_settings_menu_text(void)
++void hle_settings_menu_toggle(void)
++{
++    menu_lock();
++    toggle();
++    menu_unlock();
++}
++
 +/* The text panel, for when the renderer's own panel cannot be drawn: every
 + * setting in one list, the selected one marked. */
- const char *hle_settings_menu_text(void)
++static const char *menu_text(void)
  {
      int i, o = 0, w = 20;
  
@@ -1748,6 +1817,19 @@ index a6f655b..22c303c 100644
      return g_text;
  }
  
+-void hle_settings_menu_keys(int dy, int dx, int ok, int back)
++/* The caller gets the text as it is now; a later change rewrites it, which
++ * is how the text panel always worked. */
++const char *hle_settings_menu_text(void)
++{
++    const char *t;
++
++    menu_lock();
++    t = menu_text();
++    menu_unlock();
++    return t;
++}
++
 +/* What the pointer did over the panel, applied as keys would be. */
 +static void take_pointer_actions(void)
 +{
@@ -1774,7 +1856,7 @@ index a6f655b..22c303c 100644
 +            break;
 +        case D3D8_MENU_ACT_BUTTON:
 +            if (a.index == 0)
-+                hle_settings_menu_toggle();
++                toggle();
 +            else if (a.index == 1)
 +                quit_game();
 +            return;
@@ -1782,7 +1864,7 @@ index a6f655b..22c303c 100644
 +    }
 +}
 +
-+void hle_settings_menu_publish(void)
++static void publish(void)
 +{
 +    static D3D8Menu m;
 +    int i;
@@ -1867,13 +1949,24 @@ index a6f655b..22c303c 100644
 +                 "Could not save the settings file: the last change lasts until you quit.");
 +    d3d8_menu_set(&m);
 +    /* The text panel too, drawn only if the panel above cannot be. */
-+    d3d8_overlay_set_menu(hle_settings_menu_text());
++    d3d8_overlay_set_menu(menu_text());
 +}
 +
- void hle_settings_menu_keys(int dy, int dx, int ok, int back)
++void hle_settings_menu_publish(void)
++{
++    menu_lock();
++    publish();
++    menu_unlock();
++    quit_if_asked();
++}
++
++static void keys(int dy, int dx, int ok, int back)
  {
      if (!g_open)
-@@ -227,17 +566,37 @@ void hle_settings_menu_keys(int dy, int dx, int ok, int back)
+         return;
+     if (back) {
+-        hle_settings_menu_toggle();
++        toggle();
          return;
      }
      if (dy)
@@ -1891,8 +1984,9 @@ index a6f655b..22c303c 100644
 +    }
      if (ok) {
 -        if (g_sel == g_count)
+-            hle_settings_menu_toggle();
 +        if (g_button == 0)
-             hle_settings_menu_toggle();
++            toggle();
 +        else if (g_button == 1)
 +            quit_game();
          else
@@ -1900,22 +1994,43 @@ index a6f655b..22c303c 100644
      }
  }
  
-+void hle_settings_menu_tab(int d)
++void hle_settings_menu_keys(int dy, int dx, int ok, int back)
++{
++    menu_lock();
++    keys(dy, dx, ok, back);
++    menu_unlock();
++    quit_if_asked();
++}
++
++static void tab_step(int d)
 +{
 +    if (g_open && d)
 +        select_tab(g_tab + (d < 0 ? -1 : 1));
 +}
 +
++void hle_settings_menu_tab(int d)
++{
++    menu_lock();
++    tab_step(d);
++    menu_unlock();
++}
++
 +void hle_settings_menu_default(void)
 +{
++    menu_lock();
 +    if (g_open)
 +        reset_default();
++    menu_unlock();
 +}
 +
  static long now_ms(void)
  {
      return (long)((double)clock() * 1000.0 / CLOCKS_PER_SEC);
-@@ -256,6 +615,11 @@ void hle_settings_menu_input(unsigned port, RecompInputGamepad *g)
+@@ -253,9 +689,15 @@ void hle_settings_menu_input(unsigned port, RecompInputGamepad *g)
+ 
+     if (!g)
+         return;
++    menu_lock();
      if (port == 0) {
          unsigned b = g->buttons, pressed = b & ~g_prev_buttons;
          int a = g->analog_buttons[HOST_ANALOG_A] > 30, bb = g->analog_buttons[HOST_ANALOG_B] > 30;
@@ -1927,17 +2042,28 @@ index a6f655b..22c303c 100644
          int stick_y = g->thumb_ly > 16000 ? -1 : g->thumb_ly < -16000 ? 1 : 0;
          int stick_x = g->thumb_lx > 16000 ? 1 : g->thumb_lx < -16000 ? -1 : 0;
          static int prev_sy, prev_sx;
-@@ -273,6 +637,9 @@ void hle_settings_menu_input(unsigned port, RecompInputGamepad *g)
+@@ -263,7 +705,7 @@ void hle_settings_menu_input(unsigned port, RecompInputGamepad *g)
+ 
+         build_list();
+         if ((b & combo) == combo && (pressed & combo) && !g_swallow) {
+-            hle_settings_menu_toggle();
++            toggle();
+             g_swallow = 1;
+             held_bits = 0;
+         } else if (g_open && !g_swallow) {
+@@ -273,7 +715,10 @@ void hle_settings_menu_input(unsigned port, RecompInputGamepad *g)
  
              if (!dy && stick_y != prev_sy) dy = stick_y;
              if (!dx && stick_x != prev_sx) dx = stick_x;
-+            if (lb && !g_prev_lb) hle_settings_menu_tab(-1);
-+            if (rb && !g_prev_rb) hle_settings_menu_tab(1);
-+            if (y && !g_prev_y) hle_settings_menu_default();
-             hle_settings_menu_keys(dy, dx, a && !g_prev_a, back);
+-            hle_settings_menu_keys(dy, dx, a && !g_prev_a, back);
++            if (lb && !g_prev_lb) tab_step(-1);
++            if (rb && !g_prev_rb) tab_step(1);
++            if (y && !g_prev_y && g_open) reset_default();
++            keys(dy, dx, a && !g_prev_a, back);
              if (back)
                  g_swallow = 1;           /* Back (or Start) still down: not the game's */
-@@ -297,6 +664,9 @@ void hle_settings_menu_input(unsigned port, RecompInputGamepad *g)
+         } else if (!g_open && !g_swallow && (pressed & combo)) {
+@@ -297,9 +742,14 @@ void hle_settings_menu_input(unsigned port, RecompInputGamepad *g)
          g_prev_buttons = b;
          g_prev_a = a;
          g_prev_b = bb;
@@ -1947,6 +2073,11 @@ index a6f655b..22c303c 100644
          prev_sy = stick_y;
          prev_sx = stick_x;
      }
+     if (g_open || g_swallow)
+         memset(g, 0, sizeof *g);         /* the game sees nothing pressed */
++    menu_unlock();
++    quit_if_asked();
+ }
 diff --git a/src/input/input_bindings.c b/src/input/input_bindings.c
 index 014fbf4..5912566 100644
 --- a/src/input/input_bindings.c
