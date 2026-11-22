@@ -37,6 +37,7 @@ folder, so a run never touches `game\UDATA` or your real saves.
 | `capbetween.py` | Every chunk a `.d3dcap` capture recorded between two draws, states named: what changed state between them. |
 | `xpu.py` | Decode the game's compiled pixel shaders (`.xpu`): texture modes, combiner count. |
 | `governor.ps1` | Drives a new career (English, default name) into the start town's governor's welcome, for the governor-scene freeze. |
+| `indoor-lighting.ps1`, `indoor_compare.py` | Regression test for room lighting: a new career's nation-choice tables and the St. Kitts tavern, headless and 4:3, compared region by region (brightness, and a coarse brightness pattern) with xemu's pictures of the same screens. Exit code 1 when they differ. The xemu references are pictures of the game, so they live beside the repository (`..\fixtures\xemu-indoor\tavern.png` and `nation.png`, or `-Reference` / `PIRATES_INDOOR_REF`). See "Before merging a renderer change". |
 | `duel.ps1`, `townsneak.ps1` | Start the garden sword duel or the town sneak from the debug MINIGAMES menu (`RECOMP_PIRATES_MINIGAMES=1`). |
 | `vs-battle.ps1` | Drives a fresh start into a VS MODE ship battle. |
 | `xdis.py`, `findimm.py`, `secxrefs.py` | Disassemble a guest address, find code using a constant, count code references into a section (capstone). |
@@ -48,4 +49,16 @@ A typical session:
 .\drive.ps1 wait 36; .\drive.ps1 press start; .\drive.ps1 wait 4; .\drive.ps1 press a
 .\drive.ps1 shot signup
 .\drive.ps1 stop
+```
+
+## Before merging a renderer change
+
+A change to `src/d3d`, `src/hle/hle_d3d8*` or a toolkit patch touching them
+runs `indoor-lighting.ps1` against the PR's build first. Room lighting broke
+three times in a week (patches 0036 and 0049, then a stale play build), and
+the test fails on each of them (`indoor_compare.py` has the numbers).
+
+```
+$env:PIRATES_TEST_EXE = "<the PR's build>\pirates_recomp.exe"
+.\indoor-lighting.ps1
 ```
