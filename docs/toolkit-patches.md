@@ -539,3 +539,10 @@ Each one, with the reason it exists:
   and the governor's wig came out as one smeared texel (the governor's face
   covered by his beard texture). Such a stage now reads the attribute of an
   earlier stage that names the same set; under a declaration nothing changes.
+
+- **0059-builder-log-path-first** (`tools/builder/src/main.rs`). When a step
+  of the player's build fails, the launcher shows the builder's message in a
+  box of a few lines. The message ended with the whole log's path after 25
+  lines of output, so the box cut it off and players could not tell where the
+  log was. The path now comes first: `The whole log is in
+  %LOCALAPPDATA%\xboxrecomp\builds\<title id>\build.log`, then the last lines.
