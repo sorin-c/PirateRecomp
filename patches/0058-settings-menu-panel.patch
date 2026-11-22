@@ -1,0 +1,2197 @@
+diff --git a/src/config/recomp_config.c b/src/config/recomp_config.c
+index 0c26c2f..7dc674a 100644
+--- a/src/config/recomp_config.c
++++ b/src/config/recomp_config.c
+@@ -461,6 +461,41 @@ void recomp_settings_defaults(RecompSettings *s)
+     s->syslink_upnp      = 1;
+ }
+ 
++/* The value a key has when the settings file does not say: the toolkit's
++ * default (recomp_settings_defaults) for its own display keys, the title's
++ * (recomp_title_settings) for the title's, NULL for a key neither knows.
++ * The in-game settings menu shows it and resets to it. */
++const char *recomp_config_default(const char *key)
++{
++    static char buf[32];
++    RecompSettings d;
++    int i;
++
++    if (!key)
++        return NULL;
++#if defined(RECOMP_TITLE_SETTINGS_HEADER)
++    for (i = 0; i < RECOMP_TITLE_SETTINGS_COUNT; i++)
++        if (strcmp(recomp_title_settings[i].key, key) == 0)
++            return recomp_title_settings[i].def;
++#endif
++    recomp_settings_defaults(&d);
++    i = -1;
++    if (strcmp(key, "resolution_scale") == 0)  i = d.resolution_scale;
++    else if (strcmp(key, "widescreen") == 0)   i = d.widescreen;
++    else if (strcmp(key, "anisotropy") == 0)   i = d.anisotropy;
++    else if (strcmp(key, "fps_overlay") == 0)  i = d.fps_overlay;
++    else if (strcmp(key, "fullscreen") == 0)   i = d.fullscreen;
++    else if (strcmp(key, "vrr") == 0)          i = d.vrr;
++    else if (strcmp(key, "frame_interp") == 0) i = d.frame_interp < 1 ? 1 : d.frame_interp;
++    else if (strcmp(key, "frame_cap") == 0)    return "adaptive";
++    else if (strcmp(key, "priority") == 0)     return "1";
++    else if (strcmp(key, "vibration") == 0)    return "100";
++    if (i < 0)
++        return NULL;
++    snprintf(buf, sizeof buf, "%d", i);
++    return buf;
++}
++
+ static int clamp_int(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+ 
+ int recomp_settings_read(const char *path, RecompSettings *s)
+diff --git a/src/config/recomp_config.h b/src/config/recomp_config.h
+index 00d6a09..2f8b7a6 100644
+--- a/src/config/recomp_config.h
++++ b/src/config/recomp_config.h
+@@ -72,6 +72,11 @@ const char *recomp_config_lookup(const char *env_name, const char *key);
+  * Returns 1 when the file was written; 0 when it was not (the old file is
+  * then left whole, and the new value lasts only for this run). */
+ int recomp_config_set(const char *key, const char *value);
++/* The value `key` has when the settings file does not set it: the
++ * toolkit's default for its own keys, the title's for the keys its
++ * settings header adds; NULL for a key neither knows. Owned here; valid
++ * until the next call. */
++const char *recomp_config_default(const char *key);
+ 
+ /* The same, parsed, with a fallback for absent or unreadable values.
+  * Booleans accept 1/0, on/off, yes/no, true/false, and an empty
+diff --git a/src/d3d/CMakeLists.txt b/src/d3d/CMakeLists.txt
+index 55009c0..fdc738b 100644
+--- a/src/d3d/CMakeLists.txt
++++ b/src/d3d/CMakeLists.txt
+@@ -25,6 +25,18 @@ set(XBR_D3D8_SOURCES
+     d3d8_compile.c
+     rhi.c
+     rhi_shader_cache.c
++    d3d8_menu.cpp
++)
++
++# Dear ImGui (third_party/imgui, MIT): the settings menu's fonts, text and
++# draw lists (d3d8_menu.cpp). Only its core; no backend, no demo, and none of
++# its Win32 clipboard or IME calls, so nothing more is linked.
++set(XBR_IMGUI_DIR ${CMAKE_CURRENT_LIST_DIR}/../../third_party/imgui)
++list(APPEND XBR_D3D8_SOURCES
++    ${XBR_IMGUI_DIR}/imgui.cpp
++    ${XBR_IMGUI_DIR}/imgui_draw.cpp
++    ${XBR_IMGUI_DIR}/imgui_tables.cpp
++    ${XBR_IMGUI_DIR}/imgui_widgets.cpp
+ )
+ 
+ if(WIN32)
+@@ -44,6 +56,10 @@ else()
+     endif()
+ endif()
+ 
++target_include_directories(xbox_d3d8 PRIVATE ${XBR_IMGUI_DIR})
++target_compile_definitions(xbox_d3d8 PRIVATE
++    IMGUI_DISABLE_DEMO_WINDOWS IMGUI_DISABLE_WIN32_FUNCTIONS)
++
+ # The Vulkan backend, built when the vendored headers are checked out
+ # (git submodule update --init) and DXC's headers are found. Nothing links a
+ # Vulkan loader or DXC: volk finds the loader and rhi_vulkan_dxc.cpp finds
+diff --git a/src/d3d/d3d8_menu.cpp b/src/d3d/d3d8_menu.cpp
+new file mode 100644
+index 0000000..24b3210
+--- /dev/null
++++ b/src/d3d/d3d8_menu.cpp
+@@ -0,0 +1,874 @@
++/*
++ * d3d8_menu.cpp -- the in-game settings menu, drawn as a panel.
++ *
++ * src/hle/hle_settings_menu.c owns the menu: its settings, the selection,
++ * what a key does. It hands the state over as a D3D8Menu (d3d8_overlay.h)
++ * and this file draws it over the presented frame, at the window's own
++ * resolution, with Dear ImGui (third_party/imgui): its font atlas, text and
++ * draw lists. No ImGui windows, widgets or navigation -- the layout is
++ * fixed and done here by hand, the pad and the keyboard are the menu's, and
++ * the pointer is hit-tested here against the same rectangles that were
++ * drawn and reported back as actions.
++ *
++ * The look: a dark sea-blue panel with brass, tabs along the top, the rows
++ * on the left with "applies now" or "after restart" under each, and the
++ * selected row's description on the right.
++ *
++ * Drawing goes through rhi.h like the rest of the renderer, so it is the
++ * same on D3D11 and Vulkan: one dynamic vertex and index buffer, the font
++ * atlas as one texture, a scissor per draw command, alpha blending. The
++ * output state is saved and put back, as the text overlay does.
++ */
++#include "d3d8_overlay.h"
++
++#include "imgui.h"
++
++#include <math.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include <mutex>
++
++#if defined(_WIN32)
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#include <windows.h>
++#endif
++
++namespace {
++
++/* ---- the state handed over, and what the pointer did ------------------ */
++
++std::mutex g_lock;
++D3D8Menu   g_menu;                      /* the menu's latest, under g_lock */
++bool       g_menu_set;
++
++enum { ACT_RING = 16 };
++D3D8MenuAction g_acts[ACT_RING];        /* under g_lock */
++int            g_act_head, g_act_count;
++
++void push_action(int kind, int index, int step)
++{
++    std::lock_guard<std::mutex> hold(g_lock);
++    if (g_act_count == ACT_RING) {      /* full: the oldest goes */
++        g_act_head = (g_act_head + 1) % ACT_RING;
++        g_act_count--;
++    }
++    D3D8MenuAction &a = g_acts[(g_act_head + g_act_count) % ACT_RING];
++    a.kind = kind;
++    a.index = index;
++    a.step = step;
++    g_act_count++;
++}
++
++/* The pointer, written by the window's thread and read by the presenting
++ * one, both under g_lock; layout_and_draw takes one snapshot of it. */
++struct Pointer {
++    int x = -1, y = -1, inside = 0;
++    int down = 0;
++    unsigned presses = 0;               /* left-button downs so far */
++    int press_x = 0, press_y = 0;       /* where the last one was */
++    int wheel = 0;                      /* WHEEL_DELTA units not yet used */
++};
++Pointer g_ptr;                          /* under g_lock */
++
++/* ---- the look ----------------------------------------------------------- */
++
++struct Rgba { float r, g, b, a; };
++inline ImU32 col(Rgba c, float alpha = 1.0f)
++{
++    return IM_COL32((int)(c.r * 255.0f + 0.5f), (int)(c.g * 255.0f + 0.5f),
++                    (int)(c.b * 255.0f + 0.5f), (int)(c.a * alpha * 255.0f + 0.5f));
++}
++inline Rgba hex(unsigned v, float a = 1.0f)
++{
++    return Rgba{ ((v >> 16) & 255) / 255.0f, ((v >> 8) & 255) / 255.0f, (v & 255) / 255.0f, a };
++}
++
++const Rgba kDim       = { 0.016f, 0.04f, 0.07f, 0.45f };  /* over the game */
++const Rgba kPanel     = { 0.04f, 0.086f, 0.133f, 0.92f };
++const Rgba kLine      = { 0.77f, 0.63f, 0.36f, 0.35f };
++const Rgba kRow       = { 1.0f, 1.0f, 1.0f, 0.045f };
++const Rgba kRowSel    = { 0.84f, 0.67f, 0.33f, 0.16f };
++const Rgba kBrass     = hex(0xD6AA54);
++const Rgba kBrassDim  = hex(0x9C7C43);
++const Rgba kText      = hex(0xEBE4D4);
++const Rgba kBodyText  = hex(0xCFD6DC);
++const Rgba kMuted     = hex(0x9AA6B2);
++const Rgba kNow       = hex(0x7FC8A9);
++const Rgba kRestart   = hex(0xE0A66A);
++const Rgba kExp       = hex(0xC79BE0);
++const Rgba kWarn      = hex(0xE5736A);
++const Rgba kPip       = { 1.0f, 1.0f, 1.0f, 0.18f };
++const Rgba kPill      = { 1.0f, 1.0f, 1.0f, 0.12f };
++const Rgba kButton    = { 1.0f, 1.0f, 1.0f, 0.08f };
++const Rgba kPadA      = hex(0x3F8F3A);
++const Rgba kPadB      = hex(0xB5382F);
++const Rgba kPadY      = hex(0xC8A02A);
++
++/* The panel in layout units: 1280x720 is the design; u is pixels per unit. */
++const float PANEL_W = 980.0f, PANEL_H = 580.0f;
++
++/* ---- the renderer ------------------------------------------------------- */
++
++const char kShaderSource[] =
++    "cbuffer Menu : register(b7) {\n"
++    "    float4 xform;       // scale.xy, offset.xy: pixels to clip space\n"
++    "};\n"
++    "struct VSIn  { float2 pos : POSITION; float2 uv : TEXCOORD0; float4 col : COLOR0; };\n"
++    "struct VSOut { float4 pos : SV_Position; float4 col : COLOR0; float2 uv : TEXCOORD0; };\n"
++    "VSOut vs_main(VSIn i) {\n"
++    "    VSOut o;\n"
++    "    o.pos = float4(i.pos * xform.xy + xform.zw, 0, 1);\n"
++    "    o.col = i.col;\n"
++    "    o.uv  = i.uv;\n"
++    "    return o;\n"
++    "}\n"
++    "Texture2D<float4> tex : register(t8);\n"
++    "SamplerState smp : register(s8);\n"
++    "float4 ps_main(VSOut i) : SV_Target {\n"
++    "    return i.col * tex.Sample(smp, i.uv);\n"
++    "}\n";
++
++struct Gpu {
++    bool            tried, failed;
++    ImGuiContext   *ctx;
++    RhiShader      *vs, *ps;
++    RhiVertexLayout *layout;
++    RhiBuffer      *cb, *vb, *ib;
++    uint32_t        vb_cap, ib_cap;     /* in vertices, indices */
++    RhiImage       *font_img;
++    RhiView        *font_srv;
++    RhiSampler     *sampler;
++    RhiBlendState  *blend;
++    RhiDepthState  *depth;
++    RhiRasterState *raster;
++    float           font_u;             /* the scale the atlas was built for */
++    ImFont         *body, *body_bold, *small, *small_bold, *title, *heading;
++} g;
++
++void gpu_fail(const char *what)
++{
++    g.failed = true;
++    fprintf(stderr, "D3D8 menu: %s failed; the settings menu falls back to text\n", what);
++    fflush(stderr);
++    d3d8_menu_shutdown();
++    g.failed = true;
++}
++
++RhiShader *compile_one(uint32_t stage, const char *entry, const char *target)
++{
++    RhiShaderSource src;
++    char err[2048];
++
++    memset(&src, 0, sizeof src);
++    src.hlsl = kShaderSource;
++    src.len = sizeof kShaderSource - 1;
++    src.name = "menu";
++    src.entry = entry;
++    src.target = target;
++    err[0] = '\0';
++    RhiShader *s = rhi_shader_create(stage, &src, err, sizeof err);
++    if (!s && err[0])
++        fprintf(stderr, "D3D8 menu: %s\n", err);
++    return s;
++}
++
++bool gpu_create()
++{
++    if (g.failed) return false;
++    if (g.tried) return g.vs != NULL;
++    g.tried = true;
++    if (!rhi_device_ready()) { g.failed = true; return false; }
++
++    IMGUI_CHECKVERSION();
++    g.ctx = ImGui::CreateContext();
++    ImGuiIO &io = ImGui::GetIO();
++    io.IniFilename = NULL;              /* nothing on disk */
++    io.LogFilename = NULL;
++    io.BackendRendererName = "xboxrecomp_rhi";
++    io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
++
++    if (!(g.vs = compile_one(RHI_STAGE_VERTEX, "vs_main", "vs_4_0"))) { gpu_fail("the vertex shader"); return false; }
++    if (!(g.ps = compile_one(RHI_STAGE_PIXEL, "ps_main", "ps_4_0")))  { gpu_fail("the pixel shader"); return false; }
++
++    {
++        RhiVertexElement e[3];
++        memset(e, 0, sizeof e);
++        e[0].semantic = "POSITION"; e[0].format = RHI_FORMAT_R32G32_FLOAT;  e[0].offset = (uint32_t)offsetof(ImDrawVert, pos);
++        e[1].semantic = "TEXCOORD"; e[1].format = RHI_FORMAT_R32G32_FLOAT;  e[1].offset = (uint32_t)offsetof(ImDrawVert, uv);
++        e[2].semantic = "COLOR";    e[2].format = RHI_FORMAT_R8G8B8A8_UNORM; e[2].offset = (uint32_t)offsetof(ImDrawVert, col);
++        if (!(g.layout = rhi_vertex_layout_create(e, 3, g.vs))) { gpu_fail("the vertex layout"); return false; }
++    }
++    {
++        RhiBufferDesc bd;
++        memset(&bd, 0, sizeof bd);
++        bd.size = 16;
++        bd.usage = RHI_USAGE_DYNAMIC;
++        bd.bind = RHI_BIND_UNIFORM;
++        bd.cpu_access = RHI_CPU_WRITE;
++        if (!(g.cb = rhi_buffer_create(&bd, NULL))) { gpu_fail("the constant buffer"); return false; }
++    }
++    {
++        RhiSamplerDesc sd;
++        memset(&sd, 0, sizeof sd);
++        sd.filter = RHI_FILTER_LINEAR;
++        sd.address_u = sd.address_v = sd.address_w = RHI_ADDRESS_CLAMP;
++        sd.max_anisotropy = 1;
++        sd.compare = RHI_CMP_ALWAYS;
++        sd.min_lod = 0.0f;
++        sd.max_lod = 0.0f;
++        if (!(g.sampler = rhi_sampler_create(&sd))) { gpu_fail("the sampler"); return false; }
++    }
++    {
++        RhiBlendDesc bl;
++        memset(&bl, 0, sizeof bl);
++        bl.enable = 1;
++        bl.src = RHI_BLEND_SRC_ALPHA;
++        bl.dst = RHI_BLEND_INV_SRC_ALPHA;
++        bl.op = RHI_BLEND_OP_ADD;
++        bl.src_alpha = RHI_BLEND_ONE;
++        bl.dst_alpha = RHI_BLEND_INV_SRC_ALPHA;
++        bl.op_alpha = RHI_BLEND_OP_ADD;
++        bl.write_mask = RHI_WRITE_ALL;
++        if (!(g.blend = rhi_blend_state_create(&bl))) { gpu_fail("the blend state"); return false; }
++    }
++    {
++        RhiDepthDesc ds;
++        memset(&ds, 0, sizeof ds);
++        if (!(g.depth = rhi_depth_state_create(&ds))) { gpu_fail("the depth state"); return false; }
++    }
++    {
++        RhiRasterDesc rd;
++        memset(&rd, 0, sizeof rd);
++        rd.fill = RHI_FILL_SOLID;
++        rd.cull = RHI_CULL_NONE;
++        rd.depth_clip = 1;
++        rd.scissor = 1;
++        if (!(g.raster = rhi_raster_state_create(&rd))) { gpu_fail("the raster state"); return false; }
++    }
++    return true;
++}
++
++/* ---- fonts -------------------------------------------------------------- */
++
++/* A face from Windows' own fonts folder, or ImGui's built-in one. */
++ImFont *add_font(const char *const *files, float px)
++{
++    ImGuiIO &io = ImGui::GetIO();
++    ImFontConfig cfg;
++    cfg.OversampleH = 2;
++    cfg.OversampleV = 1;
++    cfg.PixelSnapH = false;
++#if defined(_WIN32)
++    char dir[MAX_PATH];
++    UINT n = GetWindowsDirectoryA(dir, sizeof dir);
++    if (n && n < sizeof dir - 32) {
++        for (; *files; files++) {
++            char path[MAX_PATH];
++            snprintf(path, sizeof path, "%s\\Fonts\\%s", dir, *files);
++            if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
++                ImFont *f = io.Fonts->AddFontFromFileTTF(path, px, &cfg);
++                if (f) return f;
++            }
++        }
++    }
++#else
++    (void)files;
++#endif
++    ImFontConfig def;
++    def.SizePixels = px;
++    return io.Fonts->AddFontDefault(&def);
++}
++
++void font_texture_release()
++{
++    rhi_view_destroy(g.font_srv);  g.font_srv = NULL;
++    rhi_image_destroy(g.font_img); g.font_img = NULL;
++}
++
++/* The atlas for unit size u: rebuilt when the window's size moves it by
++ * more than a few percent, so text is drawn at its own pixel size. */
++bool fonts_for(float u)
++{
++    if (g.font_img && fabsf(u - g.font_u) < g.font_u * 0.04f)
++        return true;
++    static const char *const regular[] = { "segoeui.ttf", "arial.ttf", NULL };
++    static const char *const semibold[] = { "seguisb.ttf", "segoeuib.ttf", "arialbd.ttf", NULL };
++    static const char *const serif[] = { "georgiab.ttf", "timesbd.ttf", "seguisb.ttf", NULL };
++    ImGuiIO &io = ImGui::GetIO();
++
++    font_texture_release();
++    io.Fonts->Clear();
++    g.body       = add_font(regular,  17.0f * u);
++    g.body_bold  = add_font(semibold, 17.0f * u);
++    g.small      = add_font(regular,  13.5f * u);
++    g.small_bold = add_font(semibold, 13.0f * u);
++    g.title      = add_font(serif,    27.0f * u);
++    g.heading    = add_font(serif,    20.0f * u);
++    if (!io.Fonts->Build()) { gpu_fail("the font atlas"); return false; }
++
++    unsigned char *px = NULL;
++    int w = 0, h = 0;
++    io.Fonts->GetTexDataAsRGBA32(&px, &w, &h);
++    RhiImageDesc td;
++    memset(&td, 0, sizeof td);
++    td.type = RHI_IMAGE_2D;
++    td.width = (uint32_t)w;
++    td.height = (uint32_t)h;
++    td.depth = 1;
++    td.mip_levels = 1;
++    td.format = RHI_FORMAT_R8G8B8A8_UNORM;
++    td.samples = 1;
++    td.usage = RHI_USAGE_IMMUTABLE;
++    td.bind = RHI_BIND_SAMPLED;
++    RhiSubresourceData init;
++    init.data = px;
++    init.row_pitch = (uint32_t)w * 4u;
++    init.slice_pitch = init.row_pitch * (uint32_t)h;
++    if (!(g.font_img = rhi_image_create(&td, &init))) { gpu_fail("the font texture"); return false; }
++    if (!(g.font_srv = rhi_view_create(g.font_img, RHI_VIEW_SAMPLED, NULL))) { gpu_fail("the font view"); return false; }
++    io.Fonts->SetTexID((ImTextureID)(uintptr_t)g.font_srv);
++    io.Fonts->ClearTexData();           /* the GPU has it now */
++    g.font_u = u;
++    return true;
++}
++
++/* ---- drawing helpers ---------------------------------------------------- */
++
++struct Box { float x0, y0, x1, y1; };
++inline bool inside(const Box &b, float x, float y) { return x >= b.x0 && x < b.x1 && y >= b.y0 && y < b.y1; }
++
++ImDrawList *dl;
++float U;                                /* pixels per layout unit */
++
++inline float text_w(ImFont *f, const char *s)
++{
++    return f->CalcTextSizeA(f->FontSize, 1e9f, 0.0f, s).x;
++}
++inline void text(ImFont *f, float x, float y, Rgba c, const char *s, float alpha = 1.0f)
++{
++    dl->AddText(f, f->FontSize, ImVec2(floorf(x), floorf(y)), col(c, alpha), s);
++}
++/* Wrapped to width w; returns the height used. */
++float text_wrapped(ImFont *f, float x, float y, float w, Rgba c, const char *s)
++{
++    dl->AddText(f, f->FontSize, ImVec2(floorf(x), floorf(y)), col(c), s, NULL, w);
++    return f->CalcTextSizeA(f->FontSize, 1e9f, w, s).y;
++}
++
++/* A controller-button pill ("A", "LB"). Returns its width. */
++float pill(float x, float cy, const char *label, Rgba bg, Rgba fg)
++{
++    float tw = text_w(g.small_bold, label);
++    float w = tw + 12.0f * U, h = 22.0f * U;
++    if (w < 30.0f * U) w = 30.0f * U;
++    dl->AddRectFilled(ImVec2(x, cy - h * 0.5f), ImVec2(x + w, cy + h * 0.5f), col(bg), h * 0.5f);
++    text(g.small_bold, x + (w - tw) * 0.5f, cy - g.small_bold->FontSize * 0.5f, fg, label);
++    return w;
++}
++
++void triangle(float cx, float cy, float s, int dir, Rgba c)
++{
++    /* dir -1 points left, 1 right */
++    ImVec2 a(cx + dir * s * 0.55f, cy), b(cx - dir * s * 0.45f, cy - s * 0.6f), d(cx - dir * s * 0.45f, cy + s * 0.6f);
++    dl->AddTriangleFilled(a, b, d, col(c));
++}
++
++/* ---- the layout --------------------------------------------------------- */
++
++float g_scroll;                         /* the row list's, in pixels */
++unsigned g_seen_serial = ~0u;
++int g_hover_row = -1;
++unsigned g_seen_presses;
++
++void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
++{
++    const float u = U;
++    const float x0 = px0, y0 = py0, x1 = px0 + PANEL_W * u, y1 = py0 + PANEL_H * u;
++
++    /* The pointer, as of this frame: one consistent snapshot. */
++    Pointer p;
++    {
++        std::lock_guard<std::mutex> hold(g_lock);
++        p = g_ptr;
++        g_ptr.wheel = 0;
++    }
++    const bool ptr_in = p.inside != 0;
++    const float mx = (float)p.x, my = (float)p.y;
++    bool clicked = false;
++    float cx = 0, cy = 0;
++    if (p.presses != g_seen_presses) {
++        clicked = true;
++        cx = (float)p.press_x;
++        cy = (float)p.press_y;
++        g_seen_presses = p.presses;
++    }
++    const int wheel = p.wheel;
++
++    /* Dim the game, then the panel. */
++    dl->AddRectFilled(ImVec2(0, 0), ImVec2(W, H), col(kDim));
++    dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), col(kPanel), 10.0f * u);
++    dl->AddRect(ImVec2(x0, y0), ImVec2(x1, y1), col(kLine), 10.0f * u, 0, 1.5f * u);
++
++    /* Header. */
++    text(g.title, x0 + 26 * u, y0 + 16 * u, kBrass, m.title);
++    if (m.subtitle[0]) {
++        float w = text_w(g.small, m.subtitle);
++        text(g.small, x1 - 26 * u - w, y0 + 26 * u, kMuted, m.subtitle);
++    }
++
++    /* Tabs. */
++    const float tab_y0 = y0 + 58 * u, tab_y1 = y0 + 98 * u, tab_cy = (tab_y0 + tab_y1) * 0.5f;
++    float tx = x0 + 22 * u;
++    tx += pill(tx, tab_cy, "LB", kPill, kText) + 6 * u;
++    for (int i = 0; i < m.tab_count; i++) {
++        float w = text_w(g.body_bold, m.tabs[i]) + 32 * u;
++        Box b = { tx, tab_y0, tx + w, tab_y1 };
++        bool on = i == m.tab, hot = ptr_in && inside(b, mx, my);
++        text(g.body_bold, tx + 16 * u, tab_cy - g.body_bold->FontSize * 0.55f, on ? kBrass : (hot ? kText : kMuted), m.tabs[i]);
++        if (on)
++            dl->AddRectFilled(ImVec2(tx, tab_y1 - 3 * u), ImVec2(tx + w, tab_y1), col(kBrass));
++        if (clicked && inside(b, cx, cy))
++            push_action(D3D8_MENU_ACT_TAB, i, 0);
++        tx += w + 4 * u;
++    }
++    pill(tx + 6 * u, tab_cy, "RB", kPill, kText);
++    dl->AddLine(ImVec2(x0, tab_y1), ImVec2(x1, tab_y1), col(kLine), 1.0f * u);
++
++    /* Body: rows left, description right. */
++    const float foot_y0 = y1 - 58 * u;
++    const float split = x0 + 596 * u;
++    const Box list = { x0 + 20 * u, tab_y1 + 1, split - 14 * u, foot_y0 - 1 };
++    dl->AddLine(ImVec2(split, tab_y1), ImVec2(split, foot_y0), col(kLine), 1.0f * u);
++
++    /* Row heights, to scroll. */
++    const float pad_top = 14 * u, gap = 5 * u, group_h = 30 * u, row_h = 54 * u, info_h = 34 * u;
++    float total = pad_top, sel_top = -1, sel_bot = -1;
++    for (int i = 0; i < m.row_count; i++) {
++        const D3D8MenuRow &r = m.rows[i];
++        float h = r.kind == D3D8_MENU_ROW_GROUP ? group_h : r.kind == D3D8_MENU_ROW_INFO ? info_h : row_h;
++        if (i == m.sel) { sel_top = total; sel_bot = total + h; }
++        total += h + gap;
++    }
++    total += 14 * u;
++    const float view_h = list.y1 - list.y0;
++    if (ptr_in && inside(list, mx, my) && wheel)
++        g_scroll -= (float)wheel / 120.0f * 60.0f * u;
++    if (m.serial != g_seen_serial) {    /* a key moved the selection: show it */
++        g_seen_serial = m.serial;
++        if (sel_top >= 0) {
++            if (sel_top - 8 * u < g_scroll) g_scroll = sel_top - (sel_top < 2 * row_h ? sel_top : 8 * u);
++            if (sel_bot + 8 * u > g_scroll + view_h) g_scroll = sel_bot + 8 * u - view_h;
++        }
++        if (m.sel < 0 && m.button < 0) g_scroll = 0;
++    }
++    if (g_scroll > total - view_h) g_scroll = total - view_h;
++    if (g_scroll < 0) g_scroll = 0;
++
++    dl->PushClipRect(ImVec2(list.x0 - 2 * u, list.y0), ImVec2(list.x1 + 2 * u, list.y1), true);
++    float y = list.y0 + pad_top - g_scroll;
++    int hover = -1;
++    for (int i = 0; i < m.row_count; i++) {
++        const D3D8MenuRow &r = m.rows[i];
++        if (r.kind == D3D8_MENU_ROW_GROUP) {
++            /* Uppercase, spaced a little. */
++            char up[48];
++            size_t k;
++            for (k = 0; r.label[k] && k < sizeof up - 1; k++)
++                up[k] = (r.label[k] >= 'a' && r.label[k] <= 'z') ? (char)(r.label[k] - 32) : r.label[k];
++            up[k] = '\0';
++            text(g.small_bold, list.x0 + 6 * u, y + 12 * u, kBrassDim, up);
++            y += group_h + gap;
++            continue;
++        }
++        if (r.kind == D3D8_MENU_ROW_INFO) {
++            Box b = { list.x0, y, list.x1, y + info_h };
++            dl->AddRectFilled(ImVec2(b.x0, b.y0), ImVec2(b.x1, b.y1), col(kRow), 6 * u);
++            text(g.body, b.x0 + 12 * u, y + (info_h - g.body->FontSize) * 0.5f, kMuted, r.label);
++            float vw = text_w(g.body_bold, r.value);
++            float vx = b.x1 - 12 * u - vw;
++            if (vx < b.x0 + 180 * u) vx = b.x0 + 180 * u;
++            dl->PushClipRect(ImVec2(vx, b.y0), ImVec2(b.x1 - 6 * u, b.y1), true);
++            text(g.body_bold, vx, y + (info_h - g.body_bold->FontSize) * 0.5f, kText, r.value);
++            dl->PopClipRect();
++            y += info_h + gap;
++            continue;
++        }
++        Box b = { list.x0, y, list.x1, y + row_h };
++        const bool sel = i == m.sel && m.button < 0;
++        const bool visible = b.y1 > list.y0 && b.y0 < list.y1;
++        dl->AddRectFilled(ImVec2(b.x0, b.y0), ImVec2(b.x1, b.y1), col(sel ? kRowSel : kRow), 6 * u);
++        if (sel)
++            dl->AddRect(ImVec2(b.x0, b.y0), ImVec2(b.x1, b.y1), col(kBrass), 6 * u, 0, 1.5f * u);
++
++        /* Label and its tags. */
++        text(g.body_bold, b.x0 + 12 * u, y + 8 * u, kText, r.label);
++        {
++            float tx2 = b.x0 + 12 * u, ty = y + 32 * u;
++            struct { int bit; const char *s; Rgba c; } tags[] = {
++                { D3D8_MENU_TAG_NOW, "Applies now", kNow },
++                { D3D8_MENU_TAG_RESTART, "After restart", kRestart },
++                { D3D8_MENU_TAG_EXPERIMENTAL, "Experimental", kExp },
++                { D3D8_MENU_TAG_CHANGED, "Changed", kBrass },
++                { D3D8_MENU_TAG_ENV, "Set by environment", kWarn },
++            };
++            for (auto &t : tags) {
++                if (!(r.tags & t.bit)) continue;
++                text(g.small, tx2, ty, t.c, t.s);
++                tx2 += text_w(g.small, t.s) + 10 * u;
++            }
++        }
++
++        /* The value between its arrows, the pips under it. */
++        const float val_w = 120 * u;
++        const float right = b.x1 - 14 * u;
++        const float vcx = right - 16 * u - val_w * 0.5f;
++        const float vcy = y + 20 * u;
++        Rgba arrow = sel ? kBrass : kMuted;
++        Box left_hit = { right - 16 * u - val_w - 26 * u, b.y0, right - 16 * u - val_w + 6 * u, b.y1 };
++        triangle(right - 16 * u - val_w - 8 * u, vcy, 11 * u, -1, arrow);
++        triangle(right - 6 * u, vcy, 11 * u, 1, arrow);
++        {
++            float vw = text_w(g.body_bold, r.value);
++            text(g.body_bold, vcx - vw * 0.5f, vcy - g.body_bold->FontSize * 0.55f, kText, r.value);
++        }
++        if (r.count > 1 && r.count <= 16) {
++            const float d = 7 * u, sp = 4 * u;
++            float pw = r.count * d + (r.count - 1) * sp;
++            float pxs = vcx - pw * 0.5f, pcy = y + 40 * u;
++            for (int k = 0; k < r.count; k++) {
++                ImVec2 c(pxs + k * (d + sp) + d * 0.5f, pcy);
++                dl->AddCircleFilled(c, d * 0.5f, col(k == r.index ? kBrass : kPip), 12);
++                if (k == r.def)
++                    dl->AddCircle(c, d * 0.5f + 1.0f * u, col(Rgba{1, 1, 1, 0.55f}), 12, 1.3f * u);
++            }
++        }
++
++        /* The pointer. */
++        if (visible) {
++            if (ptr_in && inside(b, mx, my) && inside(list, mx, my))
++                hover = i;
++            if (clicked && inside(b, cx, cy) && inside(list, cx, cy)) {
++                int step = inside(left_hit, cx, cy) ? -1 : 1;
++                push_action(D3D8_MENU_ACT_STEP, i, step);
++                clicked = false;
++            }
++        }
++        y += row_h + gap;
++    }
++    dl->PopClipRect();
++    if (hover != g_hover_row) {
++        g_hover_row = hover;
++        if (hover >= 0 && hover != m.sel)
++            push_action(D3D8_MENU_ACT_HOVER, hover, 0);
++    }
++    /* A scroll hint: a thin bar when the list is longer than its box. */
++    if (total > view_h + 1) {
++        float bh = view_h * view_h / total, by = list.y0 + (view_h - bh) * (g_scroll / (total - view_h));
++        dl->AddRectFilled(ImVec2(list.x1 + 6 * u, by), ImVec2(list.x1 + 9 * u, by + bh), col(kLine), 2 * u);
++    }
++
++    /* The description. */
++    {
++        const float ix = split + 24 * u, iw = x1 - 24 * u - ix;
++        float iy = tab_y1 + 20 * u;
++        if (m.info_title[0]) {
++            text(g.heading, ix, iy, kText, m.info_title);
++            iy += g.heading->FontSize + 12 * u;
++        }
++        if (m.info_text[0])
++            iy += text_wrapped(g.body, ix, iy, iw, kBodyText, m.info_text) + 14 * u;
++        struct { const char *k, *v; } dl_rows[] = {
++            { "Default", m.info_default }, { "Takes effect", m.info_when }, { "Options", m.info_options },
++        };
++        const float kw = 100 * u;
++        for (auto &d : dl_rows) {
++            if (!d.v[0]) continue;
++            text(g.small, ix, iy, kMuted, d.k);
++            iy += text_wrapped(g.small, ix + kw, iy, iw - kw, kText, d.v) + 6 * u;
++        }
++        if (m.warning[0]) {
++            iy += 8 * u;
++            text_wrapped(g.small, ix, iy, iw, kWarn, m.warning);
++        }
++    }
++
++    /* Footer: the buttons' hints, the status, Resume and Quit. */
++    dl->AddLine(ImVec2(x0, foot_y0), ImVec2(x1, foot_y0), col(kLine), 1.0f * u);
++    {
++        const float fcy = (foot_y0 + y1) * 0.5f;
++        float fx = x0 + 22 * u;
++        struct { const char *g1, *g2; Rgba bg; Rgba fg; const char *what; } hints[] = {
++            { "LB", "RB", kPill, kText, "Tabs" },
++            { "A", NULL, kPadA, kText, "Change" },
++            { "Y", NULL, kPadY, hex(0x1A1300), "Default" },
++            { "B", NULL, kPadB, kText, "Back" },
++        };
++        for (auto &h : hints) {
++            fx += pill(fx, fcy, h.g1, h.bg, h.fg) + 4 * u;
++            if (h.g2) fx += pill(fx, fcy, h.g2, h.bg, h.fg) + 4 * u;
++            text(g.small, fx + 2 * u, fcy - g.small->FontSize * 0.55f, kMuted, h.what);
++            fx += text_w(g.small, h.what) + 16 * u;
++        }
++
++        static const char *const labels[2] = { "Resume", "Quit game" };
++        float bx = x1 - 22 * u;
++        for (int i = 1; i >= 0; i--) {
++            float w = text_w(g.body_bold, labels[i]) + 36 * u, h = 36 * u;
++            Box b = { bx - w, fcy - h * 0.5f, bx, fcy + h * 0.5f };
++            bool on = m.button == i, hot = ptr_in && inside(b, mx, my);
++            dl->AddRectFilled(ImVec2(b.x0, b.y0), ImVec2(b.x1, b.y1), col(on ? kRowSel : kButton, hot && !on ? 1.6f : 1.0f), 6 * u);
++            if (on)
++                dl->AddRect(ImVec2(b.x0, b.y0), ImVec2(b.x1, b.y1), col(kBrass), 6 * u, 0, 1.5f * u);
++            text(g.body_bold, b.x0 + 18 * u, fcy - g.body_bold->FontSize * 0.55f, kText, labels[i]);
++            if (clicked && inside(b, cx, cy))
++                push_action(D3D8_MENU_ACT_BUTTON, i, 0);
++            bx = b.x0 - 10 * u;
++        }
++        if (m.status[0]) {
++            float sw = text_w(g.small_bold, m.status);
++            if (fx + sw < bx - 10 * u)
++                text(g.small_bold, fx, fcy - g.small_bold->FontSize * 0.55f, kRestart, m.status);
++        }
++    }
++}
++
++/* ---- submitting ImGui's draw data through rhi.h ------------------------- */
++
++bool ensure_buffer(RhiBuffer **b, uint32_t *cap, uint32_t need, uint32_t elem, uint32_t bind)
++{
++    if (*b && *cap >= need) return true;
++    rhi_buffer_destroy(*b);
++    *b = NULL;
++    uint32_t n = need + need / 2 + 1024;
++    RhiBufferDesc bd;
++    memset(&bd, 0, sizeof bd);
++    bd.size = n * elem;
++    bd.usage = RHI_USAGE_DYNAMIC;
++    bd.bind = bind;
++    bd.cpu_access = RHI_CPU_WRITE;
++    if (!(*b = rhi_buffer_create(&bd, NULL))) { *cap = 0; return false; }
++    *cap = n;
++    return true;
++}
++
++/* A map that failed: this frame falls back to the text panel. Said once. */
++bool map_failed(const char *what)
++{
++    static bool said;
++    if (!said) {
++        said = true;
++        fprintf(stderr, "D3D8 menu: mapping %s failed; this frame shows the text panel\n", what);
++        fflush(stderr);
++    }
++    return false;
++}
++
++/* True when the panel was drawn. */
++bool submit(ImDrawData *dd, RhiView *out, unsigned w, unsigned h)
++{
++    if (!dd || dd->TotalVtxCount <= 0) return false;
++    if (!ensure_buffer(&g.vb, &g.vb_cap, (uint32_t)dd->TotalVtxCount, sizeof(ImDrawVert), RHI_BIND_VERTEX) ||
++        !ensure_buffer(&g.ib, &g.ib_cap, (uint32_t)dd->TotalIdxCount, sizeof(ImDrawIdx), RHI_BIND_INDEX)) {
++        gpu_fail("the vertex buffers");
++        return false;
++    }
++    ImDrawVert *vtx = (ImDrawVert *)rhi_buffer_map(g.vb, RHI_MAP_WRITE_DISCARD);
++    ImDrawIdx *idx = (ImDrawIdx *)rhi_buffer_map(g.ib, RHI_MAP_WRITE_DISCARD);
++    if (!vtx || !idx) {
++        if (vtx) rhi_buffer_unmap(g.vb);
++        if (idx) rhi_buffer_unmap(g.ib);
++        return map_failed("the vertex buffers");
++    }
++    for (int n = 0; n < dd->CmdListsCount; n++) {
++        const ImDrawList *cl = dd->CmdLists[n];
++        memcpy(vtx, cl->VtxBuffer.Data, (size_t)cl->VtxBuffer.Size * sizeof(ImDrawVert));
++        memcpy(idx, cl->IdxBuffer.Data, (size_t)cl->IdxBuffer.Size * sizeof(ImDrawIdx));
++        vtx += cl->VtxBuffer.Size;
++        idx += cl->IdxBuffer.Size;
++    }
++    rhi_buffer_unmap(g.vb);
++    rhi_buffer_unmap(g.ib);
++
++    float *c = (float *)rhi_buffer_map(g.cb, RHI_MAP_WRITE_DISCARD);
++    if (!c) return map_failed("the constant buffer");
++    c[0] = 2.0f / (float)w;
++    c[1] = -2.0f / (float)h;
++    c[2] = -1.0f;
++    c[3] = 1.0f;
++    rhi_buffer_unmap(g.cb);
++
++    RhiViewport vp;
++    vp.x = vp.y = 0.0f;
++    vp.width = (float)w;
++    vp.height = (float)h;
++    vp.min_depth = 0.0f;
++    vp.max_depth = 1.0f;
++    float blend_factor[4] = { 1, 1, 1, 1 };
++    rhi_set_render_target(out, NULL);
++    rhi_set_viewports(1, &vp);
++    rhi_set_vertex_layout(g.layout);
++    rhi_set_vertex_buffer(0, g.vb, sizeof(ImDrawVert), 0);
++    rhi_set_index_buffer(g.ib, sizeof(ImDrawIdx) == 2 ? 16 : 32, 0);
++    rhi_set_topology(RHI_TOPOLOGY_TRIANGLES);
++    rhi_set_shader(RHI_STAGE_VERTEX, g.vs);
++    rhi_set_shader(RHI_STAGE_PIXEL, g.ps);
++    rhi_set_uniform_buffers(RHI_STAGE_VERTEX, 7, 1, &g.cb);
++    rhi_set_samplers(8, 1, &g.sampler);
++    rhi_set_blend_state(g.blend, blend_factor, 0xFFFFFFFF);
++    rhi_set_depth_state(g.depth, 0);
++    rhi_set_raster_state(g.raster);
++
++    int vtx_off = 0, idx_off = 0;
++    for (int n = 0; n < dd->CmdListsCount; n++) {
++        const ImDrawList *cl = dd->CmdLists[n];
++        for (int i = 0; i < cl->CmdBuffer.Size; i++) {
++            const ImDrawCmd *pc = &cl->CmdBuffer[i];
++            if (pc->UserCallback) continue;     /* none are used */
++            RhiRect r;
++            r.left = (int32_t)(pc->ClipRect.x > 0 ? pc->ClipRect.x : 0);
++            r.top = (int32_t)(pc->ClipRect.y > 0 ? pc->ClipRect.y : 0);
++            r.right = (int32_t)(pc->ClipRect.z < (float)w ? pc->ClipRect.z : (float)w);
++            r.bottom = (int32_t)(pc->ClipRect.w < (float)h ? pc->ClipRect.w : (float)h);
++            if (r.right <= r.left || r.bottom <= r.top) continue;
++            rhi_set_scissor(&r);
++            RhiView *tex = (RhiView *)(uintptr_t)pc->GetTexID();
++            rhi_set_textures(8, 1, &tex);
++            rhi_draw_indexed(pc->ElemCount, pc->IdxOffset + (uint32_t)idx_off,
++                             (int32_t)pc->VtxOffset + vtx_off);
++        }
++        vtx_off += cl->VtxBuffer.Size;
++        idx_off += cl->IdxBuffer.Size;
++    }
++    /* The title sets its own scissor (or none) with its next draw state;
++     * leave the whole target open for anything drawn after this. */
++    RhiRect all = { 0, 0, (int32_t)w, (int32_t)h };
++    rhi_set_scissor(&all);
++    return true;
++}
++
++} /* namespace */
++
++/* ---- the C side ---------------------------------------------------------- */
++
++extern "C" void d3d8_menu_set(const D3D8Menu *m)
++{
++    std::lock_guard<std::mutex> hold(g_lock);
++    if (m) {
++        g_menu = *m;
++        g_menu_set = true;
++    } else {
++        g_menu_set = false;
++        g_act_count = 0;
++    }
++}
++
++extern "C" int d3d8_menu_take_action(D3D8MenuAction *out)
++{
++    std::lock_guard<std::mutex> hold(g_lock);
++    if (!g_act_count || !out) return 0;
++    *out = g_acts[g_act_head];
++    g_act_head = (g_act_head + 1) % ACT_RING;
++    g_act_count--;
++    return 1;
++}
++
++extern "C" void d3d8_menu_pointer(int x, int y, int in)
++{
++    std::lock_guard<std::mutex> hold(g_lock);
++    g_ptr.x = x;
++    g_ptr.y = y;
++    g_ptr.inside = in;
++}
++
++extern "C" void d3d8_menu_pointer_button(int down)
++{
++    std::lock_guard<std::mutex> hold(g_lock);
++    if (down && !g_ptr.down) {
++        g_ptr.press_x = g_ptr.x;
++        g_ptr.press_y = g_ptr.y;
++        g_ptr.presses++;
++    }
++    g_ptr.down = down;
++}
++
++extern "C" void d3d8_menu_pointer_wheel(int delta)
++{
++    std::lock_guard<std::mutex> hold(g_lock);
++    g_ptr.wheel += delta;
++}
++
++extern "C" int d3d8_menu_present(RhiView *out, unsigned w, unsigned h,
++                                 unsigned pic_x, unsigned pic_y, unsigned pic_h)
++{
++    D3D8Menu m;
++    {
++        std::lock_guard<std::mutex> hold(g_lock);
++        if (!g_menu_set) {
++            g_seen_presses = g_ptr.presses;     /* a click before it opened is not one in it */
++            return 0;
++        }
++        m = g_menu;
++    }
++    (void)pic_x;
++    if (!out || !w || !h) return 0;
++    if (!gpu_create()) return 0;
++
++    /* One layout unit: the design is 1280x720; the panel stays inside the
++     * window whatever its shape, and follows the picture's height. */
++    float u = (float)(pic_h ? pic_h : h) / 720.0f;
++    if (u * (PANEL_W + 40.0f) > (float)w) u = (float)w / (PANEL_W + 40.0f);
++    if (u * (PANEL_H + 20.0f) > (float)h) u = (float)h / (PANEL_H + 20.0f);
++    if (u < 0.5f) u = 0.5f;
++    ImGui::SetCurrentContext(g.ctx);
++    if (!fonts_for(u)) return 0;
++    U = u;
++
++    ImGuiIO &io = ImGui::GetIO();
++    io.DisplaySize = ImVec2((float)w, (float)h);
++    io.DeltaTime = 1.0f / 60.0f;
++    ImGui::NewFrame();
++    dl = ImGui::GetForegroundDrawList();
++    float px0 = floorf(((float)w - PANEL_W * u) * 0.5f);
++    float pic_cy = pic_h ? (float)pic_y + (float)pic_h * 0.5f : (float)h * 0.5f;
++    float py0 = floorf(pic_cy - PANEL_H * u * 0.5f);
++    if (py0 < 0) py0 = 0;
++    layout_and_draw(m, (float)w, (float)h, px0, py0);
++    ImGui::Render();
++    if (g.failed) return 0;
++
++    RhiOutputState saved;
++    rhi_output_save(&saved);
++    bool drawn = submit(ImGui::GetDrawData(), out, w, h);
++    rhi_output_restore(&saved);
++    return drawn && !g.failed ? 1 : 0;
++}
++
++extern "C" void d3d8_menu_shutdown(void)
++{
++    font_texture_release();
++    rhi_buffer_destroy(g.vb);  g.vb = NULL; g.vb_cap = 0;
++    rhi_buffer_destroy(g.ib);  g.ib = NULL; g.ib_cap = 0;
++    rhi_buffer_destroy(g.cb);  g.cb = NULL;
++    rhi_vertex_layout_destroy(g.layout); g.layout = NULL;
++    rhi_shader_destroy(g.vs);  g.vs = NULL;
++    rhi_shader_destroy(g.ps);  g.ps = NULL;
++    rhi_sampler_destroy(g.sampler);       g.sampler = NULL;
++    rhi_blend_state_destroy(g.blend);     g.blend = NULL;
++    rhi_depth_state_destroy(g.depth);     g.depth = NULL;
++    rhi_raster_state_destroy(g.raster);   g.raster = NULL;
++    if (g.ctx) {
++        ImGui::DestroyContext(g.ctx);
++        g.ctx = NULL;
++    }
++    g.font_u = 0.0f;
++    g.tried = false;
++}
+diff --git a/src/d3d/d3d8_overlay.c b/src/d3d/d3d8_overlay.c
+index bce8c0e..ce1c2eb 100644
+--- a/src/d3d/d3d8_overlay.c
++++ b/src/d3d/d3d8_overlay.c
+@@ -438,8 +438,13 @@ void d3d8_overlay_present(RhiView *out, unsigned width, unsigned height,
+     /* The size it had drawn into a 480-line frame and scaled with it, in
+      * whole steps so the glyphs stay sharp. */
+     unsigned scale = (pic_h + 240) / 480;
+-    const char *text = g_want_menu[0] ? g_want_menu : g_want;
+-    int centred = g_want_menu[0] != '\0';
++    /* The settings menu as a panel (d3d8_menu.cpp) when it can be drawn;
++     * the text panel below only if it could not. */
++    int panel = d3d8_menu_present(out, width, height, pic_x, pic_y, pic_h);
++    /* While the panel is up the corner line is left off: on a small
++     * window the panel reaches the corner and the two would overlap. */
++    const char *text = g_want_menu[0] ? (panel ? "" : g_want_menu) : g_want;
++    int centred = g_want_menu[0] != '\0' && !panel;
+ 
+     if (scale < 1) scale = 1;
+     if (!text[0] || !out || !width || !height)
+@@ -496,6 +501,7 @@ restore:
+ 
+ void d3d8_overlay_shutdown(void)
+ {
++    d3d8_menu_shutdown();
+     rhi_view_destroy(g.srv);             g.srv = NULL;
+     rhi_image_destroy(g.texture);        g.texture = NULL;
+     rhi_buffer_destroy(g.cb);            g.cb = NULL;
+diff --git a/src/d3d/d3d8_overlay.h b/src/d3d/d3d8_overlay.h
+index 4bf86d0..09905a9 100644
+--- a/src/d3d/d3d8_overlay.h
++++ b/src/d3d/d3d8_overlay.h
+@@ -54,6 +54,88 @@ void d3d8_overlay_set_menu(const char *text);
+ void d3d8_overlay_present(RhiView *out, unsigned w, unsigned h,
+                           unsigned pic_x, unsigned pic_y, unsigned pic_h);
+ 
++/* ---- the settings menu, drawn as a panel ----------------------------------
++ *
++ * The in-game settings menu (src/hle/hle_settings_menu.c) hands its whole
++ * state over as one D3D8Menu: tabs, rows, the selection, the description of
++ * the selected row. d3d8_menu.cpp draws it with Dear ImGui at the window's
++ * own resolution, over the picture. What the menu means stays in src/hle;
++ * this side only lays it out, draws it, and reports what the pointer did
++ * (d3d8_menu_take_action), which the menu then applies as it would a key. */
++#define D3D8_MENU_MAX_TABS  6
++#define D3D8_MENU_MAX_ROWS 24
++
++enum {
++    D3D8_MENU_ROW_GROUP = 0,      /* a heading over the rows after it */
++    D3D8_MENU_ROW_SETTING,        /* a value with arrows: the selectable kind */
++    D3D8_MENU_ROW_INFO            /* a label and a value, nothing to change */
++};
++enum {
++    D3D8_MENU_TAG_NOW          = 1,   /* applies at once */
++    D3D8_MENU_TAG_RESTART      = 2,   /* applies at the next start */
++    D3D8_MENU_TAG_EXPERIMENTAL = 4,
++    D3D8_MENU_TAG_CHANGED      = 8,   /* not the default */
++    D3D8_MENU_TAG_ENV          = 16   /* an environment variable overrides it */
++};
++
++typedef struct {
++    int  kind;                    /* D3D8_MENU_ROW_* */
++    int  tags;                    /* D3D8_MENU_TAG_* */
++    int  index, count, def;       /* the value's place among count, the default's */
++    char label[48];
++    char value[40];
++} D3D8MenuRow;
++
++typedef struct {
++    int  tab_count, tab;
++    char tabs[D3D8_MENU_MAX_TABS][20];
++    int  row_count;
++    D3D8MenuRow rows[D3D8_MENU_MAX_ROWS];
++    int  sel;                     /* a row, or -1 */
++    int  button;                  /* -1, or the focused footer button: 0 Resume, 1 Quit */
++    unsigned serial;              /* bumped when sel/tab moved by a key: scroll to it */
++    char title[24];
++    char subtitle[96];
++    char info_title[48];
++    char info_text[400];
++    char info_default[40];
++    char info_when[48];
++    char info_options[160];
++    char status[96];              /* e.g. "2 changes apply at the next start" */
++    char warning[112];            /* e.g. the settings file could not be written */
++} D3D8Menu;
++
++/* The menu to draw from now on, copied; NULL hides it. Any thread. */
++void d3d8_menu_set(const D3D8Menu *m);
++
++/* What the pointer did over the panel, oldest first; 1 while there was one.
++ * Read by the menu on its own thread. */
++enum {
++    D3D8_MENU_ACT_NONE = 0,
++    D3D8_MENU_ACT_TAB,            /* index: the tab clicked */
++    D3D8_MENU_ACT_HOVER,          /* index: the row the pointer moved onto */
++    D3D8_MENU_ACT_STEP,           /* index: the row; step: -1 or 1 (a click on it or its arrows) */
++    D3D8_MENU_ACT_BUTTON          /* index: 0 Resume, 1 Quit */
++};
++typedef struct { int kind, index, step; } D3D8MenuAction;
++int d3d8_menu_take_action(D3D8MenuAction *out);
++
++/* The pointer, from the window's own thread: its position in client pixels
++ * (inside 0 when it left the window), the left button, and the wheel (in
++ * WHEEL_DELTA units, 120 a notch, positive away from the user). */
++void d3d8_menu_pointer(int x, int y, int inside);
++void d3d8_menu_pointer_button(int down);
++void d3d8_menu_pointer_wheel(int delta);
++
++/* Draws the menu, when one is set, over `out` (w x h pixels; the picture at
++ * pic_x, pic_y, pic_h tall). 0 when it could not (nothing set, or the
++ * renderer for it failed to start), and the caller falls back to the text
++ * panel. Saves and restores the output state as d3d8_overlay_present does,
++ * and binds its own sampler on slot 8. */
++int  d3d8_menu_present(RhiView *out, unsigned w, unsigned h,
++                       unsigned pic_x, unsigned pic_y, unsigned pic_h);
++void d3d8_menu_shutdown(void);
++
+ /* Releases everything. Called from the device teardown. */
+ void d3d8_overlay_shutdown(void);
+ 
+diff --git a/src/hle/hle_d3d8.c b/src/hle/hle_d3d8.c
+index b1ecd6f..0550153 100644
+--- a/src/hle/hle_d3d8.c
++++ b/src/hle/hle_d3d8.c
+@@ -455,8 +455,57 @@ static void shadow_mouse_raw(LPARAM lp)
+         recomp_mouse_move((float)ri.data.mouse.lLastX, (float)ri.data.mouse.lLastY);
+ }
+ 
++/* While the settings menu is open the pointer is the menu's: given back if
++ * mouse look held it, shown, and its moves, left button and wheel sent to
++ * the panel (d3d8_menu_pointer) instead of the bindings. 1 when the
++ * message was one of those. */
++static int shadow_menu_mouse(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
++{
++    static int tracking;
++
++    if (!hle_settings_menu_open()) {
++        tracking = 0;
++        return 0;
++    }
++    if (g_mouse_captured)
++        shadow_mouse_capture(hwnd, 0);
++    switch (msg) {
++    case WM_MOUSEMOVE:
++        if (!tracking) {
++            TRACKMOUSEEVENT t;
++            t.cbSize = sizeof t;
++            t.dwFlags = TME_LEAVE;
++            t.hwndTrack = hwnd;
++            t.dwHoverTime = 0;
++            tracking = TrackMouseEvent(&t) ? 1 : 0;
++        }
++        d3d8_menu_pointer((short)LOWORD(lp), (short)HIWORD(lp), 1);
++        return 1;
++    case WM_MOUSELEAVE:
++        tracking = 0;
++        d3d8_menu_pointer(-1, -1, 0);
++        return 1;
++    case WM_LBUTTONDOWN:
++        d3d8_menu_pointer((short)LOWORD(lp), (short)HIWORD(lp), 1);
++        d3d8_menu_pointer_button(1);
++        return 1;
++    case WM_LBUTTONUP:
++        d3d8_menu_pointer_button(0);
++        return 1;
++    case WM_MOUSEWHEEL:
++        d3d8_menu_pointer_wheel(GET_WHEEL_DELTA_WPARAM(wp));
++        return 1;
++    case WM_RBUTTONDOWN: case WM_RBUTTONUP: case WM_MBUTTONDOWN: case WM_MBUTTONUP:
++    case WM_XBUTTONDOWN: case WM_XBUTTONUP:
++        return 1;                       /* not the game's while the menu is up */
++    }
++    return 0;
++}
++
+ static LRESULT CALLBACK shadow_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+ {
++    if (shadow_menu_mouse(hwnd, msg, wp, lp))
++        return msg == WM_XBUTTONDOWN || msg == WM_XBUTTONUP ? TRUE : 0;
+     if (shadow_mouse_button(hwnd, msg, wp))
+         return msg == WM_XBUTTONDOWN || msg == WM_XBUTTONUP ? TRUE : 0;
+     switch (msg) {
+@@ -500,7 +549,8 @@ static LRESULT CALLBACK shadow_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
+     case WM_SETCURSOR:
+         /* The game has no pointer; over a fullscreen picture it is in the
+          * way, and with mouse look the pointer is not a pointer at all. */
+-        if ((g_shadow_fullscreen || g_mouse_captured) && LOWORD(lp) == HTCLIENT) {
++        if ((g_shadow_fullscreen || g_mouse_captured) && LOWORD(lp) == HTCLIENT &&
++            !hle_settings_menu_open()) {
+             SetCursor(NULL);
+             return TRUE;
+         }
+@@ -780,6 +830,12 @@ static int shadow_key_down(int vk)
+ #define SHADOW_KEY_F11  VK_F11
+ #define SHADOW_KEY_F2   VK_F2
+ #define SHADOW_KEY_ESC  VK_ESCAPE
++/* The settings menu's own keys while it is open: tabs, and the default. */
++#define SHADOW_KEY_TAB   VK_TAB
++#define SHADOW_KEY_SHIFT VK_SHIFT
++#define SHADOW_KEY_PGUP  VK_PRIOR
++#define SHADOW_KEY_PGDN  VK_NEXT
++#define SHADOW_KEY_DEL   VK_DELETE
+ 
+ int hle_fullscreen(void)
+ {
+@@ -919,6 +975,11 @@ static int shadow_key_down(int key)
+  * (Start+Back) there. */
+ #define SHADOW_KEY_F2   (-1)
+ #define SHADOW_KEY_ESC  (-1)
++#define SHADOW_KEY_TAB   (-1)
++#define SHADOW_KEY_SHIFT (-1)
++#define SHADOW_KEY_PGUP  (-1)
++#define SHADOW_KEY_PGDN  (-1)
++#define SHADOW_KEY_DEL   (-1)
+ 
+ int hle_fullscreen(void)
+ {
+@@ -3217,7 +3278,7 @@ static void held_redraw(void)
+         g_overlay_set = -1;
+     }
+     d3d8_overlay_set_text(g_overlay_shown ? g_overlay_line : NULL);
+-    d3d8_overlay_set_menu(hle_settings_menu_text());
++    hle_settings_menu_publish();
+     xbox_D3D8Represent();
+ }
+ 
+@@ -3262,13 +3323,34 @@ static void overlay_frame(void)
+         static int f2_was_down, esc_was_down;
+         int f2 = SHADOW_KEY_F2 >= 0 && shadow_key_down(SHADOW_KEY_F2);
+         int esc = SHADOW_KEY_ESC >= 0 && shadow_key_down(SHADOW_KEY_ESC);
++        static int tab_was_down, pgup_was_down, pgdn_was_down, del_was_down;
++        int tab = SHADOW_KEY_TAB >= 0 && shadow_key_down(SHADOW_KEY_TAB);
++        int pgup = SHADOW_KEY_PGUP >= 0 && shadow_key_down(SHADOW_KEY_PGUP);
++        int pgdn = SHADOW_KEY_PGDN >= 0 && shadow_key_down(SHADOW_KEY_PGDN);
++        int del = SHADOW_KEY_DEL >= 0 && shadow_key_down(SHADOW_KEY_DEL);
+         if (f2 && !f2_was_down)
+             hle_settings_menu_toggle();
+         else if (esc && !esc_was_down && hle_settings_menu_open())
+             hle_settings_menu_toggle();
++        if (hle_settings_menu_open()) {
++            /* Tab and Shift+Tab, PageUp and PageDown: the tabs. Delete:
++             * the selected setting's default, as Y on a pad. */
++            if (tab && !tab_was_down)
++                hle_settings_menu_tab(SHADOW_KEY_SHIFT >= 0 && shadow_key_down(SHADOW_KEY_SHIFT) ? -1 : 1);
++            if (pgup && !pgup_was_down)
++                hle_settings_menu_tab(-1);
++            if (pgdn && !pgdn_was_down)
++                hle_settings_menu_tab(1);
++            if (del && !del_was_down)
++                hle_settings_menu_default();
++        }
+         f2_was_down = f2;
+         esc_was_down = esc;
+-        d3d8_overlay_set_menu(hle_settings_menu_text());
++        tab_was_down = tab;
++        pgup_was_down = pgup;
++        pgdn_was_down = pgdn;
++        del_was_down = del;
++        hle_settings_menu_publish();
+     }
+     f9  = shadow_key_down(SHADOW_KEY_F9);
+     f10 = shadow_key_down(SHADOW_KEY_F10);
+diff --git a/src/hle/hle_settings.h b/src/hle/hle_settings.h
+index 2cd92b5..f7bef41 100644
+--- a/src/hle/hle_settings.h
++++ b/src/hle/hle_settings.h
+@@ -34,8 +34,18 @@ void hle_set_fullscreen(int on);
+  * while it is open. */
+ int  hle_settings_menu_open(void);
+ void hle_settings_menu_toggle(void);
+-/* What to draw: the menu's lines, or NULL while it is closed. */
++/* What to draw: the menu's lines, or NULL while it is closed. The text
++ * panel, drawn only when the renderer's own panel cannot be. */
+ const char *hle_settings_menu_text(void);
++/* Hands the menu to the renderer for the next present (d3d8_menu_set and
++ * the text above), after applying what the pointer did since the last one.
++ * Called on the presenting thread, every frame. */
++void hle_settings_menu_publish(void);
++/* While open: the previous (-1) or next (1) tab, and the selected setting's
++ * default; LB/RB and Y on a pad, Tab/PageUp/PageDown and Delete on the
++ * keyboard. */
++void hle_settings_menu_tab(int d);
++void hle_settings_menu_default(void);
+ /* Called with every sample of a port (src/hle/input_host.c), after the
+  * person and any script: Start+Back on port 1 opens or closes the menu, and
+  * while it is open (or the combination is still held) the sample is the
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index a6f655b..d554966 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -2,21 +2,27 @@
+  * hle_settings_menu.c -- the desktop's in-game settings menu.
+  *
+  * F2 on the keyboard, or Start+Back together on a pad, opens a panel over
+- * the game (drawn by the renderer's overlay, d3d8_overlay_set_menu) with the
+- * settings a player changes most: the frame-rate cap, frame interpolation,
+- * the frame-rate counter and fullscreen apply at once; the rest (internal
+- * resolution, widescreen, texture filtering, variable refresh, and the
+- * title's own lines such as the movies) are written to the settings file and
+- * take effect at the next start, which the panel says.
++ * the game with the settings a player changes most, in tabs: Display (the
++ * window, the picture, frame rates), Game (the title's own lines: movies,
++ * sound...), Controls (vibration strength) and About. Each row says whether
++ * it applies at once or at the next start, and the selected row is
++ * described beside the list. The game keeps running behind it.
+  *
+  * Every change is written to the settings file as it is made
+  * (recomp_config_set), so the launcher and the next run see it.
+  *
++ * The menu is drawn by the renderer (src/d3d/d3d8_menu.cpp), which is
++ * handed the whole state as a D3D8Menu each frame (hle_settings_menu_publish)
++ * and hands back what the pointer did. If that renderer cannot start, the
++ * text panel of old is drawn from hle_settings_menu_text instead.
++ *
+  * Input. The menu reads port 1 through the same path the game does
+  * (src/hle/input_host.c calls hle_settings_menu_input with every sample), so
+- * a pad and the keyboard's default bindings both drive it: D-pad or arrows
+- * choose, left/right change, A (Z) changes too, B (X), Back (Backspace), F2
+- * or Esc close. While it is open every port reads as untouched, so nothing
++ * a pad and the keyboard's default bindings both drive it: D-pad, stick or
++ * arrows choose, left/right change, A changes too, Y puts the default back,
++ * LB/RB (the triggers, or Black/White) switch tabs, B, Back, F2 or Esc
++ * close. The window adds Tab and PageUp/PageDown for tabs and the mouse
++ * (hle_d3d8.c). While it is open every port reads as untouched, so nothing
+  * reaches the game, and the Start+Back that opened or closed it is held back
+  * from the game until both are released.
+  */
+@@ -28,8 +34,48 @@
+ #include "hle_settings.h"
+ #include "input_model.h"
+ #include "input_host.h"
++#include "input_bindings.h"
+ #include "recomp_config.h"
++#include "d3d8_overlay.h"
++
++#if defined(_WIN32)
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#include <windows.h>
++#else
++#include <pthread.h>
++#endif
++
++extern void xbox_HostExit(const char *why);
+ 
++/* One lock over the whole menu: pad input arrives on the input thread, the
++ * keyboard and the pointer's actions on the presenting thread, and both
++ * change the same selection and rows. Every public entry takes it; the
++ * static functions below run with it held. Quitting is done after it is
++ * released (xbox_HostExit does not come back). */
++#if defined(_WIN32)
++static SRWLOCK g_menu_lock = SRWLOCK_INIT;
++static void menu_lock(void)   { AcquireSRWLockExclusive(&g_menu_lock); }
++static void menu_unlock(void) { ReleaseSRWLockExclusive(&g_menu_lock); }
++#else
++static pthread_mutex_t g_menu_lock = PTHREAD_MUTEX_INITIALIZER;
++static void menu_lock(void)   { pthread_mutex_lock(&g_menu_lock); }
++static void menu_unlock(void) { pthread_mutex_unlock(&g_menu_lock); }
++#endif
++static int g_quit;                       /* Quit game chosen: under the lock */
++
++/* Open or closed: written under the lock, and read without it by
++ * hle_settings_menu_open (the window's thread asks it for every mouse
++ * message), so its loads and stores are atomic. */
++static volatile long g_open_flag;
++#if defined(_WIN32)
++static int  open_get(void)  { return (int)InterlockedCompareExchange(&g_open_flag, 0, 0); }
++static void open_set(int v) { InterlockedExchange(&g_open_flag, v ? 1 : 0); }
++#else
++static int  open_get(void)  { return (int)__atomic_load_n(&g_open_flag, __ATOMIC_SEQ_CST); }
++static void open_set(int v) { __atomic_store_n(&g_open_flag, v ? 1L : 0L, __ATOMIC_SEQ_CST); }
++#endif
+ 
+ enum {
+     PAD_UP = 0x0001u, PAD_DOWN = 0x0002u, PAD_LEFT = 0x0004u, PAD_RIGHT = 0x0008u,
+@@ -38,81 +84,146 @@ enum {
+ 
+ /* LIVE_TITLE: the title reads the key itself while it runs
+  * (recomp_config_lookup returns what the menu set), so it applies at once. */
+-enum { LIVE_NONE, LIVE_CAP, LIVE_INTERP, LIVE_FPS, LIVE_FULLSCREEN, LIVE_TITLE };
++enum { LIVE_NONE, LIVE_CAP, LIVE_INTERP, LIVE_FPS, LIVE_FULLSCREEN, LIVE_TITLE, LIVE_VIBRATION };
++
++enum { TAB_DISPLAY, TAB_GAME, TAB_CONTROLS, TAB_ABOUT, TAB_COUNT };
++static const char *const TAB_NAMES[TAB_COUNT] = { "Display", "Game", "Controls", "About" };
+ 
+ typedef struct {
++    int tab;
++    const char *group;                   /* the heading this row sits under */
+     const char *label;
+     const char *key;                     /* the settings file's key */
+     const char *env;                     /* the variable that overrides it */
+     int live;                            /* how it applies now, or LIVE_NONE */
++    int title;                           /* the title's own line: shown only if known */
++    int experimental;
+     int n;
+     const char *vals[8];                 /* as written to the file */
+     const char *names[8];                /* as shown */
++    const char *help;
+ } Item;
+ 
++#define FPS_VALS  { "30", "60", "90", "120", "144", "240", "0" }
++
+ static const Item ITEMS[] = {
+-    { "Frame rate cap",      "frame_cap",        "RECOMP_FPS_CAP",       LIVE_CAP, 4,
+-      { "adaptive", "60", "30", "0" }, { "adaptive", "60", "30", "off" } },
+-    { "Frame interpolation", "frame_interp",     "RECOMP_FRAME_INTERP",  LIVE_INTERP, 4,
+-      { "1", "2", "3", "4" }, { "off", "2x", "3x", "4x" } },
+-    { "Frame-rate counter",  "fps_overlay",      "RECOMP_FPS_OVERLAY",   LIVE_FPS, 2,
+-      { "0", "1" }, { "off", "on" } },
+-    { "Fullscreen",          "fullscreen",       "RECOMP_FULLSCREEN",    LIVE_FULLSCREEN, 2,
+-      { "0", "1" }, { "off", "on" } },
+-    { "Internal resolution", "resolution_scale", "RECOMP_RES_SCALE",     LIVE_NONE, 8,
+-      { "1", "2", "3", "4", "5", "6", "7", "8" }, { "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x" } },
+-    { "Widescreen (16:9)",   "widescreen",       "RECOMP_WIDESCREEN",    LIVE_NONE, 2,
+-      { "0", "1" }, { "off", "on" } },
+-    { "Texture sharpness",   "anisotropy",       "RECOMP_ANISO",         LIVE_NONE, 6,
+-      { "0", "1", "2", "4", "8", "16" }, { "off", "1x", "2x", "4x", "8x", "16x" } },
+-    { "Variable refresh",    "vrr",              "RECOMP_VRR",           LIVE_NONE, 2,
+-      { "0", "1" }, { "off", "on" } },
+-};
+-#define ITEM_COUNT ((int)(sizeof ITEMS / sizeof ITEMS[0]))
++    /* Display */
++    { TAB_DISPLAY, "Window", "Fullscreen", "fullscreen", "RECOMP_FULLSCREEN", LIVE_FULLSCREEN, 0, 0, 2,
++      { "0", "1" }, { "Off", "On" },
++      "Fills the screen the window is on, without borders. Alt+Enter switches at any time." },
++    { TAB_DISPLAY, "Window", "Variable refresh", "vrr", "RECOMP_VRR", LIVE_NONE, 0, 0, 2,
++      { "0", "1" }, { "Off", "On" },
++      "In fullscreen, hands each frame to a G-SYNC or FreeSync display the moment it is ready. "
++      "The display and its driver must have it switched on. Turn it off if you see stutter." },
++    { TAB_DISPLAY, "Window", "Frame-rate counter", "fps_overlay", "RECOMP_FPS_OVERLAY", LIVE_FPS, 0, 0, 2,
++      { "0", "1" }, { "Off", "On" },
++      "Shows frames per second in the top-left corner. F9 toggles it too." },
++    { TAB_DISPLAY, "Picture", "Widescreen (16:9)", "widescreen", "RECOMP_WIDESCREEN", LIVE_NONE, 0, 0, 2,
++      { "0", "1" }, { "Off", "On" },
++      "Shows more of the world to the sides instead of the original 4:3 picture. "
++      "Menus keep their 4:3 frame." },
++    { TAB_DISPLAY, "Picture", "Internal resolution", "resolution_scale", "RECOMP_RES_SCALE", LIVE_NONE, 0, 0, 8,
++      { "1", "2", "3", "4", "5", "6", "7", "8" }, { "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x" },
++      "Renders the 3D world at a multiple of the Xbox's 640x480 and filters it down. "
++      "3x is about 1440p, 4x about 4K. Higher is sharper and asks more of the graphics card." },
++    { TAB_DISPLAY, "Picture", "Texture sharpness", "anisotropy", "RECOMP_ANISO", LIVE_NONE, 0, 0, 6,
++      { "0", "1", "2", "4", "8", "16" }, { "Off", "1x", "2x", "4x", "8x", "16x" },
++      "Anisotropic filtering: keeps the ground, decks and water sharp at a slant. "
++      "Off uses the game's own filtering." },
++    { TAB_DISPLAY, "Frame rate", "Frame rate cap", "frame_cap", "RECOMP_FPS_CAP", LIVE_CAP, 0, 0, 4,
++      { "adaptive", "60", "30", "0" }, { "Adaptive", "60", "30", "Off" },
++      "The most frames drawn a second. Adaptive follows the display. The game itself keeps "
++      "its own speed. F10 steps through these too." },
++    { TAB_DISPLAY, "Frame rate", "Frame interpolation", "frame_interp", "RECOMP_FRAME_INTERP", LIVE_INTERP, 0, 0, 4,
++      { "1", "2", "3", "4" }, { "Off", "2x", "3x", "4x" },
++      "Draws frames in between the game's own, for smoother motion where a scene still "
++      "runs at 30. Not needed where a scene below runs at a higher rate." },
++    { TAB_DISPLAY, "Frame rate by scene", "Sailing", "sea_fps", "RECOMP_PIRATES_SEA_FPS", LIVE_TITLE, 1, 1, 7,
++      FPS_VALS, { "30 (off)", "60", "90", "120", "144", "240", "Unlocked" },
++      "A real higher frame rate at sea: the ship, the wind, other ships and the calendar run "
++      "at the chosen rate with the game's normal speed. 30 is the original." },
++    { TAB_DISPLAY, "Frame rate by scene", "Sea battles", "battle_fps", "RECOMP_PIRATES_BATTLE_FPS", LIVE_TITLE, 1, 1, 7,
++      FPS_VALS, { "30 (off)", "60", "90", "120", "144", "240", "Unlocked" },
++      "A real higher frame rate in ship battles: cannons, smoke and ship motion. "
++      "30 is the original." },
++    { TAB_DISPLAY, "Frame rate by scene", "Towns and rooms", "town_fps", "RECOMP_PIRATES_TOWN_FPS", LIVE_TITLE, 1, 1, 7,
++      FPS_VALS, { "33 (off)", "60", "90", "120", "144", "240", "Unlocked" },
++      "Taverns, the governor's mansion and the other rooms in a town. 33 is the original pacing." },
++
++    /* Game: the title's own lines */
++    { TAB_GAME, "Start-up", "Movies", "skip_intro", "RECOMP_PIRATES_SKIP_INTRO", LIVE_NONE, 1, 0, 3,
++      { "1", "intro", "0" }, { "Skip all", "Skip intro", "Play all" },
++      "Which of the game's movies play. Skip intro skips the logos and the title movie and "
++      "still plays the story movies." },
++    { TAB_GAME, "Start-up", "Legal screen", "skip_legal", "RECOMP_PIRATES_SKIP_LEGAL", LIVE_NONE, 1, 0, 2,
++      { "1", "0" }, { "Skip", "Show" },
++      "The copyright, ESRB and middleware notice shown when the game starts." },
++    { TAB_GAME, "Sound", "Sound", "mute", "RECOMP_MUTE", LIVE_NONE, 1, 0, 2,
++      { "0", "1" }, { "On", "Off" },
++      "Turns all of the game's sound off." },
++    { TAB_GAME, "System", "Game priority", "priority", "RECOMP_PRIORITY", LIVE_NONE, 0, 0, 2,
++      { "0", "1" }, { "Normal", "Above normal" },
++      "Gives the game more processor time than programs in the background, which keeps "
++      "sailing smooth while something else is busy." },
+ 
+-/* The title's own lines, if its settings header has them: movies and sound.
+- * Shown only when the file (or the defaults) know the key. */
+-static const Item TITLE_ITEMS[] = {
+-    { "Movies",              "skip_intro",       NULL,                   LIVE_NONE, 3,
+-      { "1", "intro", "0" }, { "skip all", "skip intro", "play all" } },
+-    { "Legal screen",        "skip_legal",       "RECOMP_PIRATES_SKIP_LEGAL", LIVE_NONE, 2,
+-      { "1", "0" }, { "skip", "show" } },
+-    { "Sound",               "mute",             "RECOMP_MUTE",          LIVE_NONE, 2,
+-      { "0", "1" }, { "on", "off" } },
+-    { "Sailing frame rate (experimental)", "sea_fps", "RECOMP_PIRATES_SEA_FPS", LIVE_TITLE, 7,
+-      { "30", "60", "90", "120", "144", "240", "0" },
+-      { "30 (off)", "60", "90", "120", "144", "240", "unlocked" } },
+-    { "Battle frame rate (experimental)", "battle_fps", "RECOMP_PIRATES_BATTLE_FPS", LIVE_TITLE, 7,
+-      { "30", "60", "90", "120", "144", "240", "0" },
+-      { "30 (off)", "60", "90", "120", "144", "240", "unlocked" } },
+-    { "Town frame rate (experimental)", "town_fps", "RECOMP_PIRATES_TOWN_FPS", LIVE_TITLE, 7,
+-      { "30", "60", "90", "120", "144", "240", "0" },
+-      { "33 (off)", "60", "90", "120", "144", "240", "unlocked" } },
++    /* Controls */
++    { TAB_CONTROLS, "Pad", "Vibration strength", "vibration", "RECOMP_VIBRATION", LIVE_VIBRATION, 0, 0, 7,
++      { "0", "25", "50", "75", "100", "125", "150" },
++      { "Off", "25%", "50%", "75%", "100%", "125%", "150%" },
++      "How strongly the pad rumbles when the game asks it to. Above 100% makes weak rumbles "
++      "stronger; the strongest stay at the pad's maximum." },
+ };
+-#define TITLE_ITEM_COUNT ((int)(sizeof TITLE_ITEMS / sizeof TITLE_ITEMS[0]))
++#define ITEM_COUNT ((int)(sizeof ITEMS / sizeof ITEMS[0]))
+ 
+-static volatile int g_open;
+-static int  g_sel;
+-static int  g_restart_needed;
++static int  g_tab;
++static int  g_sel = -1;                  /* index into g_rows of the selected setting */
++static int  g_button = -1;               /* the footer button with the focus, or -1 */
++static unsigned g_serial;
++static int  g_restart_count;
+ static int  g_save_failed;               /* the last change missed the settings file */
+ static int  g_swallow;                   /* Start+Back still down after a toggle */
+ static unsigned g_prev_buttons;
+-static int  g_prev_a, g_prev_b;
+-static const Item *g_items[ITEM_COUNT + TITLE_ITEM_COUNT];
+-static int  g_count;
++static int  g_prev_a, g_prev_b, g_prev_y, g_prev_lb, g_prev_rb;
++static int  g_shown[ITEM_COUNT];         /* the item is in the menu */
++static int  g_built;
+ static char g_text[2048];
+ 
++/* The rows of the current tab, in order: groups, settings, info lines. */
++typedef struct { int kind; int item; const char *label; char value[40]; } Row;
++static Row g_rows[D3D8_MENU_MAX_ROWS];
++static int g_row_count;
++
+ static void build_list(void)
+ {
+     int i;
+ 
+-    if (g_count)
++    if (g_built)
+         return;
++    g_built = 1;
+     for (i = 0; i < ITEM_COUNT; i++)
+-        g_items[g_count++] = &ITEMS[i];
+-    for (i = 0; i < TITLE_ITEM_COUNT; i++)
+-        if (recomp_config_lookup(NULL, TITLE_ITEMS[i].key))
+-            g_items[g_count++] = &TITLE_ITEMS[i];
++        g_shown[i] = !ITEMS[i].title || recomp_config_lookup(NULL, ITEMS[i].key) != NULL;
++}
++
++static int env_set(const Item *it)
++{
++    const char *e = it->env ? getenv(it->env) : NULL;
++    return e && *e;
++}
++
++static int value_index(const Item *it, const char *v)
++{
++    int i;
++
++    for (i = 0; v && i < it->n; i++)
++        if (strcmp(v, it->vals[i]) == 0)
++            return i;
++    return -1;
++}
++
++static int default_index(const Item *it)
++{
++    int i = value_index(it, recomp_config_default(it->key));
++    return i < 0 ? 0 : i;
+ }
+ 
+ /* The value shown: what is in effect for a live setting, the file's (or the
+@@ -126,10 +237,8 @@ static int current_index(const Item *it)
+     switch (it->live) {
+     case LIVE_CAP:
+         v = hle_frame_cap();
+-        for (i = 0; i < it->n; i++)
+-            if (strcmp(v, it->names[i]) == 0)
+-                return i;
+-        return 0;
++        if (strcmp(v, "off") == 0) v = "0";
++        break;
+     case LIVE_INTERP:
+         snprintf(buf, sizeof buf, "%d", hle_frame_interp());
+         v = buf;
+@@ -140,35 +249,112 @@ static int current_index(const Item *it)
+     case LIVE_FULLSCREEN:
+         v = hle_fullscreen() ? "1" : "0";
+         break;
++    case LIVE_VIBRATION:
++        snprintf(buf, sizeof buf, "%d", recomp_bindings_vibration());
++        v = buf;
++        break;
+     default:
+         v = recomp_config_lookup(it->env, it->key);
+         if (!v || !*v)
+-            v = strcmp(it->key, "resolution_scale") == 0 ? "1" : it->vals[0];
++            v = recomp_config_default(it->key);
+         break;
+     }
+-    for (i = 0; i < it->n; i++)
+-        if (strcmp(v, it->vals[i]) == 0)
+-            return i;
+-    return 0;
++    if ((i = value_index(it, v)) >= 0)
++        return i;
++    /* Not one of the menu's values (a hand-edited file): the default's place,
++     * so a step lands on a real value. */
++    return default_index(it);
+ }
+ 
+-static void change(int dir)
++static void build_rows(void)
+ {
+-    const Item *it;
++    const char *group = NULL;
+     int i;
+ 
+-    if (g_sel >= g_count)                /* "Close" */
++    build_list();
++    g_row_count = 0;
++#define ROW(k, it, lab) do { if (g_row_count < D3D8_MENU_MAX_ROWS) { \
++        g_rows[g_row_count].kind = (k); g_rows[g_row_count].item = (it); \
++        g_rows[g_row_count].label = (lab); g_rows[g_row_count].value[0] = '\0'; \
++        g_row_count++; } } while (0)
++    if (g_tab == TAB_ABOUT) {
++        const char *path = recomp_config_path();
++        ROW(D3D8_MENU_ROW_GROUP, -1, "This build");
++        ROW(D3D8_MENU_ROW_INFO, -1, "Renderer");
++        snprintf(g_rows[g_row_count - 1].value, sizeof g_rows[0].value, "%s",
++                 rhi_backend_name() ? rhi_backend_name() : "-");
++        ROW(D3D8_MENU_ROW_INFO, -1, "Settings file");
++        if (path) {
++            const char *base = path, *c;
++            for (c = path; *c; c++)          /* after the last separator of either kind */
++                if (*c == '\\' || *c == '/')
++                    base = c + 1;
++            snprintf(g_rows[g_row_count - 1].value, sizeof g_rows[0].value, "%s", base);
++        } else {
++            snprintf(g_rows[g_row_count - 1].value, sizeof g_rows[0].value, "none");
++        }
++        ROW(D3D8_MENU_ROW_GROUP, -1, "Keys");
++        ROW(D3D8_MENU_ROW_INFO, -1, "This menu");
++        snprintf(g_rows[g_row_count - 1].value, sizeof g_rows[0].value, "F2 or Start+Back");
++        ROW(D3D8_MENU_ROW_INFO, -1, "Frame-rate counter");
++        snprintf(g_rows[g_row_count - 1].value, sizeof g_rows[0].value, "F9");
++        ROW(D3D8_MENU_ROW_INFO, -1, "Fullscreen");
++        snprintf(g_rows[g_row_count - 1].value, sizeof g_rows[0].value, "Alt+Enter");
++        ROW(D3D8_MENU_ROW_INFO, -1, "Capture a frame");
++        snprintf(g_rows[g_row_count - 1].value, sizeof g_rows[0].value, "F11");
++        return;
++    }
++    for (i = 0; i < ITEM_COUNT; i++) {
++        if (ITEMS[i].tab != g_tab || !g_shown[i])
++            continue;
++        if (!group || strcmp(group, ITEMS[i].group) != 0) {
++            group = ITEMS[i].group;
++            ROW(D3D8_MENU_ROW_GROUP, -1, group);
++        }
++        ROW(D3D8_MENU_ROW_SETTING, i, ITEMS[i].label);
++    }
++#undef ROW
++}
++
++static int is_setting(int r)
++{
++    return r >= 0 && r < g_row_count && g_rows[r].kind == D3D8_MENU_ROW_SETTING;
++}
++
++static int first_setting(void)
++{
++    int r;
++
++    for (r = 0; r < g_row_count; r++)
++        if (is_setting(r))
++            return r;
++    return -1;
++}
++
++static void select_tab(int tab)
++{
++    g_tab = (tab + TAB_COUNT) % TAB_COUNT;
++    build_rows();
++    g_sel = first_setting();
++    g_button = g_sel < 0 ? 0 : -1;
++    g_serial++;
++}
++
++static void set_index(const Item *it, int i)
++{
++    int before = current_index(it);
++
++    if (i == before)
+         return;
+-    it = g_items[g_sel];
+-    i = (current_index(it) + dir + it->n) % it->n;
+     g_save_failed = !recomp_config_set(it->key, it->vals[i]);
+     switch (it->live) {
+-    case LIVE_CAP:        hle_set_frame_cap(it->names[i]); break;
++    case LIVE_CAP:        hle_set_frame_cap(strcmp(it->vals[i], "0") == 0 ? "off" : it->vals[i]); break;
+     case LIVE_INTERP:     hle_set_frame_interp(atoi(it->vals[i])); break;
+     case LIVE_FPS:        hle_set_fps_overlay(i); break;
+     case LIVE_FULLSCREEN: hle_set_fullscreen(i); break;
++    case LIVE_VIBRATION:  recomp_bindings_set_vibration(atoi(it->vals[i])); break;
+     case LIVE_TITLE:      break;
+-    default:              g_restart_needed = 1; break;
++    default:              g_restart_count++; break;
+     }
+     fprintf(stderr, "[MENU] %s = %s%s%s\n", it->key, it->vals[i],
+             it->live == LIVE_NONE ? " (at the next start)" : "",
+@@ -176,68 +362,343 @@ static void change(int dir)
+     fflush(stderr);
+ }
+ 
++static void change(int dir)
++{
++    const Item *it;
++
++    if (!is_setting(g_sel) || g_button >= 0)
++        return;
++    it = &ITEMS[g_rows[g_sel].item];
++    set_index(it, (current_index(it) + dir + it->n) % it->n);
++}
++
++static void reset_default(void)
++{
++    const Item *it;
++
++    if (!is_setting(g_sel) || g_button >= 0)
++        return;
++    it = &ITEMS[g_rows[g_sel].item];
++    set_index(it, default_index(it));
++}
++
++static void quit_game(void)
++{
++    fprintf(stderr, "[MENU] Quit game\n");
++    fflush(stderr);
++    open_set(0);
++    d3d8_menu_set(NULL);
++    g_quit = 1;                          /* the caller exits, unlocked */
++}
++
++/* Under the lock: whether Quit was chosen, and the request consumed. */
++static int take_quit(void)
++{
++    int q = g_quit;
++    g_quit = 0;
++    return q;
++}
++
++/* After a public entry has released the lock, with what take_quit said. */
++static void quit_if(int q)
++{
++    if (q)
++        xbox_HostExit("Quit game, from the settings menu");
++}
++
++/* Up and down: through the settings, then onto the footer's buttons. */
++static void move(int dy)
++{
++    int r;
++
++    if (g_button >= 0) {
++        if (dy < 0) {
++            for (r = g_row_count - 1; r >= 0 && !is_setting(r); r--) ;
++            if (r >= 0) { g_button = -1; g_sel = r; }
++        }
++        g_serial++;
++        return;
++    }
++    for (r = g_sel + dy; r >= 0 && r < g_row_count && !is_setting(r); r += dy) ;
++    if (r >= 0 && r < g_row_count)
++        g_sel = r;
++    else if (dy > 0)
++        g_button = 0;
++    g_serial++;
++}
++
+ int hle_settings_menu_open(void)
+ {
+-    return g_open;
++    return open_get();
+ }
+ 
+-void hle_settings_menu_toggle(void)
++static void toggle(void)
+ {
+     build_list();
+-    g_open = !g_open;
+-    fprintf(stderr, "[MENU] settings menu %s\n", g_open ? "opened" : "closed");
++    open_set(!open_get());
++    if (open_get()) {
++        build_rows();
++        if (!is_setting(g_sel))
++            g_sel = first_setting();
++        g_button = g_sel < 0 ? 0 : -1;
++        g_serial++;
++    } else {
++        d3d8_menu_set(NULL);
++    }
++    fprintf(stderr, "[MENU] settings menu %s\n", open_get() ? "opened" : "closed");
+     fflush(stderr);
+ }
+ 
+-const char *hle_settings_menu_text(void)
++void hle_settings_menu_toggle(void)
++{
++    menu_lock();
++    toggle();
++    menu_unlock();
++}
++
++/* The text panel, for when the renderer's own panel cannot be drawn: every
++ * setting in one list, the selected one marked. */
++static const char *menu_text(void)
+ {
+     int i, o = 0, w = 20;
+ 
+-    if (!g_open)
++    if (!open_get())
+         return NULL;
+-    build_list();
+-    for (i = 0; i < g_count; i++)            /* the label column fits the longest */
+-        if ((int)strlen(g_items[i]->label) > w)
+-            w = (int)strlen(g_items[i]->label);
++    build_rows();
++    for (i = 0; i < g_row_count; i++)
++        if ((int)strlen(g_rows[i].label) > w)
++            w = (int)strlen(g_rows[i].label);
+ #define ADD(...) do { if (o < (int)sizeof g_text) \
+         o += snprintf(g_text + o, sizeof g_text - (size_t)o, __VA_ARGS__); } while (0)
+-    ADD("            SETTINGS\n\n");
+-    for (i = 0; i < g_count; i++) {
+-        const Item *it = g_items[i];
+-        int env = it->env && getenv(it->env) && *getenv(it->env) && it->live == LIVE_NONE;
+-        ADD("%s%s %-*s < %-10s >%s\n", i == g_sel ? "\x01" : "", i == g_sel ? ">" : " ",
+-            w, it->label, it->names[current_index(it)],
+-            it->live == LIVE_NONE ? (env ? " *env" : " *") : "");
++    ADD("    SETTINGS: %s   (LB/RB: tab)\n\n", TAB_NAMES[g_tab]);
++    for (i = 0; i < g_row_count; i++) {
++        const Row *r = &g_rows[i];
++        if (r->kind == D3D8_MENU_ROW_GROUP) {
++            ADD("  %s\n", r->label);
++        } else if (r->kind == D3D8_MENU_ROW_INFO) {
++            ADD("   %-*s   %s\n", w, r->label, r->value);
++        } else {
++            const Item *it = &ITEMS[r->item];
++            int sel = i == g_sel && g_button < 0;
++            ADD("%s%s %-*s < %-10s >%s\n", sel ? "\x01" : "", sel ? ">" : " ",
++                w, it->label, it->names[current_index(it)], it->live == LIVE_NONE ? " *" : "");
++        }
+     }
+-    ADD("%s%s Close\n\n", g_sel == g_count ? "\x01" : "", g_sel == g_count ? ">" : " ");
+-    ADD("  * at the next start%s\n", g_restart_needed ? ": restart to apply" : "");
++    ADD("%s%s Resume\n", g_button == 0 ? "\x01" : "", g_button == 0 ? ">" : " ");
++    ADD("%s%s Quit game\n\n", g_button == 1 ? "\x01" : "", g_button == 1 ? ">" : " ");
++    ADD("  * at the next start%s\n", g_restart_count ? ": restart to apply" : "");
+     if (g_save_failed)
+         ADD("  ! Could not save the settings file: this change lasts until you quit\n");
+-    ADD("  Up/Down choose   Left/Right/A change   B/F2 close");
++    ADD("  Up/Down choose   Left/Right/A change   Y default   B/F2 close");
+ #undef ADD
+     return g_text;
+ }
+ 
+-void hle_settings_menu_keys(int dy, int dx, int ok, int back)
++/* The caller gets the text as it is now; a later change rewrites it, which
++ * is how the text panel always worked. */
++const char *hle_settings_menu_text(void)
++{
++    const char *t;
++
++    menu_lock();
++    t = menu_text();
++    menu_unlock();
++    return t;
++}
++
++/* What the pointer did over the panel, applied as keys would be. */
++static void take_pointer_actions(void)
++{
++    D3D8MenuAction a;
++
++    while (d3d8_menu_take_action(&a)) {
++        switch (a.kind) {
++        case D3D8_MENU_ACT_TAB:
++            if (a.index >= 0 && a.index < TAB_COUNT && a.index != g_tab)
++                select_tab(a.index);
++            break;
++        case D3D8_MENU_ACT_HOVER:
++            if (is_setting(a.index)) {
++                g_sel = a.index;
++                g_button = -1;
++            }
++            break;
++        case D3D8_MENU_ACT_STEP:
++            if (is_setting(a.index)) {
++                g_sel = a.index;
++                g_button = -1;
++                change(a.step < 0 ? -1 : 1);
++            }
++            break;
++        case D3D8_MENU_ACT_BUTTON:
++            if (a.index == 0)
++                toggle();
++            else if (a.index == 1)
++                quit_game();
++            return;
++        }
++    }
++}
++
++static void publish(void)
+ {
+-    if (!g_open)
++    static D3D8Menu m;
++    int i;
++
++    if (!open_get()) {
++        d3d8_overlay_set_menu(NULL);
++        return;
++    }
++    take_pointer_actions();
++    if (!open_get()) {
++        d3d8_overlay_set_menu(NULL);
++        return;
++    }
++    build_rows();
++    if (g_button < 0 && !is_setting(g_sel)) {
++        g_sel = first_setting();
++        if (g_sel < 0) g_button = 0;
++    }
++    memset(&m, 0, sizeof m);
++    m.tab_count = TAB_COUNT;
++    m.tab = g_tab;
++    for (i = 0; i < TAB_COUNT; i++)
++        snprintf(m.tabs[i], sizeof m.tabs[i], "%s", TAB_NAMES[i]);
++    m.row_count = g_row_count;
++    for (i = 0; i < g_row_count; i++) {
++        D3D8MenuRow *mr = &m.rows[i];
++        const Row *r = &g_rows[i];
++        mr->kind = r->kind;
++        snprintf(mr->label, sizeof mr->label, "%s", r->label);
++        if (r->kind == D3D8_MENU_ROW_INFO) {
++            snprintf(mr->value, sizeof mr->value, "%s", r->value);
++        } else if (r->kind == D3D8_MENU_ROW_SETTING) {
++            const Item *it = &ITEMS[r->item];
++            mr->index = current_index(it);
++            mr->count = it->n;
++            mr->def = default_index(it);
++            snprintf(mr->value, sizeof mr->value, "%s", it->names[mr->index]);
++            mr->tags = it->live == LIVE_NONE ? D3D8_MENU_TAG_RESTART : D3D8_MENU_TAG_NOW;
++            if (it->experimental) mr->tags |= D3D8_MENU_TAG_EXPERIMENTAL;
++            if (mr->index != mr->def) mr->tags |= D3D8_MENU_TAG_CHANGED;
++            if (env_set(it) && it->live != LIVE_TITLE) mr->tags |= D3D8_MENU_TAG_ENV;
++        }
++    }
++    m.sel = g_button >= 0 ? -1 : g_sel;
++    m.button = g_button;
++    m.serial = g_serial;
++    snprintf(m.title, sizeof m.title, "Settings");
++    snprintf(m.subtitle, sizeof m.subtitle, "F2 or Start+Back to close");
++    if (g_button == 0) {
++        snprintf(m.info_title, sizeof m.info_title, "Resume");
++        snprintf(m.info_text, sizeof m.info_text, "Closes this menu and goes back to the game.");
++    } else if (g_button == 1) {
++        snprintf(m.info_title, sizeof m.info_title, "Quit game");
++        snprintf(m.info_text, sizeof m.info_text,
++                 "Closes the game. Your settings are already saved; your voyage is not, "
++                 "so save it in the game first.");
++    } else if (is_setting(g_sel)) {
++        const Item *it = &ITEMS[g_rows[g_sel].item];
++        int o = 0, k;
++        snprintf(m.info_title, sizeof m.info_title, "%s", it->label);
++        snprintf(m.info_text, sizeof m.info_text, "%s", it->help);
++        snprintf(m.info_default, sizeof m.info_default, "%s", it->names[default_index(it)]);
++        snprintf(m.info_when, sizeof m.info_when, "%s",
++                 it->live == LIVE_NONE ? "Next time the game starts" : "At once");
++        for (k = 0; k < it->n && o < (int)sizeof m.info_options; k++)
++            o += snprintf(m.info_options + o, sizeof m.info_options - (size_t)o, "%s%s",
++                          k ? ", " : "", it->names[k]);
++        if (env_set(it) && it->live != LIVE_TITLE)
++            snprintf(m.warning, sizeof m.warning,
++                     "%s is set, and wins over this setting until it is removed.", it->env);
++    } else if (g_tab == TAB_ABOUT) {
++        snprintf(m.info_title, sizeof m.info_title, "About");
++        snprintf(m.info_text, sizeof m.info_text,
++                 "The renderer, where your settings are kept, and the keys "
++                 "the recomp adds. Useful when you report a problem.");
++    }
++    if (g_restart_count)
++        snprintf(m.status, sizeof m.status, "%d %s at the next start", g_restart_count,
++                 g_restart_count == 1 ? "change applies" : "changes apply");
++    if (g_save_failed)
++        snprintf(m.warning, sizeof m.warning,
++                 "Could not save the settings file: the last change lasts until you quit.");
++    d3d8_menu_set(&m);
++    /* The text panel too, drawn only if the panel above cannot be. */
++    d3d8_overlay_set_menu(menu_text());
++}
++
++void hle_settings_menu_publish(void)
++{
++    int q;
++
++    menu_lock();
++    publish();
++    q = take_quit();
++    menu_unlock();
++    quit_if(q);
++}
++
++static void keys(int dy, int dx, int ok, int back)
++{
++    if (!open_get())
+         return;
+     if (back) {
+-        hle_settings_menu_toggle();
++        toggle();
+         return;
+     }
+     if (dy)
+-        g_sel = (g_sel + dy + g_count + 1) % (g_count + 1);
+-    if (dx)
+-        change(dx);
++        move(dy);
++    if (dx) {
++        if (g_button >= 0) {
++            g_button = dx < 0 ? 0 : 1;
++            g_serial++;
++        } else {
++            change(dx);
++        }
++    }
+     if (ok) {
+-        if (g_sel == g_count)
+-            hle_settings_menu_toggle();
++        if (g_button == 0)
++            toggle();
++        else if (g_button == 1)
++            quit_game();
+         else
+             change(1);
+     }
+ }
+ 
++void hle_settings_menu_keys(int dy, int dx, int ok, int back)
++{
++    int q;
++
++    menu_lock();
++    keys(dy, dx, ok, back);
++    q = take_quit();
++    menu_unlock();
++    quit_if(q);
++}
++
++static void tab_step(int d)
++{
++    if (open_get() && d)
++        select_tab(g_tab + (d < 0 ? -1 : 1));
++}
++
++void hle_settings_menu_tab(int d)
++{
++    menu_lock();
++    tab_step(d);
++    menu_unlock();
++}
++
++void hle_settings_menu_default(void)
++{
++    menu_lock();
++    if (open_get())
++        reset_default();
++    menu_unlock();
++}
++
+ static long now_ms(void)
+ {
+     return (long)((double)clock() * 1000.0 / CLOCKS_PER_SEC);
+@@ -250,12 +711,19 @@ void hle_settings_menu_input(unsigned port, RecompInputGamepad *g)
+      * does not first pause the game with the one that landed first. */
+     static unsigned held_bits;
+     static long held_since;
++    int q;
+ 
+     if (!g)
+         return;
++    menu_lock();
+     if (port == 0) {
+         unsigned b = g->buttons, pressed = b & ~g_prev_buttons;
+         int a = g->analog_buttons[HOST_ANALOG_A] > 30, bb = g->analog_buttons[HOST_ANALOG_B] > 30;
++        int y = g->analog_buttons[HOST_ANALOG_Y] > 30;
++        /* LB and RB: the triggers when the bindings give the bumpers to
++         * them, Black and White otherwise; either works. */
++        int lb = g->analog_buttons[HOST_ANALOG_LTRIG] > 60 || g->analog_buttons[HOST_ANALOG_BLACK] > 30;
++        int rb = g->analog_buttons[HOST_ANALOG_RTRIG] > 60 || g->analog_buttons[HOST_ANALOG_WHITE] > 30;
+         int stick_y = g->thumb_ly > 16000 ? -1 : g->thumb_ly < -16000 ? 1 : 0;
+         int stick_x = g->thumb_lx > 16000 ? 1 : g->thumb_lx < -16000 ? -1 : 0;
+         static int prev_sy, prev_sx;
+@@ -263,20 +731,23 @@ void hle_settings_menu_input(unsigned port, RecompInputGamepad *g)
+ 
+         build_list();
+         if ((b & combo) == combo && (pressed & combo) && !g_swallow) {
+-            hle_settings_menu_toggle();
++            toggle();
+             g_swallow = 1;
+             held_bits = 0;
+-        } else if (g_open && !g_swallow) {
++        } else if (open_get() && !g_swallow) {
+             int dy = (pressed & PAD_UP) ? -1 : (pressed & PAD_DOWN) ? 1 : 0;
+             int dx = (pressed & PAD_LEFT) ? -1 : (pressed & PAD_RIGHT) ? 1 : 0;
+             int back = (bb && !g_prev_b) || (pressed & PAD_BACK) != 0;
+ 
+             if (!dy && stick_y != prev_sy) dy = stick_y;
+             if (!dx && stick_x != prev_sx) dx = stick_x;
+-            hle_settings_menu_keys(dy, dx, a && !g_prev_a, back);
++            if (lb && !g_prev_lb) tab_step(-1);
++            if (rb && !g_prev_rb) tab_step(1);
++            if (y && !g_prev_y && open_get()) reset_default();
++            keys(dy, dx, a && !g_prev_a, back);
+             if (back)
+                 g_swallow = 1;           /* Back (or Start) still down: not the game's */
+-        } else if (!g_open && !g_swallow && (pressed & combo)) {
++        } else if (!open_get() && !g_swallow && (pressed & combo)) {
+             held_bits = pressed & combo;
+             held_since = now_ms();
+         }
+@@ -297,9 +768,15 @@ void hle_settings_menu_input(unsigned port, RecompInputGamepad *g)
+         g_prev_buttons = b;
+         g_prev_a = a;
+         g_prev_b = bb;
++        g_prev_y = y;
++        g_prev_lb = lb;
++        g_prev_rb = rb;
+         prev_sy = stick_y;
+         prev_sx = stick_x;
+     }
+-    if (g_open || g_swallow)
++    if (open_get() || g_swallow)
+         memset(g, 0, sizeof *g);         /* the game sees nothing pressed */
++    q = take_quit();
++    menu_unlock();
++    quit_if(q);
+ }
+diff --git a/src/input/input_bindings.c b/src/input/input_bindings.c
+index 014fbf4..5912566 100644
+--- a/src/input/input_bindings.c
++++ b/src/input/input_bindings.c
+@@ -1264,11 +1264,52 @@ unsigned recomp_bindings_present_mask(void)
+     return mask;
+ }
+ 
++/* Vibration strength, 0 to 150 percent of what the title asks for
++ * (`vibration` in the settings file, RECOMP_VIBRATION; 100 by default). Above
++ * 100 makes a weak rumble stronger; a motor never goes past its maximum.
++ * -1: not read yet. */
++static volatile int g_vibration = -1;
++
++static int vibration_percent(void)
++{
++    int v = g_vibration;
++
++    if (v < 0) {
++        v = recomp_config_int("RECOMP_VIBRATION", "vibration", 100);
++        if (v < 0) v = 0;
++        if (v > 150) v = 150;
++        g_vibration = v;
++    }
++    return v;
++}
++
++int recomp_bindings_vibration(void)
++{
++    return vibration_percent();
++}
++
++void recomp_bindings_set_vibration(int percent)
++{
++    if (percent < 0) percent = 0;
++    if (percent > 150) percent = 150;
++    g_vibration = percent;
++}
++
++static unsigned short scale_motor(unsigned short speed, int percent)
++{
++    unsigned long v = (unsigned long)speed * (unsigned long)percent / 100ul;
++    return (unsigned short)(v > 0xFFFFul ? 0xFFFFul : v);
++}
++
+ void recomp_bindings_rumble(unsigned port, unsigned short low, unsigned short high)
+ {
++    int percent;
++
+     if (recomp_headless())
+         return;                     /* nobody's pad shakes for a test */
+     recomp_bindings_init();
++    percent = vibration_percent();
+     if (port < PORTS && g_ctl[port].device == DEV_PAD)
+-        recomp_pad_rumble(g_ctl[port].pad, low, high);
++        recomp_pad_rumble(g_ctl[port].pad, scale_motor(low, percent),
++                          scale_motor(high, percent));
+ }
+diff --git a/src/input/input_bindings.h b/src/input/input_bindings.h
+index 8e3646d..130a0b6 100644
+--- a/src/input/input_bindings.h
++++ b/src/input/input_bindings.h
+@@ -55,6 +55,10 @@ void recomp_bindings_set_bumper_test(RecompBumperTest test);
+ /* Rumble on the pad this port reads, 0..65535 per motor as XInputSetState
+  * takes it. Nothing happens for a keyboard port or a pad without motors. */
+ void recomp_bindings_rumble(unsigned port, unsigned short low, unsigned short high);
++/* Vibration strength, 0 to 150 percent of what the title asks for: the
++ * `vibration` setting, changed live by the in-game settings menu. */
++int  recomp_bindings_vibration(void);
++void recomp_bindings_set_vibration(int percent);
+ 
+ /* ---- the mouse ----------------------------------------------------------
+  *

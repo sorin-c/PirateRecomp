@@ -540,6 +540,28 @@ Each one, with the reason it exists:
   covered by his beard texture). Such a stage now reads the attribute of an
   earlier stage that names the same set; under a declaration nothing changes.
 
+- **0057-third-party-dear-imgui** (`third_party/imgui`, new). Dear ImGui
+  1.91.9b (MIT, its `LICENSE.txt` beside it), core files only: no backend,
+  no demo. Vendored rather than a submodule because the toolkit's
+  submodules are upstream's to choose and the release builds only what a
+  patch puts in the tree. Used by 0058 for fonts, text and draw lists.
+
+- **0058-settings-menu-panel** (`src/d3d/d3d8_menu.cpp` new,
+  `d3d8_overlay.c/.h`, `src/d3d/CMakeLists.txt`, `src/hle/hle_settings_menu.c`,
+  `hle_settings.h`, `hle_d3d8.c`, `src/input/input_bindings.c/.h`,
+  `src/config/recomp_config.c/.h`). The F2 menu redrawn as a panel at the
+  window's own resolution, through rhi.h (D3D11 and Vulkan alike): tabs
+  (Display, Game, Controls, About), each row tagged "Applies now" or "After
+  restart" (and "Experimental", "Changed"), dots for where the value sits
+  with the default ringed, and the selected row described on the right.
+  LB/RB (or the triggers, Black/White; Tab, PageUp/PageDown) switch tabs, Y
+  (Delete) puts the default back, Resume and Quit game sit at the bottom,
+  and the mouse works while it is open (it is given back from mouse look and
+  shown). The game keeps running behind it. New setting `vibration`
+  (`RECOMP_VIBRATION`, 0-150 %, default 100) scales the pad's rumble, live.
+  `recomp_config_default(key)` says what a key is when the file does not
+  set it. If the panel's renderer cannot start, the old text panel is drawn.
+
 - **0059-builder-log-path-first** (`tools/builder/src/main.rs`). When a step
   of the player's build fails, the launcher shows the builder's message in a
   box of a few lines. The message ended with the whole log's path after 25
