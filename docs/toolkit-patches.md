@@ -519,3 +519,12 @@ Each one, with the reason it exists:
 - **0054-settings-menu-legal-screen** (`src/hle/hle_settings_menu.c`). The
   F2 row "Legal screen": skip, show (`skip_legal`), after "Movies". Applies
   at the next start.
+
+- **0055-game-above-normal-priority** (`src/hle/hle_d3d8.c`, Windows). A played game
+  runs at above-normal priority (`RECOMP_PRIORITY`, `priority`, default 1);
+  a headless or background test run stays at normal so it never takes the
+  PC from the person at it. With a full game build compiling in the
+  background, the sea at sea_fps unlocked ran 24-39 fps at normal priority
+  and 56-120 fps above normal (140 with nothing else running): the game's
+  threads hand work to each other many times a frame, and at normal
+  priority each hand-off waited behind the compilers.
