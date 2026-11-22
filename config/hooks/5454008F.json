@@ -376,6 +376,30 @@
   {
    "address": "0x000C3C38",
    "note": "battle_fps: the battle ends (the after-battle call)"
+  },
+  {
+   "address": "0x00126F4E",
+   "note": "main menu: draw the EXIT row under OPTIONS"
+  },
+  {
+   "address": "0x00126FD4",
+   "note": "main menu: up from NEW GAME goes to EXIT"
+  },
+  {
+   "address": "0x00127054",
+   "note": "main menu: down from OPTIONS goes to EXIT"
+  },
+  {
+   "address": "0x001270B0",
+   "note": "main menu: A on EXIT quits"
+  },
+  {
+   "address": "0x00125DE0",
+   "note": "main menu: the chosen row's y, rows 34 apart (30 with MINIGAMES)"
+  },
+  {
+   "address": "0x000E11B0",
+   "note": "main menu: a row's y, rows 34 apart (30 with MINIGAMES)"
   }
  ]
 }

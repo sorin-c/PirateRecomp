@@ -488,6 +488,190 @@ void sub_00126BC0(void)
     sub_00126BC0_gen();
 }
 
+/* ── Sid Meier's Pirates!: EXIT on the main menu ───────────────
+ *
+ * The console's main menu has no way out (the dashboard button does that),
+ * so on a PC the only way to quit was the window's close button. An EXIT row
+ * is added under OPTIONS, drawn by the game's own menu code in the same font,
+ * colours, spacing and cursor bar as the rows above it, and chosen with the
+ * pad or keys like them. Choosing it quits as closing the window does
+ * (xbox_HostExit: the logs flushed, ExitProcess(0)).
+ *
+ * How (guest hooks, toolkit patch 0042, all in sub_00126BC0):
+ * - The rows are 0..6 in [0x004D5D14] (NEW GAME, LOAD GAME, VS MODE, the
+ *   debug MINIGAMES, BONUS CONTENT, XBOX LIVE, OPTIONS); EXIT is row 7.
+ *   Each row looks its text up in the string table (sub_0013E4F0, which
+ *   fills the text buffer 0x004AA548) and draws it: the chosen row with
+ *   sub_00125DE0 (the bar, the text), the others with sub_000E0EA0 and
+ *   sub_000E11B0. At 0x00126F4E, after OPTIONS and before the frame's text
+ *   goes out, EXIT is drawn the same way one row lower: edi is OPTIONS' row
+ *   (5, or 6 with MINIGAMES), y = (row * 5 + 20) * 8, x in ebp. The text is
+ *   the table's own "Exit" (Quitter, Beenden, Salir, Esci), in capitals like
+ *   the other rows.
+ * - Up from NEW GAME the game wraps to OPTIONS (0x00126FD4), down from
+ *   OPTIONS to NEW GAME (0x00127054): both go to EXIT instead. From EXIT
+ *   the game's own steps already land right (up: 6; down: past 6, so 0),
+ *   and on row 7 every other row is drawn unchosen.
+ * - A (event 0xD) on row 7: the game plays its confirm sound and finds no
+ *   row to start (row > 6); the hook at 0x001270B0 quits. */
+extern void sub_0013E4F0(void);
+extern void sub_00125DE0(void);
+extern void sub_000E0EA0(void);
+extern void sub_000E11B0(void);
+extern void xbox_HostExit(const char *why);
+
+#define PM_SEL       0x004D5D14u   /* the main menu's row */
+#define PM_TEXT      0x004AA548u   /* the menu's text buffer */
+#define PM_STRINGS   0x004F8FE8u   /* the string table (esi for sub_0013E4F0) */
+#define PM_FONT      0x004D5444u
+#define PM_KEY_EXIT  0x003E841Cu   /* "Exit", a key of the string table */
+#define PM_ROW_LAST  6             /* OPTIONS, the game's last row */
+#define PM_ROW_EXIT  7
+
+#define PM_MEM32(a) (*(volatile uint32_t *)((uintptr_t)(uint32_t)(a) + g_xbox_mem_offset))
+#define PM_MEM8(a)  (*(volatile uint8_t *)((uintptr_t)(uint32_t)(a) + g_xbox_mem_offset))
+
+static int g_menu_row_before = -1;   /* the row as this frame's input came in */
+
+static void pm_push(uint32_t v)
+{
+    g_esp -= 4;
+    PM_MEM32(g_esp) = v;
+}
+
+/* A guest call from a hook: the return address the callee's ret pops. */
+static void pm_call(void (*fn)(void), uint32_t ret_va)
+{
+    pm_push(ret_va);
+    fn();
+}
+
+static void menu_draw_exit(void)
+{
+    uint32_t sv_eax = g_eax, sv_ebx = g_ebx, sv_ecx = g_ecx, sv_edx = g_edx;
+    uint32_t sv_esi = g_esi, sv_edi = g_edi, sv_esp = g_esp;
+    uint32_t sv_ebp = g_ebp, sv_seh = g_seh_ebp;
+    uint32_t x = g_ebp;
+    uint32_t y = ((g_edi + 1u) * 5u + 20u) * 8u;
+    int chosen = PM_MEM32(PM_SEL) == PM_ROW_EXIT;
+    uint32_t text, i;
+
+    pm_push(PM_KEY_EXIT);
+    g_esi = PM_STRINGS;
+    pm_call(sub_0013E4F0, 0x00126F4Eu);
+    g_esp += 4;
+    text = g_eax;
+    /* Capitals, as the other rows. The rows draw from the text buffer the
+     * lookup copied into (PM_TEXT), so that copy is the one changed; the
+     * string the lookup returns is the table's own and stays as it is. */
+    for (i = 0; i < 255u; i++) {
+        uint8_t c = PM_MEM8(PM_TEXT + i);
+        if (!c)
+            break;
+        if ((c >= 'a' && c <= 'z') || (c >= 0xE0u && c <= 0xFEu && c != 0xF7u))
+            PM_MEM8(PM_TEXT + i) = (uint8_t)(c - 0x20u);
+    }
+    {
+        static int said;
+        if (!said) {
+            said = 1;
+            fprintf(stderr, "[PIRATES] main menu: EXIT row added (\"%.32s\")\n",
+                    (const char *)((uintptr_t)PM_TEXT + g_xbox_mem_offset));
+            fflush(stderr);
+        }
+    }
+
+    if (chosen) {
+        pm_push(0x64u);
+        pm_push(x);
+        pm_push(PM_TEXT);
+        g_eax = text;
+        g_ebx = y;
+        pm_call(sub_00125DE0, 0x00126F4Eu);
+        g_esp += 0xCu;
+    } else {
+        uint32_t r;
+        pm_push(0x64u);
+        pm_push(PM_MEM32(PM_FONT));
+        pm_push(0x23u);
+        pm_push(0x136u);
+        g_eax = text;
+        pm_call(sub_000E0EA0, 0x00126F4Eu);
+        r = g_eax;
+        pm_push(0u);
+        pm_push(0xFFFFFFFFu);
+        pm_push(PM_MEM32(PM_FONT));
+        pm_push(4u);
+        pm_push(0xFFE8E8E8u);              /* the unchosen rows' colour */
+        pm_push(r);
+        pm_push(PM_TEXT);
+        g_eax = y;
+        g_ecx = x;
+        pm_call(sub_000E11B0, 0x00126F4Eu);
+        g_esp += 0x2Cu;
+    }
+
+    g_eax = sv_eax; g_ebx = sv_ebx; g_ecx = sv_ecx; g_edx = sv_edx;
+    g_esi = sv_esi; g_edi = sv_edi; g_esp = sv_esp;
+    g_ebp = sv_ebp; g_seh_ebp = sv_seh;
+}
+
+/* The rows a little closer together. At the game's 40 lines a row the
+ * eighth row's cursor bar (y 400) covered the A SELECT prompt at the bottom
+ * left; at 34 (30 with MINIGAMES, one row more) every row, EXIT's bar
+ * included, ends above it. NEW GAME stays where it was, under the logo.
+ * Applied where the two row-drawing functions start, only when the main
+ * menu called them (their return address inside sub_00126BC0): y is ebx for
+ * sub_00125DE0, eax for sub_000E11B0. */
+#define PM_FUNC_START 0x00126BC0u
+#define PM_FUNC_END   0x00127216u
+#define PM_ROW0_Y     160u
+#define PM_ROW_STEP   40u
+
+static uint32_t menu_row_y(uint32_t y)
+{
+    uint32_t ret = PM_MEM32(g_esp);
+    uint32_t step = PM_MEM8(0x004D69C0u) ? 30u : 34u;   /* MINIGAMES shown: 8 rows */
+
+    if (ret < PM_FUNC_START || ret >= PM_FUNC_END || y < PM_ROW0_Y ||
+        (y - PM_ROW0_Y) % PM_ROW_STEP != 0)
+        return y;
+    return PM_ROW0_Y + (y - PM_ROW0_Y) / PM_ROW_STEP * step;
+}
+
+/* The main menu's hooks; 0 for an address that is not one of them. */
+static int menu_guest_hook(uint32_t va)
+{
+    switch (va) {
+    case 0x00125DE0u:                   /* the chosen row: bar and text */
+        g_ebx = menu_row_y(g_ebx);
+        return 1;
+    case 0x000E11B0u:                   /* a row's text */
+        g_eax = menu_row_y(g_eax);
+        return 1;
+    case 0x00126F4Eu:                   /* the rows are drawn; input next */
+        g_menu_row_before = (int)PM_MEM32(PM_SEL);
+        menu_draw_exit();
+        return 1;
+    case 0x00126FD4u:                   /* up, the row moved */
+        if (g_menu_row_before == 0 && PM_MEM32(PM_SEL) == PM_ROW_LAST)
+            PM_MEM32(PM_SEL) = PM_ROW_EXIT;
+        return 1;
+    case 0x00127054u:                   /* down, the row moved */
+        if (g_menu_row_before == PM_ROW_LAST && PM_MEM32(PM_SEL) == 0)
+            PM_MEM32(PM_SEL) = PM_ROW_EXIT;
+        return 1;
+    case 0x001270B0u:                   /* A: start the row */
+        if (PM_MEM32(PM_SEL) == PM_ROW_EXIT) {
+            fprintf(stderr, "[PIRATES] EXIT chosen on the main menu\n");
+            fflush(stderr);
+            xbox_HostExit("EXIT on the main menu");
+        }
+        return 1;
+    }
+    return 0;
+}
+
 /* ── Sid Meier's Pirates!: a treasure map on demand (debug) ────
  *
  * RECOMP_PIRATES_TREASURE_MAP=n (treasure_map = n) buys up to n pieces of a
@@ -1506,6 +1690,9 @@ static int btl_guest_hook(uint32_t va)
 void recomp_guest_hook(uint32_t va)
 {
     int skip;
+
+    if (menu_guest_hook(va))                /* the main menu's EXIT row */
+        return;
 
     /* The short-lived effects' ages in a town scene (as btl_guest_hook does
      * in a battle): a year a tick, never held at 0. */
