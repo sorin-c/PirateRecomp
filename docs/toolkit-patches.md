@@ -520,7 +520,7 @@ Each one, with the reason it exists:
   F2 row "Legal screen": skip, show (`skip_legal`), after "Movies". Applies
   at the next start.
 
-- **0055-game-above-normal-priority** (`src/hle/hle_d3d8.c`). A played game
+- **0055-game-above-normal-priority** (`src/hle/hle_d3d8.c`, Windows). A played game
   runs at above-normal priority (`RECOMP_PRIORITY`, `priority`, default 1);
   a headless or background test run stays at normal so it never takes the
   PC from the person at it. With a full game build compiling in the
