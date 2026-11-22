@@ -419,10 +419,24 @@ static int pirates_hud_edge(uint32_t handle, unsigned w, unsigned h, unsigned fm
     }
     if (battle)
         return pirates_hud_battle_dx(handle, w, h, fmt, count, cx, cy, lo_x, hi_x);
-    if (cy < 100.0f)                         /* top band: crew, food */
+    /* The sea's HUD has fixed places; the towns' names (the font, as the
+     * HUD's numbers are) move with the world, and the test moved those too
+     * whenever one passed the top band or the compass's corner: the name
+     * slid a box-width right of its own box (which, a 128x64 texture, never
+     * moves). So a piece moves only where the HUD's own are: in the top
+     * band the rings (y 32..82, 43..71), the bars and the counts (44..67,
+     * 45..67) -- at most four digits, 16 vertices, where a town's name is 5
+     * letters or more; the compass, single quads centred on its middle
+     * (599, 411 in the buffer: its four pieces, 566..632 x 378..444,
+     * 572..626 x 400..420, 576..623 x 387..434, 589..611 x 366..456). A
+     * town's name is drawn in one call, 4 vertices a letter, so never as a
+     * single quad, and would also have to sit exactly on that middle. */
+    if (lo_y >= 30.0f && lo_y <= 47.0f && hi_y >= 65.0f && hi_y <= 84.0f && count <= 16u &&
+        hi_x - lo_x <= 130.0f)               /* top band: crew, food */
         return cx < 240.0f ? PIRATES_HUD_DX_LEFT : cx > 480.0f ? PIRATES_HUD_DX_RIGHT : 0;
-    if (cy > 360.0f && cx > 480.0f)          /* bottom right: the compass */
-        return PIRATES_HUD_DX_COMPASS;
+    if (count == 4u && cx > 596.0f && cx < 603.0f && cy > 407.0f && cy < 414.0f &&
+        lo_x >= 560.0f && hi_x <= 640.0f && lo_y >= 360.0f && hi_y <= 462.0f)
+        return PIRATES_HUD_DX_COMPASS;       /* bottom right: the compass */
     return 0;
 }
 
@@ -554,7 +568,8 @@ void sub_00021D70(void)
  *               starts with the player at 0x004564BC, stride 0x45C
  *   battle.txt  tick, ours: x, y, heading, crew (0x004D8F10..+0x1C),
  *               enemy: x, y, heading, crew (0x004DBE08..+0x1C)
- *   teleport.txt  written by the script: "x y" in map units moves the
+ *   teleport.txt  written by the script: "x y" in map units (fractions
+ *               allowed, to place the view finely) moves the
  *               player's ship there once, then the file is deleted. */
 static void pirates_probe_write(const char *dir, const char *name, const char *text)
 {
@@ -575,7 +590,7 @@ static void pirates_test_probe(uint32_t now)
     static uint32_t last_pos, last_ships, last_battle;
     char buf[8192], fn[512];
     FILE *fp;
-    int tx, ty, i, n;
+    int i, n; double tx, ty;
 
     if (on < 0) {
         const char *v = recomp_config_lookup("RECOMP_PIRATES_TEST_PROBE", "test_probe");
@@ -592,10 +607,10 @@ static void pirates_test_probe(uint32_t now)
         last_pos = now;
         snprintf(fn, sizeof fn, "%s/teleport.txt", dir);
         if ((fp = fopen(fn, "r")) != NULL) {
-            if (fscanf(fp, "%d %d", &tx, &ty) == 2) {
-                *(volatile int32_t *)((uintptr_t)0x004564BCu + g_xbox_mem_offset) = tx * 4000000;
-                *(volatile int32_t *)((uintptr_t)0x004564C0u + g_xbox_mem_offset) = ty * 4000000;
-                fprintf(stderr, "[PIRATES] test probe: ship moved to %d,%d\n", tx, ty);
+            if (fscanf(fp, "%lf %lf", &tx, &ty) == 2) {
+                *(volatile int32_t *)((uintptr_t)0x004564BCu + g_xbox_mem_offset) = (int32_t)(tx * 4000000.0);
+                *(volatile int32_t *)((uintptr_t)0x004564C0u + g_xbox_mem_offset) = (int32_t)(ty * 4000000.0);
+                fprintf(stderr, "[PIRATES] test probe: ship moved to %.2f,%.2f\n", tx, ty);
             }
             fclose(fp);
             remove(fn);
