@@ -1,8 +1,41 @@
+diff --git a/src/launcher/CMakeLists.txt b/src/launcher/CMakeLists.txt
+index c88d077..135ba57 100644
+--- a/src/launcher/CMakeLists.txt
++++ b/src/launcher/CMakeLists.txt
+@@ -125,7 +125,8 @@ function(recomp_add_launcher TARGET GAME_EXE)
+     if(WIN32)
+         # The rest is in every Windows.
+         # ole32 for the open dialog a self-building release asks with.
+-        target_link_libraries(${TARGET} PRIVATE user32 gdi32 ole32)
++        # shell32 for ShellExecute (lhost_open: the build screen's links).
++        target_link_libraries(${TARGET} PRIVATE user32 gdi32 ole32 shell32)
+     elseif(APPLE)
+         target_link_libraries(${TARGET} PRIVATE SDL3::SDL3
+             "-framework CoreText" "-framework CoreGraphics"
 diff --git a/src/launcher/launcher.c b/src/launcher/launcher.c
-index 2111451..a1e47b2 100644
+index 2111451..a94ead7 100644
 --- a/src/launcher/launcher.c
 +++ b/src/launcher/launcher.c
-@@ -485,6 +485,25 @@ static double g_build_progress;
+@@ -16,6 +16,7 @@
+  * settings are and how they are moved between, not about pixels. The window
+  * is the front end's (launcher.h), so nothing here is one host's.
+  */
++#include <math.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -469,6 +470,10 @@ static int  g_release;
+ static char g_release_dir[LAUNCHER_PATH];
+ static char g_release_exe[128];
+ static char g_release_version[96];
++/* release.json's "look" ("sea": THEME_LOOK_SEA for the first-run screens)
++ * and "home_url" (the project's page, a link on them). */
++static int  g_release_look = THEME_LOOK_DASHBOARD;
++static char g_home_url[256];
+ static char g_user_dir[LAUNCHER_PATH];   /* where the builder builds it */
+ 
+ /* REL_DONE: built just now, and saying so until the player presses OK. */
+@@ -485,6 +490,25 @@ static double g_build_progress;
  static char   g_build_label[96], g_build_detail[200];
  static int    g_build_cancelled;
  static uint64_t g_build_started, g_build_ms; /* lhost_ticks; how long it took */
@@ -28,7 +61,30 @@ index 2111451..a1e47b2 100644
  static int    g_setup_sel;              /* 0 the path, 1 image, 2 folder, 3 build */
  
  static int read_small_file(const char *path, char *buf, size_t n)
-@@ -1700,6 +1719,12 @@ static void release_start_build(void)
+@@ -764,6 +788,13 @@ static void release_init(void)
+     g_title_id = (uint32_t)strtoul(id, NULL, 16);
+     json_str(text, "title_name", g_title_name, sizeof g_title_name);
+     json_str(text, "version", g_release_version, sizeof g_release_version);
++    {
++        char look[32];
++
++        if (json_str(text, "look", look, sizeof look) && strcmp(look, "sea") == 0)
++            g_release_look = THEME_LOOK_SEA;
++    }
++    json_str(text, "home_url", g_home_url, sizeof g_home_url);
+     if (!release_user_dir(g_title_id, g_user_dir, sizeof g_user_dir)) {
+         g_rel = REL_SETUP;
+         snprintf(g_rel_error, sizeof g_rel_error,
+@@ -1408,6 +1439,8 @@ static void input_move(int dy)
+ }
+ 
+ static void setup_nav(int dx, int dy, int accept, int cancel);
++static int  sea_footer_click(int mx, int my);
++static ThemeRect sea_ok_rect(void);
+ 
+ static void nav(int dx, int dy, int accept, int cancel, int tabdelta)
+ {
+@@ -1700,6 +1733,12 @@ static void release_start_build(void)
      g_rel_error[0] = g_rel_note[0] = '\0';
      g_rel_unsupported = g_build_cancelled = 0;
      g_build_progress = 0.0;
@@ -41,7 +97,7 @@ index 2111451..a1e47b2 100644
      snprintf(g_build_label, sizeof g_build_label, "Starting");
      g_build_detail[0] = '\0';
      g_build_started = lhost_ticks();
-@@ -1719,7 +1744,26 @@ static void release_line(const char *line)
+@@ -1719,7 +1758,26 @@ static void release_line(const char *line)
      if (!json_str(line, "event", ev, sizeof ev))
          return;
      if (strcmp(ev, "progress") == 0) {
@@ -68,7 +124,7 @@ index 2111451..a1e47b2 100644
          json_str(line, "label", g_build_label, sizeof g_build_label);
          if (!json_str(line, "detail", g_build_detail, sizeof g_build_detail))
              g_build_detail[0] = '\0';
-@@ -1732,6 +1776,29 @@ static void release_line(const char *line)
+@@ -1732,6 +1790,29 @@ static void release_line(const char *line)
      }
  }
  
@@ -98,7 +154,7 @@ index 2111451..a1e47b2 100644
  static void release_tick(void)
  {
      char line[4096];
-@@ -1739,6 +1806,7 @@ static void release_tick(void)
+@@ -1739,6 +1820,7 @@ static void release_tick(void)
  
      while (n++ < 64 && lhost_job_line(line, sizeof line))
          release_line(line);
@@ -106,7 +162,27 @@ index 2111451..a1e47b2 100644
      code = lhost_job_status();
      if (code < 0)
          return;
-@@ -1845,10 +1913,69 @@ static void draw_setup(void)
+@@ -1760,6 +1842,10 @@ static void release_tick(void)
+         }
+         /* Say so, rather than swapping screens under the player. */
+         g_build_ms = lhost_ticks() - g_build_started;
++        /* The last step ends here: no later stage will close it. */
++        if (g_build_step >= 0 && g_build_step < BUILD_STEPS)
++            g_step_ms[g_build_step] = lhost_ticks() - g_step_started[g_build_step];
++        g_build_step = BUILD_STEPS;
+         g_rel = REL_DONE;
+         return;
+     }
+@@ -1838,17 +1924,77 @@ static void draw_setup(void)
+         theme_text_wrapped(r, g_rel_note, 12, THEME_TEXT_DIM);
+     }
+ 
+-    r.x = 60; r.y = g_ch - 44; r.w = g_cw - 120; r.h = 24;
++    r.x = 60; r.y = g_ch - (theme_look() == THEME_LOOK_SEA ? 128 : 44);
++    r.w = g_cw - 120; r.h = 24;
+     theme_text(r, g_pad_seen
+                   ? "A  Choose      B  Quit      D-pad  Move"
+                   : "Enter  Choose      Esc  Quit      Type or paste a path in the box",
                 11, 400, THEME_TEXT_DIM, THEME_LEFT);
  }
  
@@ -177,7 +253,7 @@ index 2111451..a1e47b2 100644
  
      p.x = 60; p.y = 130; p.w = g_cw - 120; p.h = 300;
      theme_panel(p, 0.3);
-@@ -1861,17 +1988,27 @@ static void draw_building(void)
+@@ -1861,17 +2007,27 @@ static void draw_building(void)
      theme_text(r, pct, 13, 700, THEME_TEXT, THEME_RIGHT);
      b.x = r.x; b.y = r.y + 40; b.w = r.w; b.h = 16;
      theme_bar(b, g_build_progress, g_pulse * 2.0);   /* a sweep every ~1.4 s */
@@ -204,50 +280,941 @@ index 2111451..a1e47b2 100644
  
      r.x = 60; r.y = g_ch - 44; r.w = g_cw - 260; r.h = 24;
 -    theme_text(r, g_pad_seen ? "B  Cancel" : "Esc  Cancel", 11, 400,
-+    theme_text(r, "Esc  Cancel", 11, 400,
++    theme_text(r, "Click CANCEL to stop the build", 11, 400,
                 THEME_TEXT_DIM, THEME_LEFT);
      b.w = 150; b.h = 42; b.x = g_cw - 60 - b.w; b.y = g_ch - 74;
      theme_panel(b, 0.5);
-@@ -2524,6 +2661,12 @@ void launcher_tick(void)
-     if (g_rel == REL_BUILDING)
-         release_tick();
-     g_pad_seen = pad_poll(&dx, &dy, &a, &b, &t);
-+    /* A pad's B never cancels a build: it is the button a player presses
-+     * without thinking (it is "back" everywhere else), and a cancelled
-+     * build starts over from the beginning. Escape, the CANCEL button and
-+     * closing the window still cancel. */
+@@ -1941,13 +2097,12 @@ static void setup_nav(int dx, int dy, int accept, int cancel)
+             done_ok();
+         return;
+     }
+-    if (g_rel == REL_BUILDING) {
+-        if (cancel && !g_build_cancelled) {
+-            g_build_cancelled = 1;
+-            lhost_job_cancel();
+-        }
++    /* Neither a pad's B nor Escape cancels a build: they are the "back"
++     * a player presses without thinking, and a cancelled build starts
++     * over from the beginning. The CANCEL button (a click) and closing
++     * the window still do. */
 +    if (g_rel == REL_BUILDING)
-+        b = 0;
-     if (g_capturing)
-         capture_tick();             /* the press is the answer, not a move */
-     else if (g_pad_seen && (dx || dy || a || b || t))
+         return;
+-    }
+     if (dy < 0) g_setup_sel = 0;
+     if (dy > 0 && g_setup_sel == 0) g_setup_sel = 1;
+     if (dx && g_setup_sel > 0) {
+@@ -1965,8 +2120,11 @@ static void setup_click(int mx, int my)
+ {
+     int i;
+ 
++    if (g_release_look == THEME_LOOK_SEA && sea_footer_click(mx, my))
++        return;
+     if (g_rel == REL_DONE) {
+-        if (hit_play(mx, my))
++        if (g_release_look == THEME_LOOK_SEA ? in_rect(sea_ok_rect(), mx, my)
++                                             : hit_play(mx, my))
+             done_ok();
+         return;
+     }
+@@ -2019,13 +2177,304 @@ void launcher_picked(const char *path)
+     release_start_build();
+ }
+ 
++/* ---------------------------------------------- the sea look's screens */
++
++static const char *const k_step_short[BUILD_STEPS] = {
++    "Game files", "Check disc", "Translate", "Set up", "Compile", "Finish"
++};
++
++/* The footer's links, left to right after the version. */
++enum { LINK_LOG, LINK_FOLDER, LINK_HOME, LINK_COUNT };
++
++static ThemeRect sea_link_rect(int i)
++{
++    static const int k_x[LINK_COUNT] = { 150, 236, 372 }, k_w[LINK_COUNT] = { 66, 120, 50 };
++    ThemeRect r;
++
++    r.x = k_x[i]; r.w = k_w[i]; r.y = g_ch - 64; r.h = 24;
++    return r;
++}
++
++static int sea_link_shown(int i)
++{
++    return i != LINK_HOME || g_home_url[0];
++}
++
++/* SET SAIL on the done screen. */
++static ThemeRect sea_ok_rect(void)
++{
++    ThemeRect r;
++
++    r.w = 220; r.h = 48; r.x = (g_cw - r.w) / 2; r.y = 480;
++    return r;
++}
++
++/* Text with a dark shadow under it, to read over brass. */
++static void text_shadowed(ThemeRect r, const char *t, int size, int weight,
++                          COLORREF colour, ThemeAlign align)
++{
++    ThemeRect sh = r;
++
++    sh.x += 1; sh.y += 1;
++    theme_text(sh, t, size, weight, RGB(0x10, 0x0C, 0x04), align);
++    theme_text(r, t, size, weight, colour, align);
++}
++
++/* A divider: two fading lines and a small compass between them. */
++static void sea_ornament(int cy)
++{
++    int cx = g_cw / 2;
++
++    theme_hline(cx - 190, cx - 18, cy, THEME_BRASS_MID, 0.9, -1);
++    theme_hline(cx + 18, cx + 190, cy, THEME_BRASS_MID, 0.9, 1);
++    theme_disc(cx, cy + 0.5, 9.0, THEME_BRASS, 1.0);
++    theme_disc(cx, cy + 0.5, 7.6, RGB(0x13, 0x2C, 0x43), 1.0);
++    theme_diamond(cx, cy + 0.5, 5.0, THEME_BRASS_LIGHT);
++}
++
++static void sea_button(ThemeRect b, const char *label, int bright)
++{
++    ThemeRect in = { b.x + 1, b.y + 1, b.w - 2, b.h - 2 };
++
++    theme_fill(b, 6.0, bright ? THEME_BRASS_LIGHT : THEME_BRASS_DARK, 1.0);
++    if (bright)
++        theme_fill_vgrad(in, 5.0, THEME_BRASS_LIGHT, THEME_BRASS_MID);
++    else
++        theme_fill(in, 5.0, RGB(0x13, 0x29, 0x3D), 1.0);
++    theme_set_serif(1);
++    theme_text(b, label, 13, 700, bright ? RGB(0x1A, 0x12, 0x08) : THEME_CREAM, THEME_CENTRE);
++    theme_set_serif(0);
++}
++
++static void sea_header(void)
++{
++    ThemeRect r, rope;
++    char name[160];
++    size_t i;
++
++    /* The game's name in capitals, as a ship's name is painted. */
++    snprintf(name, sizeof name, "%s", g_title_name);
++    for (i = 0; name[i]; i++)
++        if (name[i] >= 'a' && name[i] <= 'z')
++            name[i] = (char)(name[i] - 'a' + 'A');
++    theme_set_serif(1);
++    r.x = 48; r.y = 24; r.w = g_cw - 96; r.h = 44;
++    text_shadowed(r, name, 24, 700, THEME_BRASS, THEME_LEFT);
++    r.y += 6; r.h = 36;
++    theme_text(r, "UNOFFICIAL RECOMPILATION", 9, 400, THEME_SLATE, THEME_RIGHT);
++    theme_set_serif(0);
++    rope.x = 0; rope.y = 80; rope.w = g_cw; rope.h = 9;
++    theme_rope(rope);
++}
++
++static void sea_footer(void)
++{
++    static const char *const k_links[LINK_COUNT] = { "Show log", "Open logs folder", "GitHub" };
++    ThemeRect r;
++    int i;
++
++    theme_hline(48, g_cw - 48, g_ch - 92, RGB(0x2B, 0x42, 0x58), 1.0, 0);
++    r.x = 48; r.y = g_ch - 64; r.w = 100; r.h = 24;
++    theme_text(r, g_release_version, 11, 400, THEME_SLATE, THEME_LEFT);
++    for (i = 0; i < LINK_COUNT; i++)
++        if (sea_link_shown(i)) {
++            ThemeRect t;
++
++            r = sea_link_rect(i);
++            t = r;
++            t.w += 40;                  /* room for the text; r is the underline */
++            theme_text(t, k_links[i], 11, 400, THEME_MIST, THEME_LEFT);
++            theme_hline(r.x, r.x + r.w - 6, r.y + r.h - 3, THEME_ROUTE, 1.0, 0);
++        }
++}
++
++/* The steps as ports along a sea route: done, the one under way, to come. */
++static void sea_route(int top)
++{
++    const int x0 = 72, w = g_cw - 144, cy = top + 10;
++    uint64_t now = lhost_ticks();
++    char t[32];
++    int i, step = g_build_step < 0 ? 0 : g_build_step;
++    double col = w / (double)BUILD_STEPS;
++    int first = (int)(x0 + col / 2), last = (int)(x0 + col * (BUILD_STEPS - 0.5));
++    int here = (int)(x0 + col * ((step < BUILD_STEPS ? step : BUILD_STEPS - 1) + 0.5));
++
++    theme_hdash(here, last, cy, 2, THEME_ROUTE);
++    if (here > first) {
++        ThemeRect sailed = { first, cy, here - first, 2 };
++
++        theme_fill(sailed, 0, THEME_BRASS_MID, 1.0);
++    }
++    for (i = 0; i < BUILD_STEPS; i++) {
++        double cx = x0 + col * (i + 0.5);
++        ThemeRect r;
++        int done = i < step, now_on = i == step;
++
++        if (done) {
++            theme_disc(cx, cy + 1, 8.0, THEME_BRASS_LIGHT, 1.0);
++            theme_disc(cx, cy + 1, 6.0, THEME_BRASS_MID, 1.0);
++        } else if (now_on) {
++            theme_disc(cx, cy + 1, 10.5, THEME_BRASS_LIGHT, 1.0);
++            theme_disc(cx, cy + 1, 8.0, THEME_NAVY, 1.0);
++            theme_disc(cx, cy + 1, 3.0 + 1.0 * sin(g_pulse * 6.2831853 * 3),
++                       THEME_BRASS_LIGHT, 1.0);
++        } else {
++            theme_disc(cx, cy + 1, 8.0, THEME_ROUTE, 1.0);
++            theme_disc(cx, cy + 1, 6.5, THEME_NAVY, 1.0);
++        }
++        r.x = (int)(x0 + col * i); r.w = (int)col; r.y = cy + 18; r.h = 20;
++        theme_text(r, k_step_short[i], 11, now_on ? 700 : 400,
++                   done ? THEME_BRASS : now_on ? THEME_CREAM : THEME_SLATE, THEME_CENTRE);
++        r.y += 20;
++        if (done) {
++            fmt_clock(t, sizeof t, g_step_ms[i]);
++            theme_text(r, t, 10, 400, THEME_SLATE, THEME_CENTRE);
++        } else if (now_on) {
++            fmt_clock(t, sizeof t, now - g_step_started[i]);
++            theme_text(r, t, 10, 700, THEME_CREAM, THEME_CENTRE);
++        }
++    }
++}
++
++static void sea_building(void)
++{
++    ThemeRect r, b;
++    char t[96], c[16], eta[64];
++    int step = g_build_step < 0 ? 0 : g_build_step;
++
++    theme_set_serif(1);
++    r.x = 60; r.w = g_cw - 120; r.y = 168; r.h = 22;
++    if (g_rel_relinking)
++        snprintf(t, sizeof t, "FINDING THE GAME'S FILES");
++    else
++        snprintf(t, sizeof t, "STEP %d OF %d", (step < BUILD_STEPS ? step : BUILD_STEPS - 1) + 1,
++                 BUILD_STEPS);
++    theme_text(r, t, 12, 400, THEME_BRASS, THEME_CENTRE);
++    r.y = 194; r.h = 40;
++    text_shadowed(r, g_build_label, 21, 700, THEME_CREAM, THEME_CENTRE);
++    theme_set_serif(0);
++    sea_ornament(254);
++
++    b.x = 72; b.y = 280; b.w = g_cw - 144; b.h = 30;
++    theme_bar(b, g_build_progress, g_pulse * 2.0);
++    snprintf(t, sizeof t, "%d%%", (int)(g_build_progress * 100.0 + 0.5));
++    text_shadowed(b, t, 12, 700, THEME_CREAM, THEME_CENTRE);
++
++    r.x = 72; r.w = g_cw - 144; r.y = 320; r.h = 22;
++    theme_text(r, g_build_detail, 11, 400, THEME_MIST, THEME_LEFT);
++    if (!g_rel_relinking) {
++        eta_text(eta, sizeof eta);
++        fmt_clock(c, sizeof c, lhost_ticks() - g_build_started);
++        snprintf(t, sizeof t, "%s   (%s so far)", eta, c);
++        theme_text(r, t, 11, 700, THEME_CREAM, THEME_RIGHT);
++        sea_route(380);
++    }
++
++    r.x = 60; r.w = g_cw - 120; r.y = 490; r.h = 22;
++    theme_text(r, g_rel_relinking
++                  ? "Linking the game to its files again. Nothing is rebuilt."
++                  : "This happens once. It builds the game from your own copy, on this computer.",
++               12, 400, THEME_SLATE, THEME_CENTRE);
++    if (!g_rel_relinking) {
++        r.y += 22;
++        theme_text(r, "Later starts go straight to the game.", 12, 400, THEME_SLATE,
++                   THEME_CENTRE);
++    }
++
++    b.w = 150; b.h = 42; b.x = g_cw - 60 - b.w; b.y = g_ch - 74;
++    sea_button(b, g_build_cancelled ? "STOPPING" : "CANCEL", 0);
++}
++
++static void sea_done(void)
++{
++    ThemeRect r, b;
++    char text[LAUNCHER_PATH + 400], t[64];
++    unsigned secs = (unsigned)((g_build_ms + 500) / 1000);
++
++    theme_set_serif(1);
++    r.x = 60; r.w = g_cw - 120; r.y = 168; r.h = 22;
++    theme_text(r, g_rel_relinking ? "FILES FOUND" : "ALL 6 STEPS DONE", 12, 400,
++               THEME_BRASS, THEME_CENTRE);
++    r.y = 194; r.h = 40;
++    text_shadowed(r, "The game is ready", 21, 700, THEME_CREAM, THEME_CENTRE);
++    theme_set_serif(0);
++    sea_ornament(254);
++
++    b.x = 72; b.y = 280; b.w = g_cw - 144; b.h = 30;
++    theme_bar(b, 1.0, -1.0);
++    if (g_rel_relinking)
++        snprintf(t, sizeof t, "Linked again");
++    else if (secs >= 60)
++        snprintf(t, sizeof t, "Built in %u min %u s", secs / 60, secs % 60);
++    else
++        snprintf(t, sizeof t, "Built in %u s", secs);
++    theme_text(b, t, 12, 700, RGB(0x1A, 0x12, 0x08), THEME_CENTRE);
++
++    if (g_rel_relinking)
++        snprintf(text, sizeof text, "%s is linked to its files at %s again. Nothing was "
++                 "rebuilt, and your saves are where they were.", g_title_name, g_source);
++    else
++        snprintf(text, sizeof text, "%s was built from your copy. Next time, the launcher "
++                 "opens straight to the settings and Play. Your saves stay where they are.",
++                 g_title_name);
++    r.x = 150; r.w = g_cw - 300; r.y = 370; r.h = 100;
++    theme_text_wrapped(r, text, 13, THEME_MIST);
++
++    b = sea_ok_rect();
++    sea_button(b, "SET SAIL", 1);
++    r.x = b.x; r.w = b.w; r.y = b.y + b.h + 8; r.h = 20;
++    theme_text(r, g_pad_seen ? "A  to continue" : "Enter  to continue", 11, 400, THEME_SLATE,
++               THEME_CENTRE);
++}
++
++/* A click on the footer's links; 1 when it was one. */
++static int sea_footer_click(int mx, int my)
++{
++    char path[LAUNCHER_PATH + 32];
++    int i;
++
++    for (i = 0; i < LINK_COUNT; i++) {
++        if (!sea_link_shown(i) || !in_rect(sea_link_rect(i), mx, my))
++            continue;
++        if (i == LINK_LOG) {
++#ifdef _WIN32
++            snprintf(path, sizeof path, "%s\\build.log", g_user_dir);
++#else
++            snprintf(path, sizeof path, "%s/build.log", g_user_dir);
++#endif
++            lhost_open(path);
++        } else if (i == LINK_FOLDER) {
++            lhost_open(g_user_dir);
++        } else {
++            lhost_open(g_home_url);
++        }
++        return 1;
++    }
++    return 0;
++}
++
+ static void draw(void)
+ {
+     ThemeRect r;
+     int i;
+ 
++    /* The first run (the disc, the build, done) in the release's own look;
++     * the settings in the toolkit's. */
++    theme_set_look(g_release && g_rel != REL_READY ? g_release_look : THEME_LOOK_DASHBOARD);
+     theme_background(g_pulse);
+ 
++    if (theme_look() == THEME_LOOK_SEA) {
++        sea_header();
++        if (g_rel == REL_BUILDING)
++            sea_building();
++        else if (g_rel == REL_DONE)
++            sea_done();
++        else
++            draw_setup();
++        sea_footer();
++        return;
++    }
++
+     /* Title. The game's own name, from its certificate. */
+     r.x = 60; r.y = 30; r.w = g_cw - 120; r.h = 46;
+     theme_text(r, g_title_name, 26, 700, THEME_TEXT, THEME_LEFT);
+diff --git a/src/launcher/launcher.h b/src/launcher/launcher.h
+index 1631fdd..334d367 100644
+--- a/src/launcher/launcher.h
++++ b/src/launcher/launcher.h
+@@ -69,6 +69,9 @@ int      lhost_copy(const char *text);  /* 1 when it is on the clipboard */
+  * it cannot, and returns 0. */
+ int      lhost_launch(const char *exe, const char *dir);
+ void     lhost_close(void);             /* end the launcher, after this event */
++/* Open a web address, a file or a folder with the desktop's own handler
++ * (the browser, the text editor, the file manager). 0 when it cannot. */
++int      lhost_open(const char *target);
+ /* Run fn on a thread of its own, detached. 0 when there is no thread. */
+ int      lhost_thread(void (*fn)(void));
+ /* A flag one thread raises for another to see, with what was written
+diff --git a/src/launcher/launcher_sdl.c b/src/launcher/launcher_sdl.c
+index 59d3bf4..3ef55b5 100644
+--- a/src/launcher/launcher_sdl.c
++++ b/src/launcher/launcher_sdl.c
+@@ -153,6 +153,17 @@ int lhost_launch(const char *exe, const char *dir)
+     return 1;
+ }
+ 
++int lhost_open(const char *target)
++{
++    char url[4096];
++
++    /* SDL opens web addresses; a path goes as a file:// one. */
++    if (strstr(target, "://"))
++        return SDL_OpenURL(target);
++    snprintf(url, sizeof url, "file://%s", target);
++    return SDL_OpenURL(url);
++}
++
+ void lhost_close(void)
+ {
+     g_quit = 1;
+diff --git a/src/launcher/launcher_theme.c b/src/launcher/launcher_theme.c
+index b25943d..175a806 100644
+--- a/src/launcher/launcher_theme.c
++++ b/src/launcher/launcher_theme.c
+@@ -28,6 +28,26 @@
+ uint32_t *theme_px;
+ int       theme_w, theme_h;
+ double    theme_scale = 1.0;
++int       theme_serif;
++static int g_look = THEME_LOOK_DASHBOARD;
++
++void theme_set_look(int look) { g_look = look; }
++int  theme_look(void) { return g_look; }
++void theme_set_serif(int on) { theme_serif = on; }
++
++uint32_t theme_map_colour(uint32_t c)
++{
++    if (g_look != THEME_LOOK_SEA)
++        return c;
++    if (c == THEME_GREEN)    return THEME_BRASS;
++    if (c == THEME_TEXT)     return THEME_CREAM;
++    if (c == THEME_TEXT_DIM) return THEME_SLATE;
++    return c;
++}
++
++#define CR(c) ((int)((c) & 0xFF))
++#define CG(c) ((int)(((c) >> 8) & 0xFF))
++#define CB(c) ((int)(((c) >> 16) & 0xFF))
+ 
+ /* ------------------------------------------------------------- pixels */
+ 
+@@ -103,6 +123,26 @@ void theme_background(double pulse)
+     if (!theme_px || !background_cache())
+         return;
+ 
++    if (g_look == THEME_LOOK_SEA) {
++        /* Night water: a lighter blue where the content sits, falling to
++         * near black at the edges. It does not breathe. */
++        const double reach = theme_w * 0.75;
++
++        n = (size_t)theme_w * theme_h;
++        for (i = 0; i < n; i++) {
++            double t = clamp01(g_bg_dist[i] / reach), k = g_bg_vignette[i];
++            /* #16324A at the centre, #0E2236 halfway, #081624 at the edge. */
++            double r = t < 0.5 ? 0x16 + (0x0E - 0x16) * t * 2 : 0x0E + (0x08 - 0x0E) * (t - 0.5) * 2;
++            double g = t < 0.5 ? 0x32 + (0x22 - 0x32) * t * 2 : 0x22 + (0x16 - 0x22) * (t - 0.5) * 2;
++            double b = t < 0.5 ? 0x4A + (0x36 - 0x4A) * t * 2 : 0x36 + (0x24 - 0x36) * (t - 0.5) * 2;
++
++            k *= 0.5;
++            theme_px[i] = ((uint32_t)(r - r * k) << 16) | ((uint32_t)(g - g * k) << 8) |
++                          (uint32_t)(b - b * k);
++        }
++        return;
++    }
++
+     n = (size_t)theme_w * theme_h;
+     for (i = 0; i < n; i++) {
+         double d = g_bg_dist[i];
+@@ -151,6 +191,17 @@ void theme_panel(ThemeRect r, double lit)
+     if (!theme_px)
+         return;
+     lit = clamp01(lit);
++    if (g_look == THEME_LOOK_SEA) {
++        ThemeRect in = { r.x + 1, r.y + 1, r.w - 2, r.h - 2 };
++
++        /* A dark slab with a brass rim that brightens when selected. */
++        theme_fill(r, 8.0, lit > 0.5 ? THEME_BRASS_LIGHT : THEME_BRASS_DARK,
++                   0.35 + 0.65 * lit);
++        theme_fill(in, 7.0, RGB(0x0A, 0x1A, 0x2A), 1.0);
++        if (lit > 0.5)
++            theme_fill(in, 7.0, THEME_BRASS, 0.10 * lit);
++        return;
++    }
+     falloff = 4.0 + 7.0 * lit;
+     strength = 0.07 + 0.42 * lit;
+ 
+@@ -215,6 +266,37 @@ void theme_bar(ThemeRect r, double fraction, double phase)
+ 
+     if (!theme_px)
+         return;
++    if (g_look == THEME_LOOK_SEA) {
++        ThemeRect in = { r.x + 1, r.y + 1, r.w - 2, r.h - 2 };
++        ThemeRect fill = { r.x + 3, r.y + 3, 0, r.h - 6 };
++
++        /* A brass-rimmed trough, filled with polished brass. */
++        theme_fill(r, radius, THEME_BRASS_DARK, 1.0);
++        theme_fill(in, radius - 1, RGB(0x07, 0x14, 0x20), 1.0);
++        fill.w = (int)((r.w - 6) * clamp01(fraction) + 0.5);
++        if (fill.w >= fill.h)
++            theme_fill_vgrad(fill, fill.h / 2.0, THEME_BRASS_LIGHT, THEME_BRASS_DARK);
++        else if (fill.w > 0)
++            theme_disc(fill.x + fill.h / 2.0, fill.y + fill.h / 2.0, fill.h / 2.0,
++                       THEME_BRASS_MID, 1.0);
++        /* The glint that says it is alive, along the brass only. */
++        if (phase >= 0 && fill.w > 0) {
++            x0 = (int)floor(fill.x * s);
++            x1 = (int)ceil((fill.x + fill.w) * s);
++            y0 = (int)floor(fill.y * s);
++            y1 = (int)ceil((fill.y + fill.h) * s);
++            for (y = y0; y < y1 && y < theme_h; y++)
++                for (x = x0 < 0 ? 0 : x0; x < x1 && x < theme_w; x++) {
++                    double px = (x + 0.5) / s, py = (y + 0.5) / s;
++                    double d = rrect_distance(px, py, fill, fill.h / 2.0);
++                    double u = (px - centre) / band;
++
++                    if (d < 0)
++                        blend(x, y, 0xFF, 0xF0, 0xC8, 0.35 * exp(-u * u * 4.0) * clamp01(-d * s));
++                }
++        }
++        return;
++    }
+     x0 = (int)floor(r.x * s);
+     y0 = (int)floor(r.y * s);
+     x1 = (int)ceil((r.x + r.w) * s);
+@@ -310,3 +392,154 @@ void theme_arrows(ThemeRect r, int can_left, int can_right, double lit)
+         }
+     }
+ }
++
++/* ------------------------------------------------------ the sea look */
++
++/* Pixel bounds of a window-unit box grown by `pad`, clipped to the buffer. */
++static void px_bounds(double x, double y, double w, double h, double pad,
++                      int *x0, int *y0, int *x1, int *y1)
++{
++    const double s = theme_scale;
++
++    *x0 = (int)floor((x - pad) * s);
++    *y0 = (int)floor((y - pad) * s);
++    *x1 = (int)ceil((x + w + pad) * s);
++    *y1 = (int)ceil((y + h + pad) * s);
++    if (*x0 < 0) *x0 = 0;
++    if (*y0 < 0) *y0 = 0;
++    if (*x1 > theme_w) *x1 = theme_w;
++    if (*y1 > theme_h) *y1 = theme_h;
++}
++
++static void fill_rrect(ThemeRect r, double radius, COLORREF top, COLORREF bottom,
++                       double alpha)
++{
++    const double s = theme_scale;
++    int x0, y0, x1, y1, x, y;
++
++    if (!theme_px || r.w <= 0 || r.h <= 0)
++        return;
++    if (radius > r.w / 2.0) radius = r.w / 2.0;
++    if (radius > r.h / 2.0) radius = r.h / 2.0;
++    px_bounds(r.x, r.y, r.w, r.h, 1, &x0, &y0, &x1, &y1);
++    for (y = y0; y < y1; y++) {
++        double t = clamp01(((y + 0.5) / s - r.y) / r.h);
++        int cr = (int)(CR(top) + (CR(bottom) - CR(top)) * t);
++        int cg = (int)(CG(top) + (CG(bottom) - CG(top)) * t);
++        int cb = (int)(CB(top) + (CB(bottom) - CB(top)) * t);
++
++        for (x = x0; x < x1; x++) {
++            double d = rrect_distance((x + 0.5) / s, (y + 0.5) / s, r, radius);
++            double edge = clamp01(0.5 - d * s);
++
++            if (edge > 0)
++                blend(x, y, cr, cg, cb, alpha * edge);
++        }
++    }
++}
++
++void theme_fill(ThemeRect r, double radius, COLORREF colour, double alpha)
++{
++    fill_rrect(r, radius, colour, colour, alpha);
++}
++
++void theme_fill_vgrad(ThemeRect r, double radius, COLORREF top, COLORREF bottom)
++{
++    fill_rrect(r, radius, top, bottom, 1.0);
++}
++
++void theme_disc(double cx, double cy, double radius, COLORREF colour, double alpha)
++{
++    const double s = theme_scale;
++    int x0, y0, x1, y1, x, y;
++
++    if (!theme_px)
++        return;
++    px_bounds(cx - radius, cy - radius, radius * 2, radius * 2, 1, &x0, &y0, &x1, &y1);
++    for (y = y0; y < y1; y++)
++        for (x = x0; x < x1; x++) {
++            double dx = (x + 0.5) / s - cx, dy = (y + 0.5) / s - cy;
++            double edge = clamp01(0.5 - (sqrt(dx * dx + dy * dy) - radius) * s);
++
++            if (edge > 0)
++                blend(x, y, CR(colour), CG(colour), CB(colour), alpha * edge);
++        }
++}
++
++void theme_diamond(double cx, double cy, double radius, COLORREF colour)
++{
++    const double s = theme_scale;
++    int x0, y0, x1, y1, x, y;
++
++    if (!theme_px)
++        return;
++    px_bounds(cx - radius, cy - radius, radius * 2, radius * 2, 1, &x0, &y0, &x1, &y1);
++    for (y = y0; y < y1; y++)
++        for (x = x0; x < x1; x++) {
++            double d = fabs((x + 0.5) / s - cx) + fabs((y + 0.5) / s - cy) - radius;
++            double edge = clamp01(0.5 - d * s * 0.7071);
++
++            if (edge > 0)
++                blend(x, y, CR(colour), CG(colour), CB(colour), edge);
++        }
++}
++
++void theme_hline(int x0, int x1, int y, COLORREF colour, double alpha, int fade)
++{
++    const double s = theme_scale;
++    int px0 = (int)floor(x0 * s), px1 = (int)ceil(x1 * s);
++    int py0 = (int)floor(y * s), py1 = (int)floor((y + 1) * s);
++    int px, py;
++
++    if (!theme_px || x1 <= x0)
++        return;
++    if (py1 <= py0) py1 = py0 + 1;
++    for (px = px0; px < px1; px++) {
++        double t = clamp01(((px + 0.5) / s - x0) / (double)(x1 - x0));
++        double a = alpha * (fade < 0 ? t : fade > 0 ? 1.0 - t : 1.0);
++
++        for (py = py0; py < py1; py++)
++            blend(px, py, CR(colour), CG(colour), CB(colour), a);
++    }
++}
++
++void theme_hdash(int x0, int x1, int y, int thick, COLORREF colour)
++{
++    int x;
++
++    for (x = x0; x < x1; x += 10) {
++        ThemeRect d = { x, y, x + 6 <= x1 ? 6 : x1 - x, thick };
++
++        theme_fill(d, 0, colour, 1.0);
++    }
++}
++
++void theme_rope(ThemeRect r)
++{
++    const double s = theme_scale;
++    int x0, y0, x1, y1, x, y;
++
++    if (!theme_px)
++        return;
++    px_bounds(r.x, r.y, r.w, r.h, 0, &x0, &y0, &x1, &y1);
++    for (y = y0; y < y1; y++) {
++        double v = ((y + 0.5) / s - r.y) / r.h;         /* 0 top .. 1 bottom */
++        /* Rounder in the middle, as a rope is. */
++        double shade = 0.75 + 0.45 * sin(v * 3.14159265);
++
++        for (x = x0; x < x1; x++) {
++            /* Strands lie at a slant: light where a strand's crown is,
++             * dark in the lay between two strands. */
++            double u = (x + 0.5) / s + ((y + 0.5) / s - r.y) * 0.55;
++            double w = u / 7.0 - floor(u / 7.0);
++            double k = (w < 0.62 ? sin(w / 0.62 * 3.14159265) : 0.0) * shade;
++            int cr = (int)(0x5A + (0xE6 - 0x5A) * clamp01(k));
++            int cg = (int)(0x44 + (0xC2 - 0x44) * clamp01(k));
++            int cb = (int)(0x1E + (0x7E - 0x1E) * clamp01(k));
++
++            blend(x, y, cr, cg, cb, 1.0);
++        }
++    }
++    theme_hline(r.x, r.x + r.w, r.y - 1, THEME_BRASS_LIGHT, 0.6, 0);
++    theme_hline(r.x, r.x + r.w, r.y + r.h, RGB(0x3A, 0x2C, 0x12), 0.9, 0);
++}
+diff --git a/src/launcher/launcher_theme.h b/src/launcher/launcher_theme.h
+index 98038e5..8a561e7 100644
+--- a/src/launcher/launcher_theme.h
++++ b/src/launcher/launcher_theme.h
+@@ -90,4 +90,44 @@ void theme_arrows(ThemeRect r, int can_left, int can_right, double lit);
+  * negative phase draws it still. */
+ void theme_bar(ThemeRect r, double fraction, double phase);
+ 
++/* ---- a title's own look, for the self-building release's first run ----
++ *
++ * THEME_LOOK_SEA is brass on a dark sea blue, the look of Sid Meier's
++ * Pirates!' in-game menu (a release asks for it with "look": "sea" in its
++ * recipe). While it is set, theme_background, theme_panel and theme_bar
++ * draw in it, and text drawn in THEME_GREEN, THEME_TEXT and THEME_TEXT_DIM
++ * comes out brass, cream and a grey-blue, so a screen written for the
++ * dashboard look takes the sea look without being written twice. */
++#define THEME_LOOK_DASHBOARD 0
++#define THEME_LOOK_SEA       1
++void theme_set_look(int look);
++int  theme_look(void);
++
++/* The sea look's own colours. */
++#define THEME_BRASS        RGB(0xD9, 0xB2, 0x6A)
++#define THEME_BRASS_LIGHT  RGB(0xE6, 0xC2, 0x7E)
++#define THEME_BRASS_MID    RGB(0xB8, 0x91, 0x4C)
++#define THEME_BRASS_DARK   RGB(0x8C, 0x6C, 0x34)
++#define THEME_CREAM        RGB(0xF3, 0xEB, 0xD8)
++#define THEME_MIST         RGB(0xC9, 0xD3, 0xDC)
++#define THEME_SLATE        RGB(0x9A, 0xAC, 0xBC)
++#define THEME_ROUTE        RGB(0x3E, 0x5A, 0x72)
++#define THEME_NAVY         RGB(0x0E, 0x22, 0x36)
++
++/* Text after this in a serif face (Georgia on Windows, the desktop's
++ * serif on Linux; macOS keeps its system face), until it is set back. */
++void theme_set_serif(int on);
++
++/* Shapes, in window units, antialiased. `alpha` 0..1. */
++void theme_fill(ThemeRect r, double radius, COLORREF colour, double alpha);
++void theme_fill_vgrad(ThemeRect r, double radius, COLORREF top, COLORREF bottom);
++void theme_disc(double cx, double cy, double radius, COLORREF colour, double alpha);
++void theme_diamond(double cx, double cy, double radius, COLORREF colour);
++/* A one-unit line, faded in from the left (fade < 0), out to the right
++ * (fade > 0) or solid (0); and the same dashed. */
++void theme_hline(int x0, int x1, int y, COLORREF colour, double alpha, int fade);
++void theme_hdash(int x0, int x1, int y, int thick, COLORREF colour);
++/* A band of twisted rope across `r`: the sea look's trim. */
++void theme_rope(ThemeRect r);
++
+ #endif /* XBOXRECOMP_LAUNCHER_THEME_H */
+diff --git a/src/launcher/launcher_theme_buf.h b/src/launcher/launcher_theme_buf.h
+index 3035b5a..0ff71f0 100644
+--- a/src/launcher/launcher_theme_buf.h
++++ b/src/launcher/launcher_theme_buf.h
+@@ -19,4 +19,9 @@ extern uint32_t *theme_px;
+ extern int       theme_w, theme_h;
+ extern double    theme_scale;
+ 
++/* For the text half: the face asked for (theme_set_serif) and the colour a
++ * text colour becomes in the current look (theme_set_look). */
++extern int       theme_serif;
++uint32_t theme_map_colour(uint32_t colour);
++
+ #endif /* XBOXRECOMP_LAUNCHER_THEME_BUF_H */
+diff --git a/src/launcher/launcher_theme_coretext.c b/src/launcher/launcher_theme_coretext.c
+index 94436dc..9d2b448 100644
+--- a/src/launcher/launcher_theme_coretext.c
++++ b/src/launcher/launcher_theme_coretext.c
+@@ -163,6 +163,7 @@ static CFAttributedStringRef styled(const char *text, int size, int weight,
+         str = CFStringCreateWithCString(NULL, text, kCFStringEncodingMacRoman);
+     if (!str)
+         return NULL;
++    colour = theme_map_colour(colour);     /* the look's text colours */
+     cg = CGColorCreateSRGB((colour & 0xFF) / 255.0, ((colour >> 8) & 0xFF) / 255.0,
+                            ((colour >> 16) & 0xFF) / 255.0, 1.0);
+     k[0] = kCTFontAttributeName;            v[0] = font;
+diff --git a/src/launcher/launcher_theme_freetype.c b/src/launcher/launcher_theme_freetype.c
+index 83ce714..a7c7da0 100644
+--- a/src/launcher/launcher_theme_freetype.c
++++ b/src/launcher/launcher_theme_freetype.c
+@@ -64,11 +64,11 @@ int theme_begin(int width, int height)
+ /* --------------------------------------------------------------- fonts */
+ 
+ static FT_Library g_ft;
+-static FT_Face    g_face[2];            /* regular, bold */
++static FT_Face    g_face[4];            /* regular, bold; serif regular, bold */
+ static int        g_font_tried;
+ 
+-/* The file fontconfig chooses for the desktop's sans at a weight. */
+-static FT_Face open_sans(int bold)
++/* The file fontconfig chooses for the desktop's sans (or serif) at a weight. */
++static FT_Face open_face(const char *family, int bold)
+ {
+     FcPattern *pat, *match;
+     FcResult res;
+@@ -76,7 +76,7 @@ static FT_Face open_sans(int bold)
+     int index = 0;
+     FT_Face face = NULL;
+ 
+-    pat = FcNameParse((const FcChar8 *)"sans-serif");
++    pat = FcNameParse((const FcChar8 *)family);
+     if (!pat)
+         return NULL;
+     FcPatternAddInteger(pat, FC_WEIGHT, bold ? FC_WEIGHT_BOLD : FC_WEIGHT_REGULAR);
+@@ -89,8 +89,8 @@ static FT_Face open_sans(int bold)
+             face = NULL;
+     }
+     if (!face)
+-        fprintf(stderr, "launcher: no %s sans-serif font from fontconfig\n",
+-                bold ? "bold" : "regular");
++        fprintf(stderr, "launcher: no %s %s font from fontconfig\n",
++                bold ? "bold" : "regular", family);
+     if (match)
+         FcPatternDestroy(match);
+     FcPatternDestroy(pat);
+@@ -106,10 +106,17 @@ static int fonts_ready(void)
+             return 0;
+         }
+         FcInit();
+-        g_face[0] = open_sans(0);
+-        g_face[1] = open_sans(1);
++        g_face[0] = open_face("sans-serif", 0);
++        g_face[1] = open_face("sans-serif", 1);
+         if (!g_face[1])
+             g_face[1] = g_face[0];      /* bold drawn regular, rather than not at all */
++        /* The serif (theme_set_serif); the sans where there is none. */
++        g_face[2] = open_face("serif", 0);
++        g_face[3] = open_face("serif", 1);
++        if (!g_face[2])
++            g_face[2] = g_face[0];
++        if (!g_face[3])
++            g_face[3] = g_face[2] != g_face[0] ? g_face[2] : g_face[1];
+     }
+     return g_face[0] != NULL;
+ }
+@@ -317,7 +324,8 @@ static void px_rect(ThemeRect r, int *x0, int *y0, int *x1, int *y1)
+ void theme_text(ThemeRect r, const char *text, int size, int weight,
+                 COLORREF colour, ThemeAlign align)
+ {
+-    int bold = weight >= 600, px, x0, y0, x1, y1, asc, desc, baseline;
++    /* The face's slot in g_face, which the glyph cache keys on too. */
++    int bold = (weight >= 600) + (theme_serif ? 2 : 0), px, x0, y0, x1, y1, asc, desc, baseline;
+     long width, x;
+     FT_Face f;
+ 
+@@ -337,12 +345,13 @@ void theme_text(ThemeRect r, const char *text, int size, int weight,
+     asc = (int)(f->size->metrics.ascender >> 6);
+     desc = (int)(-f->size->metrics.descender >> 6);
+     baseline = y0 + ((y1 - y0) - (asc + desc)) / 2 + asc;
+-    draw_run(text, strlen(text), x, baseline, bold, px, colour, x0, y0, x1, y1);
++    draw_run(text, strlen(text), x, baseline, bold, px, theme_map_colour(colour),
++             x0, y0, x1, y1);
+ }
+ 
+ void theme_text_wrapped(ThemeRect r, const char *text, int size, COLORREF colour)
+ {
+-    int px, x0, y0, x1, y1, asc, line_h, y;
++    int px, x0, y0, x1, y1, asc, line_h, y, face = theme_serif ? 2 : 0;
+     long room;
+     const char *p;
+     FT_Face f;
+@@ -350,8 +359,9 @@ void theme_text_wrapped(ThemeRect r, const char *text, int size, COLORREF colour
+     if (!theme_px || !text || !*text || !fonts_ready())
+         return;
+     px = px_for(size);
+-    if (!(f = face_at(0, px)))
++    if (!(f = face_at(face, px)))
+         return;
++    colour = theme_map_colour(colour);
+     px_rect(r, &x0, &y0, &x1, &y1);
+     room = (long)(x1 - x0) << 6;
+     asc = (int)(f->size->metrics.ascender >> 6);
+@@ -372,7 +382,7 @@ void theme_text_wrapped(ThemeRect r, const char *text, int size, COLORREF colour
+                 q++;
+             while (*q && *q != ' ' && *q != '\n')
+                 q++;
+-            if (measure(p, (size_t)(q - p), 0, px) > room)
++            if (measure(p, (size_t)(q - p), face, px) > room)
+                 break;
+             fit = end = q;
+         }
+@@ -385,14 +395,14 @@ void theme_text_wrapped(ThemeRect r, const char *text, int size, COLORREF colour
+                 while (*u && *u != '\n' && *u != ' ') {
+                     const unsigned char *n = u;
+                     next_cp(&n);
+-                    if (measure(p, (size_t)((const char *)n - p), 0, px) > room && fit > p)
++                    if (measure(p, (size_t)((const char *)n - p), face, px) > room && fit > p)
+                         break;
+                     u = n;
+                     fit = (const char *)u;
+                 }
+             }
+         }
+-        draw_run(p, (size_t)(fit - p), (long)x0 << 6, y + asc, 0, px, colour,
++        draw_run(p, (size_t)(fit - p), (long)x0 << 6, y + asc, face, px, colour,
+                  x0, y0, x1, y1);
+         p = fit;
+         while (*p == ' ')
+diff --git a/src/launcher/launcher_theme_gdi.c b/src/launcher/launcher_theme_gdi.c
+index 034fa11..44dd09e 100644
+--- a/src/launcher/launcher_theme_gdi.c
++++ b/src/launcher/launcher_theme_gdi.c
+@@ -83,11 +83,13 @@ void theme_text(ThemeRect r, const char *text, int size, int weight,
+      * Segoe UI where it exists, Arial where it does not. */
+     font = CreateFontA(-MulDiv(size, 96, 72), 0, 0, 0, weight, FALSE, FALSE, FALSE,
+                        DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+-                       CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
++                       CLEARTYPE_QUALITY,
++                       DEFAULT_PITCH | (theme_serif ? FF_ROMAN : FF_SWISS),
++                       theme_serif ? "Georgia" : "Segoe UI");
+     if (!font)
+         return;
+     old = (HFONT)SelectObject(g_dc, font);
+-    SetTextColor(g_dc, colour);
++    SetTextColor(g_dc, theme_map_colour(colour));
+ 
+     rc.left = r.x;
+     rc.top = r.y;
+@@ -110,11 +112,13 @@ void theme_text_wrapped(ThemeRect r, const char *text, int size, COLORREF colour
+         return;
+     font = CreateFontA(-MulDiv(size, 96, 72), 0, 0, 0, 400, FALSE, FALSE, FALSE,
+                        DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+-                       CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
++                       CLEARTYPE_QUALITY,
++                       DEFAULT_PITCH | (theme_serif ? FF_ROMAN : FF_SWISS),
++                       theme_serif ? "Georgia" : "Segoe UI");
+     if (!font)
+         return;
+     old = (HFONT)SelectObject(g_dc, font);
+-    SetTextColor(g_dc, colour);
++    SetTextColor(g_dc, theme_map_colour(colour));
+ 
+     rc.left = r.x;
+     rc.top = r.y;
+diff --git a/src/launcher/launcher_win32.c b/src/launcher/launcher_win32.c
+index 9dea3bb..ca1613f 100644
+--- a/src/launcher/launcher_win32.c
++++ b/src/launcher/launcher_win32.c
+@@ -11,6 +11,7 @@
+ #define COBJMACROS
+ #include <windows.h>
+ #include <shobjidl.h>
++#include <shellapi.h>
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -117,6 +118,11 @@ int lhost_launch(const char *exe, const char *dir)
+     return 1;
+ }
+ 
++int lhost_open(const char *target)
++{
++    return (INT_PTR)ShellExecuteA(NULL, "open", target, NULL, NULL, SW_SHOWNORMAL) > 32;
++}
++
+ void lhost_close(void)
+ {
+     PostMessage(g_hwnd, WM_CLOSE, 0, 0);
 diff --git a/tools/builder/src/main.rs b/tools/builder/src/main.rs
-index 5e7ace0..81f899e 100644
+index 5e7ace0..5e335fe 100644
 --- a/tools/builder/src/main.rs
 +++ b/tools/builder/src/main.rs
-@@ -143,14 +143,17 @@ struct Stamp {
+@@ -143,15 +143,19 @@ struct Stamp {
  // ── progress ────────────────────────────────────────────────────────────────
  
  /// The share of the whole build each stage is drawn as. Measured on
 -/// TimeSplitters 2: extraction is disk-bound, the pipeline about 19 s and the
 -/// compile about 30 s on a 6-core machine.
-+/// Sid Meier's Pirates! (22 Nov 2026, a 16-thread desktop, the game's files
-+/// already extracted): the translation about 155 s, configure and compile
-+/// about 90 s. Extraction is disk-bound and reports its own files. The
-+/// launcher's time left is worked out from how fast this moves, so the
-+/// closer these are to the real times, the steadier it is.
++/// Sid Meier's Pirates! (22 Nov 2026, a 16-thread desktop, a clean build
++/// from the game's folder in 133 s): the game's files 3.5 s, the
++/// translation 44 s, CMake's configure 24 s, the compile 62 s. Extraction
++/// from an image is disk-bound and reports its own files. The launcher's
++/// time left is worked out from how fast this moves, so the closer these
++/// are to the real times, the steadier it is.
  const STAGES: &[(&str, &str, f64)] = &[
-     ("game", "Preparing the game files", 0.12),
+-    ("game", "Preparing the game files", 0.12),
++    ("game", "Preparing the game files", 0.05),
      ("check", "Checking the disc", 0.01),
 -    ("lift", "Translating the game to C", 0.35),
-+    ("lift", "Translating the game to C", 0.55),
-     ("configure", "Setting up the build", 0.02),
+-    ("configure", "Setting up the build", 0.02),
 -    ("compile", "Compiling", 0.48),
-+    ("compile", "Compiling", 0.28),
-     ("install", "Finishing", 0.02),
+-    ("install", "Finishing", 0.02),
++    ("lift", "Translating the game to C", 0.33),
++    ("configure", "Setting up the build", 0.17),
++    ("compile", "Compiling", 0.43),
++    ("install", "Finishing", 0.01),
  ];
  
-@@ -680,8 +683,16 @@ fn lossy_lines<R: std::io::Read>(r: R) -> impl Iterator<Item = String> {
+ fn stage_index(name: &str) -> usize {
+@@ -680,8 +684,16 @@ fn lossy_lines<R: std::io::Read>(r: R) -> impl Iterator<Item = String> {
  
  /// Run a tool, its output appended to the log and each line handed to
  /// `on_line`; on failure, the error carries the last lines it printed.
@@ -265,7 +1232,7 @@ index 5e7ace0..81f899e 100644
  {
      let mut logf = fs::OpenOptions::new().create(true).append(true).open(log)
          .or_else(|e| fail(format!("cannot write {}: {e}", log.display())))?;
-@@ -702,6 +713,7 @@ fn run(cmd: &mut Command, log: &Path, what: &str, mut on_line: impl FnMut(&str))
+@@ -702,6 +714,7 @@ fn run(cmd: &mut Command, log: &Path, what: &str, mut on_line: impl FnMut(&str))
      let errs = std::thread::spawn(move || {
          for line in lossy_lines(err) {
              let _ = writeln!(log2.lock().unwrap(), "{line}");
@@ -273,22 +1240,25 @@ index 5e7ace0..81f899e 100644
              let mut t = tail2.lock().unwrap();
              t.push_back(line);
              if t.len() > 25 { t.pop_front(); }
-@@ -746,19 +758,72 @@ fn sync_tree(from: &Path, to: &Path) -> Result<(), Failure> {
+@@ -746,19 +759,75 @@ fn sync_tree(from: &Path, to: &Path) -> Result<(), Failure> {
  
  // ── 3-5. lift, build, install ───────────────────────────────────────────────
  
 -/// recompile.py's "  2/4  disasm" as each stage starts, as progress.
-+/// The lift's progress, in thousandths of the stage. recompile.py's four
-+/// steps take seconds except the last, tools.recomp, which on Pirates is
-+/// ~40 s loading its tables, ~90 s lifting 16,000 functions and ~10 s
-+/// writing them; it says where it is on stderr ("Loading data files...",
-+/// "Loaded ...", "[n/N] translated", "=== Split Translation Complete"), and
-+/// each of those moves the bar, so a long lift is not one long stop.
++/// The lift's progress, in thousandths of the stage. Measured on Pirates
++/// (44 s in all): naming the XDK functions 3 s, disasm 18 s, identify 1 s,
++/// tools.recomp loading its tables 8.5 s, lifting 16,000 functions 11 s
++/// (on a busy machine both were minutes) and writing them 2 s. tools.recomp
++/// says where it is on stderr ("Loaded ...", "[n/N] translated",
++/// "=== Split Translation Complete"), and each of those moves the bar, so
++/// a long lift is not one long stop.
 +const LIFT_TOTAL: u64 = 1000;
-+const LIFT_STEP_START: [u64; 4] = [0, 20, 60, 100];   // 1/4 .. 4/4
-+const LIFT_LOADED: u64 = 350;
-+const LIFT_TRANSLATED: u64 = 920;
-+const LIFT_WRITTEN: u64 = 980;
++/// About how many lines CMake prints configuring Pirates.
++const CONFIGURE_LINES: u64 = 20;
++const LIFT_STEP_START: [u64; 4] = [60, 70, 480, 510];   // 1/4 .. 4/4
++const LIFT_LOADED: u64 = 700;
++const LIFT_TRANSLATED: u64 = 950;
++const LIFT_WRITTEN: u64 = 965;
 +
 +/// recompile.py's "  2/4  disasm" as each stage starts (stdout).
  fn lift_progress(line: &str) {
@@ -348,7 +1318,7 @@ index 5e7ace0..81f899e 100644
  fn lift(release: &Release, image: &Image, user: &Path, log: &Path) -> Result<(), Failure> {
      let r = &release.dir;
      let project = user.join("project");
-@@ -784,7 +849,9 @@ fn lift(release: &Release, image: &Image, user: &Path, log: &Path) -> Result<(),
+@@ -784,7 +853,9 @@ fn lift(release: &Release, image: &Image, user: &Path, log: &Path) -> Result<(),
              // UTF-8 to the pipe whatever the system code page is: the
              // pipeline prints the disc's title, which can hold a "\u{2122}".
              .env("PYTHONUTF8", "1").env("PYTHONIOENCODING", "utf-8")
@@ -359,7 +1329,7 @@ index 5e7ace0..81f899e 100644
      };
  
      // A title's own lift. It finds the pipeline where its toolkit submodule
-@@ -802,15 +869,15 @@ fn lift(release: &Release, image: &Image, user: &Path, log: &Path) -> Result<(),
+@@ -802,15 +873,15 @@ fn lift(release: &Release, image: &Image, user: &Path, log: &Path) -> Result<(),
          let Some((script, args)) = hook.split_first() else {
              return fail("release.json's lift names no script");
          };
@@ -378,7 +1348,7 @@ index 5e7ace0..81f899e 100644
          return Ok(());
      }
  
-@@ -821,7 +888,7 @@ fn lift(release: &Release, image: &Image, user: &Path, log: &Path) -> Result<(),
+@@ -821,7 +892,7 @@ fn lift(release: &Release, image: &Image, user: &Path, log: &Path) -> Result<(),
      // Which XDK functions sit where in this image, for the replacements the
      // lifter links in by name. A recipe may carry them; otherwise they are
      // found here, by signature, as tools.xdk_symbols does at a desk.
@@ -387,7 +1357,7 @@ index 5e7ace0..81f899e 100644
      // Beside the XBE, named after it, where recompile.py looks.
      let stem = Path::new(name).file_stem().map(|s| s.to_string_lossy().into_owned())
          .unwrap_or_else(|| "default".into());
-@@ -857,8 +924,8 @@ fn lift(release: &Release, image: &Image, user: &Path, log: &Path) -> Result<(),
+@@ -857,8 +928,8 @@ fn lift(release: &Release, image: &Image, user: &Path, log: &Path) -> Result<(),
      } else if image.config.is_some() {
          cmd.arg("--no-xbe-patches");
      }
@@ -398,7 +1368,24 @@ index 5e7ace0..81f899e 100644
      Ok(())
  }
  
-@@ -1309,6 +1376,22 @@ mod tests {
+@@ -910,7 +981,15 @@ fn build(release: &Release, user: &Path, log: &Path) -> Result<PathBuf, Failure>
+             c.arg(format!("-DCMAKE_RC_COMPILER={}", cmake_path(&tool(&tc, "bin/zrc"))));
+         }
+         with_env(&mut c);
+-        run(&mut c, log, "CMake", |_| {})?;
++        // CMake says nothing of how far it is; it prints about 20 lines
++        // ("-- ..."), so each moves the bar a little, short of the end.
++        let mut lines = 0u64;
++        run(&mut c, log, "CMake", |line| {
++            lines += 1;
++            let what = line.trim_start_matches("-- ").trim();
++            progress("configure", lines.min(CONFIGURE_LINES - 1), CONFIGURE_LINES,
++                     &what.chars().take(80).collect::<String>());
++        })?;
+         fs::write(&marker, &want).ok();
+     }
+     progress("configure", 1, 1, "");
+@@ -1309,6 +1388,22 @@ mod tests {
          let _ = fs::remove_dir_all(&d);
      }
  
@@ -454,3 +1441,19 @@ index f070d60..2fbea08 100644
                                      or len(codes) == len(work)):
                          print(f"  [{len(codes)}/{len(work)}] translated "
                                f"({jobs} processes)", file=sys.stderr)
+diff --git a/tools/release/make_release.py b/tools/release/make_release.py
+index 9858275..5c93643 100644
+--- a/tools/release/make_release.py
++++ b/tools/release/make_release.py
+@@ -490,6 +490,11 @@ def main():
+     # disc); the builder checks and lifts that one.
+     if recipe.get("xbe"):
+         release["xbe"] = recipe["xbe"]
++    # The launcher's look for its first-run screens ("sea"), and the
++    # project's page, a link on them.
++    for key in ("look", "home_url"):
++        if recipe.get(key):
++            release[key] = recipe[key]
+     (rel / "release.json").write_text(json.dumps(release, indent=2) + "\n")
+     shutil.copy2(ROOT / "LICENSE", rel / "LICENSE")
+     notice = NOTICE.format(
