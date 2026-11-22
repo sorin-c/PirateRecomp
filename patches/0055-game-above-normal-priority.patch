@@ -1,0 +1,27 @@
+diff --git a/src/hle/hle_d3d8.c b/src/hle/hle_d3d8.c
+index aa56db6..94789bd 100644
+--- a/src/hle/hle_d3d8.c
++++ b/src/hle/hle_d3d8.c
+@@ -706,6 +706,22 @@ static DWORD WINAPI shadow_window_thread(LPVOID param)
+                                         (int)(sizeof wide / sizeof wide[0])) > 0)
+             SetWindowTextW(req->hwnd, wide);
+     }
++    /* A game a person plays runs above the PC's normal work. At normal
++     * priority it shares the cores with whatever else is busy, and its
++     * threads hand work to each other many times a frame, each hand-off
++     * waiting its turn behind the rest: Pirates! sailed at 24-39 fps instead
++     * of 140 while a build compiled in the background, and at 90-120 above
++     * normal. A test run (headless, or in the background) stays at normal,
++     * so it does not take the PC from the person at it. RECOMP_PRIORITY
++     * (`priority` in the title's settings): 1 above normal, 0 normal. */
++    {
++        const char *bgp = getenv("RECOMP_WINDOW_BACKGROUND");
++        int scripted = recomp_headless() || (bgp && *bgp && strcmp(bgp, "0") != 0);
++
++        if (recomp_config_bool("RECOMP_PRIORITY", "priority", !scripted) &&
++                SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS))
++            fprintf(stderr, "[STARTUP] above normal priority (RECOMP_PRIORITY=0 for normal)\n");
++    }
+     if (!req->hwnd)
+         fprintf(stderr, "[HLE-D3D8] shadow: CreateWindow failed (%lu)\n", GetLastError());
+     else

@@ -134,6 +134,7 @@ defaults. Every line names the environment variable that overrides it, so a
 | `skip_legal` | `1` | `1` skips the legal screen at boot (the copyright lines, the ESRB notice, the Bink and Miles logos), `0` shows it as the disc does. |
 | `mute` | `0` | No sound. |
 | `minigames` | `0` | Shows the developers' MINIGAMES (*DEBUG!*) menu entry. |
+| `priority` | `1` | Runs the game above normal priority, so other work on the PC (a build, a download) does not slow it; test runs stay at normal. `0` for normal. |
 | `headless` | `0` | Test runs only (see [building.md](building.md#testing)). |
 
 <details>
