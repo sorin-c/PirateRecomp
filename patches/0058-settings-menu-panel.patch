@@ -950,10 +950,10 @@ index 0000000..aff5a99
 +    g.tried = false;
 +}
 diff --git a/src/d3d/d3d8_overlay.c b/src/d3d/d3d8_overlay.c
-index bce8c0e..0dc729b 100644
+index bce8c0e..ce1c2eb 100644
 --- a/src/d3d/d3d8_overlay.c
 +++ b/src/d3d/d3d8_overlay.c
-@@ -438,8 +438,11 @@ void d3d8_overlay_present(RhiView *out, unsigned width, unsigned height,
+@@ -438,8 +438,13 @@ void d3d8_overlay_present(RhiView *out, unsigned width, unsigned height,
      /* The size it had drawn into a 480-line frame and scaled with it, in
       * whole steps so the glyphs stay sharp. */
      unsigned scale = (pic_h + 240) / 480;
@@ -962,12 +962,14 @@ index bce8c0e..0dc729b 100644
 +    /* The settings menu as a panel (d3d8_menu.cpp) when it can be drawn;
 +     * the text panel below only if it could not. */
 +    int panel = d3d8_menu_present(out, width, height, pic_x, pic_y, pic_h);
-+    const char *text = g_want_menu[0] && !panel ? g_want_menu : g_want;
++    /* While the panel is up the corner line is left off: on a small
++     * window the panel reaches the corner and the two would overlap. */
++    const char *text = g_want_menu[0] ? (panel ? "" : g_want_menu) : g_want;
 +    int centred = g_want_menu[0] != '\0' && !panel;
  
      if (scale < 1) scale = 1;
      if (!text[0] || !out || !width || !height)
-@@ -496,6 +499,7 @@ restore:
+@@ -496,6 +501,7 @@ restore:
  
  void d3d8_overlay_shutdown(void)
  {
