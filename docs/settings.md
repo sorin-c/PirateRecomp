@@ -84,6 +84,8 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   characters and camera already run on the game's real-time clock, so 60,
   90, 120, 144, 240 or 0 (unlocked) only lets the frames come faster, paced
   as sailing and battles are; the default, 30, keeps the console's 33.
+  The governor's room also skips the 10 ms pause its dialog loop takes
+  every frame, which otherwise held it to about 60.
 - **Widescreen.** `widescreen = 1` turns on the game's own 16:9 mode. The
   front end (legal text, title, menus and the new-career pages) stays at 4:3
   between bars, as it was drawn, and the game world fills the screen.
