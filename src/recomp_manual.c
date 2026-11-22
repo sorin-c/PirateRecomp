@@ -191,6 +191,47 @@ void sub_000DB7A0(void)
     sub_000DB7A0_gen();
 }
 
+/* ── Sid Meier's Pirates!: skip the legal screen ───────────────
+ *
+ * RECOMP_PIRATES_SKIP_LEGAL=1 (skip_legal, the default) leaves out the text
+ * screen shown once at boot, after the logo movies: the Firaxis, Microsoft,
+ * NDL, Bink and Miles copyright lines and the ESRB notice, with the Bink and
+ * Miles logos. =0 shows it as the disc does.
+ *
+ * How: the boot state sub_001264A0 builds the screen (sub_000C0E40, its
+ * constructor, thiscall-like with the object in edi and its time on screen
+ * as a float at [esp+4]: 5.0, ret 4) and starts its thread, whose loop
+ * (vtable slot 1, sub_000C0F80) draws it until the time shown reaches that
+ * float or the object is told to stop. No button ends it. Meanwhile the boot
+ * thread lets the .FPK cache copy run ([0x004D67B0]+0x38), loads the main
+ * menu (sub_001003E0), then waits for the screen's thread to end and goes on
+ * to the title screen (sub_001265B0). This wrapper hands the constructor 0.0
+ * for that time: the screen's thread ends on its first pass without drawing,
+ * and the loading, the cache copy and the wait run as they did, so the title
+ * screen comes up as soon as the main menu is loaded. sub_001264A0 is its
+ * only caller.
+ *
+ * Delete this when it is no longer wanted: at 0 it only passes through. */
+extern void sub_000C0E40_gen(void);
+
+void sub_000C0E40(void)
+{
+    static int skip = -1;
+
+    if (skip < 0) {
+        skip = recomp_config_bool("RECOMP_PIRATES_SKIP_LEGAL", "skip_legal", 1) ? 1 : 0;
+        fprintf(stderr, "[PIRATES] legal screen: %s (RECOMP_PIRATES_SKIP_LEGAL)\n",
+                skip ? "skipped" : "shown");
+        fflush(stderr);
+    }
+    if (skip) {
+        /* [esp] is the return address, [esp+4] the float seconds. */
+        volatile float *secs = (volatile float *)((uintptr_t)(g_esp + 4u) + g_xbox_mem_offset);
+        *secs = 0.0f;
+    }
+    sub_000C0E40_gen();
+}
+
 /* ── Sid Meier's Pirates!: the debug MINIGAMES menu ────────────
  *
  * RECOMP_PIRATES_MINIGAMES=1 adds "MINIGAMES (*DEBUG!*)", the developers'

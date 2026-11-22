@@ -31,6 +31,7 @@ Back pressed alone still reaches the game as usual.
 | Texture sharpness (off, 1x, 2x, 4x, 8x, 16x) | next start |
 | Variable refresh | next start |
 | Movies (skip all, skip intro, play all) | next start |
+| Legal screen (skip, show) | next start |
 | Sound | next start |
 | Sailing frame rate (experimental: 30, 60, 90, 120, 144, 240, unlocked) | at once |
 | Battle frame rate (experimental: 30, 60, 90, 120, 144, 240, unlocked) | at once |
@@ -128,6 +129,7 @@ defaults. Every line names the environment variable that overrides it, so a
 | `pad_follow_input` | `1` | Controller 1 is the pad used last. |
 | `pad_directinput` | `0` | SDL's DirectInput back end. |
 | `skip_intro` | `1` | `1` skips every movie, `intro` only the logos and title movie, `0` plays all. |
+| `skip_legal` | `1` | `1` skips the legal screen at boot (the copyright lines, the ESRB notice, the Bink and Miles logos), `0` shows it as the disc does. |
 | `mute` | `0` | No sound. |
 | `minigames` | `0` | Shows the developers' MINIGAMES (*DEBUG!*) menu entry. |
 | `headless` | `0` | Test runs only (see [building.md](building.md#testing)). |
