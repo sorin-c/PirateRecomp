@@ -11,5 +11,8 @@
       "sha1": "19191d2b0364c6ca7ee2a6fc063f3c8e3c843244",
       "name": "Disc (USA, Europe, multi-language)"
     }
+  ],
+  "include": [
+    "tools/check_guest_hooks.py"
   ]
 }

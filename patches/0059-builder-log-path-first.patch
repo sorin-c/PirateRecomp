@@ -1,0 +1,18 @@
+diff --git a/tools/builder/src/main.rs b/tools/builder/src/main.rs
+index af207aa..5e7ace0 100644
+--- a/tools/builder/src/main.rs
++++ b/tools/builder/src/main.rs
+@@ -722,8 +722,11 @@ fn run(cmd: &mut Command, log: &Path, what: &str, mut on_line: impl FnMut(&str))
+         return Ok(());
+     }
+     let tail: Vec<String> = tail.lock().unwrap().iter().cloned().collect();
+-    fail(format!("{what} failed ({status}). Its last lines:\n{}\n\nThe whole log is {}",
+-                 tail.join("\n"), log.display()))
++    // The log's path first: the launcher shows this message in a box of a
++    // few lines and cuts what does not fit, so a path after the tail was
++    // never seen.
++    fail(format!("{what} failed ({status}).\nThe whole log is in {}\n\nIts last lines:\n{}",
++                 log.display(), tail.join("\n")))
+ }
+ 
+ /// The recipe's files into the player's project folder, leaving files that
