@@ -1,0 +1,58 @@
+diff --git a/src/hle/hle_d3d8_state.c b/src/hle/hle_d3d8_state.c
+index a7b2822..f3df7db 100644
+--- a/src/hle/hle_d3d8_state.c
++++ b/src/hle/hle_d3d8_state.c
+@@ -1035,6 +1035,34 @@ void hle_d3d8_set_routed_arrays(int on)
+     g_routed_arrays = on;
+ }
+ 
++uint32_t hle_d3d8_shadow_fvf(void);   /* hle_d3d8.c */
++
++/* The set a stage reads in a routed draw (g_routed_arrays) that names set
++ * `named`. Stage s's own attribute (v9 + s) holds that set, but a draw under
++ * an FVF is laid out with only the FVF's sets, v9 .. v9 + ntex - 1
++ * (push_gather_fvf, inline_draw): a stage past them has no attribute in the
++ * vertex, and reading it gave zeros. Such a stage reads the attribute of an
++ * earlier stage that names the same set. Sid Meier's Pirates! draws its
++ * characters' heads (hair, beards, the governor's wig) from prebuilt push
++ * buffers under a one-set FVF, with a reflection on stage 0 (index 0 with
++ * camera-space reflection, so v9 holds set 0) and stages 1 and 2 both at set
++ * 0; sent to sets 1 and 2 they took no coordinates and the hair was drawn as
++ * one smeared texel. Under a declaration (no FVF) every stage keeps its own. */
++static uint32_t routed_set(uint32_t base_all, int s, uint32_t named)
++{
++    uint32_t fvf = hle_d3d8_shadow_fvf(), ntex = (fvf >> 8) & 0xFu;
++    int j;
++
++    if (!fvf || (uint32_t)s < ntex)
++        return (uint32_t)s;
++    for (j = 0; j < s && (uint32_t)j < ntex; j++) {
++        uint32_t other = HLE_MEM32(base_all + (uint32_t)(j * STAGE_SIZE * 4) + 4 * ts_slot(28));
++        if ((other & 0xFFFFu) == (named & 0xFFFFu))
++            return (uint32_t)j;
++    }
++    return named < ntex ? named : (uint32_t)s;
++}
++
+ void hle_d3d8_shadow_apply_states(IDirect3DDevice8 *dev)
+ {
+     size_t i;
+@@ -1056,7 +1084,8 @@ void hle_d3d8_shadow_apply_states(IDirect3DDevice8 *dev)
+     }
+ 
+     for (s = 0; s < STAGES; s++) {
+-        uint32_t base = hle_var_D3D_g_DeferredTextureState + (uint32_t)(s * STAGE_SIZE * 4);
++        uint32_t base_all = hle_var_D3D_g_DeferredTextureState;
++        uint32_t base = base_all + (uint32_t)(s * STAGE_SIZE * 4);
+ 
+         for (i = 0; i < sizeof g_ts_map / sizeof g_ts_map[0]; i++) {
+             uint32_t x = g_ts_map[i].xbox;
+@@ -1081,7 +1110,7 @@ void hle_d3d8_shadow_apply_states(IDirect3DDevice8 *dev)
+              * carries the draw's kind in bit 31. */
+             if (x == 28) {
+                 if (g_routed_arrays && !(v & 0xFFFF0000u))
+-                    v = (uint32_t)s;
++                    v = routed_set(base_all, s, v);
+                 v |= g_routed_arrays ? 0x80000000u : 0u;
+             }
+ 

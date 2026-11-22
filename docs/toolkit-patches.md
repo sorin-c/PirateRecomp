@@ -528,3 +528,14 @@ Each one, with the reason it exists:
   and 56-120 fps above normal (140 with nothing else running): the game's
   threads hand work to each other many times a frame, and at normal
   priority each hand-off waited behind the compilers.
+
+- **0056-texcoord-routed-past-fvf-sets** (`src/hle/hle_d3d8_state.c`). Fixes
+  a regression from 0053. A draw read back from routed arrays under an FVF is
+  laid out with only the FVF's coordinate sets (v9 .. v9 + ntex - 1), so a
+  stage past them has no coordinates of its own in the vertex. 0053 sent such
+  a stage to its own set anyway, and it read zeros. The game draws its
+  characters' heads from prebuilt push buffers under a one-set FVF, with a
+  reflection on stage 0 and stages 1 and 2 both naming set 0: hair, beards
+  and the governor's wig came out as one smeared texel (the governor's face
+  covered by his beard texture). Such a stage now reads the attribute of an
+  earlier stage that names the same set; under a declaration nothing changes.
