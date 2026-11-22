@@ -568,3 +568,12 @@ Each one, with the reason it exists:
   lines of output, so the box cut it off and players could not tell where the
   log was. The path now comes first: `The whole log is in
   %LOCALAPPDATA%\xboxrecomp\builds\<title id>\build.log`, then the last lines.
+
+- **0061-settings-menu-restart-note** (`src/d3d/d3d8_menu.cpp`,
+  `d3d8_overlay.h`, `src/hle/hle_settings_menu.c`). The F2 panel no longer
+  shows "Applies now" / "After restart" under each row (Sorin's feedback on
+  0058): a row with no other tag shows its label centred, and the
+  description pane on the right says "Restart the game for this to take
+  effect." only for a setting that needs a restart. The "Takes effect" line
+  in the pane is gone. Numbered 0061 because the VSync patch (PR #66) takes
+  0060; it applies with or without 0060.
