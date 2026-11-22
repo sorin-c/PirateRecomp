@@ -26,7 +26,7 @@ Back pressed alone still reaches the game as usual.
 | Frame interpolation (off, 2x, 3x, 4x) | at once |
 | Frame-rate counter | at once |
 | Fullscreen | at once |
-| Internal resolution (1x to 8x) | next start |
+| Resolution (native, console, 720p to 8K) | next start |
 | Widescreen (16:9) | next start |
 | Texture sharpness (off, 1x, 2x, 4x, 8x, 16x) | next start |
 | Variable refresh | next start |
@@ -86,11 +86,18 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   as sailing and battles are; the default, 30, keeps the console's 33.
   The governor's room also skips the 10 ms pause its dialog loop takes
   every frame, which otherwise held it to about 60.
-- **Widescreen.** `widescreen = 1` turns on the game's own 16:9 mode. The
-  front end (legal text, title, menus and the new-career pages) stays at 4:3
+- **Widescreen.** `widescreen = 1`, the default, turns on the game's own
+  16:9 mode (`0` plays at 4:3). The front end (legal text, title, menus and the new-career pages) stays at 4:3
   between bars, as it was drawn, and the game world fills the screen.
-- **Internal resolution.** `resolution_scale` renders 2 to 8 times larger
-  than the console.
+- **Resolution.** `resolution` is how tall the picture is rendered:
+  `native`, the default, is your display's own (the tallest 16:9 picture
+  it holds, so 1440 on a 2560x1440 screen), or `480` (the console's),
+  `720`, `1080`, `1440`, `2160` (4K), `2880` or `4320`. The launcher and
+  the F2 menu show the sizes at the picture's shape: 1920x1080 in
+  widescreen, 1440x1080 at 4:3. A resolution taller than the window is
+  supersampled (smoother edges, more work for the graphics card). The
+  older `resolution_scale` (2 to 8 times 480 rows) is still read from a
+  file without a `resolution` line; its old default, 1, reads as native.
 - **Bottom and left bands.** The console leaves a grey-lavender band along
   the bottom of the sea view, and in widescreen the main menu's map stops
   short of the left edge. Both are always cropped off.
@@ -117,8 +124,8 @@ defaults. Every line names the environment variable that overrides it, so a
 
 | Key | Default | What it does |
 | --- | --- | --- |
-| `widescreen` | `0` | The game's own 16:9 mode. |
-| `resolution_scale` | `1` | Render 1 to 8 times the console's resolution. |
+| `widescreen` | `1` | The game's own 16:9 mode. |
+| `resolution` | `native` | Picture height: `native` (the display's), `480`, `720`, `1080`, `1440`, `2160`, `2880` or `4320`. |
 | `frame_cap` | `adaptive` | `adaptive` (as the console), `60`, `30` or `0` (off). |
 | `frame_interp` | `1` | `1` off, `2` shows 60 where the game runs at 30. |
 | `sea_fps` | `30` | Experimental: frames a second while sailing (`0` unlocked). |

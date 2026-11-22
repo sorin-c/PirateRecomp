@@ -1,0 +1,767 @@
+diff --git a/src/config/CMakeLists.txt b/src/config/CMakeLists.txt
+index 84fe92d..2e5c526 100644
+--- a/src/config/CMakeLists.txt
++++ b/src/config/CMakeLists.txt
+@@ -9,6 +9,11 @@ add_library(xbox_config STATIC
+ 
+ target_include_directories(xbox_config PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+ 
++# EnumDisplaySettingsW: the display's size, for resolution = native.
++if(WIN32)
++    target_link_libraries(xbox_config PUBLIC user32)
++endif()
++
+ if(MSVC)
+     target_compile_options(xbox_config PRIVATE /W4 $<$<NOT:$<CONFIG:Debug>>:/O2>)
+ else()
+diff --git a/src/config/recomp_config.c b/src/config/recomp_config.c
+index 7dc674a..77ca926 100644
+--- a/src/config/recomp_config.c
++++ b/src/config/recomp_config.c
+@@ -422,6 +422,15 @@ int recomp_title_bumpers_as_triggers(void)
+ #endif
+ }
+ 
++int recomp_title_default_widescreen(void)
++{
++#if defined(RECOMP_TITLE_DEFAULT_WIDESCREEN)
++    return RECOMP_TITLE_DEFAULT_WIDESCREEN ? 1 : 0;
++#else
++    return 0;
++#endif
++}
++
+ int recomp_title_pixel_offset_scaled(void)
+ {
+ #if defined(RECOMP_TITLE_PIXEL_OFFSET_SCALED)
+@@ -436,8 +445,9 @@ void recomp_settings_defaults(RecompSettings *s)
+     if (!s)
+         return;
+     memset(s, 0, sizeof *s);
++    s->resolution        = RECOMP_RESOLUTION_NATIVE;
+     s->resolution_scale  = 1;
+-    s->widescreen        = 0;
++    s->widescreen        = recomp_title_default_widescreen();
+     s->hor_plus          = RECOMP_HOR_PLUS_AUTO;
+     s->hor_plus_register = RECOMP_REGISTER_AUTO;
+     snprintf(s->widescreen_2d, sizeof s->widescreen_2d, "auto");
+@@ -480,6 +490,8 @@ const char *recomp_config_default(const char *key)
+ #endif
+     recomp_settings_defaults(&d);
+     i = -1;
++    if (strcmp(key, "resolution") == 0)
++        return d.resolution == RECOMP_RESOLUTION_NATIVE ? "native" : NULL;
+     if (strcmp(key, "resolution_scale") == 0)  i = d.resolution_scale;
+     else if (strcmp(key, "widescreen") == 0)   i = d.widescreen;
+     else if (strcmp(key, "anisotropy") == 0)   i = d.anisotropy;
+@@ -525,6 +537,13 @@ int recomp_settings_read(const char *path, RecompSettings *s)
+ 
+         if ((v = from_table("resolution_scale")) != NULL)
+             s->resolution_scale = clamp_int(atoi(v), 1, 8);
++        /* `resolution` wins; a file from before it said how many times
++         * the console's 480 rows, and 1, which every such file held unless
++         * someone chose otherwise, is read as no choice at all: native. */
++        if ((v = from_table("resolution")) != NULL && recomp_resolution_parse(v) >= 0)
++            s->resolution = recomp_resolution_parse(v);
++        else if (s->resolution_scale > 1)
++            s->resolution = RECOMP_RESOLUTION_MIN_ROWS * s->resolution_scale;
+         if ((v = from_table("widescreen")) != NULL)
+             s->widescreen = !off_word(v);
+         /* A number is an override and is kept as one; "auto", like no
+@@ -616,7 +635,7 @@ static void make_parents(const char *path)
+ int recomp_settings_write(const char *path, const RecompSettings *s)
+ {
+     RecompSettings d;
+-    char hor_plus[48], reg[48];
++    char hor_plus[48], reg[48], res[16];
+     FILE *f;
+ 
+     if (!path)
+@@ -625,6 +644,11 @@ int recomp_settings_write(const char *path, const RecompSettings *s)
+         recomp_settings_defaults(&d);
+         s = &d;
+     }
++    if (s->resolution == RECOMP_RESOLUTION_NATIVE)
++        snprintf(res, sizeof res, "native");
++    else
++        snprintf(res, sizeof res, "%d", clamp_int(s->resolution, RECOMP_RESOLUTION_MIN_ROWS,
++                                                  RECOMP_RESOLUTION_MAX_ROWS));
+ 
+ #if defined(RECOMP_TITLE_SETTINGS_HEADER)
+     /* The values the title's keys have in the file now, so a save from the
+@@ -681,10 +705,12 @@ int recomp_settings_write(const char *path, const RecompSettings *s)
+         "#\n"
+         "# Delete this file to go back to the defaults.\n"
+         "\n"
+-        "# How much larger than the console the game is rendered, before being\n"
+-        "# filtered back down: supersampling. 1 is the console's own size. 2 is\n"
+-        "# a good default and costs little. Up to 8.        [RECOMP_RES_SCALE]\n"
+-        "resolution_scale = %d\n"
++        "# How tall the picture is rendered, in rows: native (the display's\n"
++        "# own), or 480 (the console's), 720, 1080, 1440, 2160 (4K), 2880 or\n"
++        "# 4320. Its width follows from its shape: 1080 is 1920x1080 in\n"
++        "# widescreen and 1440x1080 at 4:3. Taller than the window is\n"
++        "# supersampled, and sharper still.                [RECOMP_RESOLUTION]\n"
++        "resolution = %s\n"
+         "\n"
+         "# Widescreen: play at 16:9 rather than 4:3. The game is told the\n"
+         "# console is widescreen and its picture is shown at 16:9; what more\n"
+@@ -756,7 +782,7 @@ int recomp_settings_write(const char *path, const RecompSettings *s)
+         "# How far a movement pushes the stick, %d to %d; %d is the default, a\n"
+         "# full push at %d mouse counts a second.  [RECOMP_MOUSE_SENSITIVITY]\n"
+         "mouse_sensitivity = %d\n",
+-        s->resolution_scale, s->widescreen, hor_plus, reg,
++        res, s->widescreen, hor_plus, reg,
+         s->widescreen_2d[0] ? s->widescreen_2d : "auto",
+         s->anisotropy, s->frame_cap[0] ? s->frame_cap : "adaptive", s->fps_overlay,
+         s->fullscreen, s->vrr, s->frame_interp < 1 ? 1 : s->frame_interp,
+@@ -1302,6 +1328,132 @@ void recomp_window_size(int guest_w, int guest_h, int widescreen, int *w, int *h
+     if (h) *h = guest_h;
+ }
+ 
++/* ---------------------------------------------------------- resolution */
++
++const int recomp_resolution_choices[RECOMP_RESOLUTION_CHOICES] = {
++    RECOMP_RESOLUTION_NATIVE, 480, 720, 1080, 1440, 2160, 2880, 4320
++};
++
++int recomp_resolution_parse(const char *v)
++{
++    char *end = NULL;
++    long n;
++
++    if (!v)
++        return -1;
++    while (*v == ' ' || *v == '\t')
++        v++;
++    if (ieq(v, "native") || ieq(v, "auto"))
++        return RECOMP_RESOLUTION_NATIVE;
++    n = strtol(v, &end, 10);
++    if (end == v)
++        return -1;
++    /* "1080p" is 1080 too. */
++    if (*end == 'p' || *end == 'P')
++        end++;
++    while (*end == ' ' || *end == '\t')
++        end++;
++    if (*end)
++        return -1;
++    if (n == 0)
++        return RECOMP_RESOLUTION_NATIVE;
++    return n < RECOMP_RESOLUTION_MIN_ROWS ? RECOMP_RESOLUTION_MIN_ROWS
++         : n > RECOMP_RESOLUTION_MAX_ROWS ? RECOMP_RESOLUTION_MAX_ROWS : (int)n;
++}
++
++static int g_native_w, g_native_h;
++
++void recomp_set_native_size(int w, int h)
++{
++    if (w > 0 && h > 0) {
++        g_native_w = w;
++        g_native_h = h;
++    }
++}
++
++void recomp_native_size(int *w, int *h)
++{
++#if defined(_WIN32)
++    if (!g_native_w) {
++        /* The mode the primary display is in, in its own pixels: unlike
++         * GetSystemMetrics, not shrunk by the desktop's scaling for a
++         * program that has not said it is DPI aware. The game's window
++         * opens on the primary display. */
++        DEVMODEW dm;
++
++        memset(&dm, 0, sizeof dm);
++        dm.dmSize = sizeof dm;
++        if (EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &dm) &&
++            dm.dmPelsWidth > 0 && dm.dmPelsHeight > 0)
++            recomp_set_native_size((int)dm.dmPelsWidth, (int)dm.dmPelsHeight);
++    }
++#endif
++    if (w) *w = g_native_w;
++    if (h) *h = g_native_h;
++}
++
++int recomp_resolution_rows_for(int resolution, int widescreen)
++{
++    int rows = resolution;
++
++    if (resolution == RECOMP_RESOLUTION_NATIVE) {
++        int w, h;
++
++        recomp_native_size(&w, &h);
++        if (w > 0 && h > 0) {
++            /* The tallest picture of this shape the display holds. */
++            long long fit = widescreen ? (long long)w * 9 / 16 : (long long)w * 3 / 4;
++
++            rows = fit < h ? (int)fit : h;
++        } else {
++            rows = 1080;
++        }
++    }
++    return clamp_int(rows, RECOMP_RESOLUTION_MIN_ROWS, RECOMP_RESOLUTION_MAX_ROWS);
++}
++
++void recomp_resolution_label(int resolution, int widescreen, char *out, size_t n)
++{
++    int rows = recomp_resolution_rows_for(resolution, widescreen);
++    /* Rounded as the window's width is (recomp_window_size): 480 rows at
++     * 16:9 are 854 wide. */
++    int cols = widescreen ? (int)(((long long)rows * 16 + 8) / 9) : rows * 4 / 3;
++
++    if (!out || !n)
++        return;
++    if (resolution == RECOMP_RESOLUTION_NATIVE)
++        snprintf(out, n, "Native (%dx%d)", cols, rows);
++    else if (rows == RECOMP_RESOLUTION_MIN_ROWS)
++        snprintf(out, n, "Console (%dx%d)", cols, rows);
++    else
++        snprintf(out, n, "%dx%d", cols, rows);
++}
++
++int recomp_resolution_rows(void)
++{
++    int wide = recomp_config_bool("RECOMP_WIDESCREEN", "widescreen",
++                                  recomp_title_default_widescreen());
++    const char *v = getenv("RECOMP_RESOLUTION");
++    int r;
++
++    if (v && *v && (r = recomp_resolution_parse(v)) >= 0)
++        return recomp_resolution_rows_for(r, wide);
++    v = getenv("RECOMP_RES_SCALE");
++    if (v && *v) {
++        int n = atoi(v);
++
++        if (n >= 1 && n <= 8)
++            return RECOMP_RESOLUTION_MIN_ROWS * n;
++    }
++    v = recomp_config_lookup(NULL, "resolution");
++    if (v && *v && (r = recomp_resolution_parse(v)) >= 0)
++        return recomp_resolution_rows_for(r, wide);
++    v = recomp_config_lookup(NULL, "resolution_scale");
++    if (v && *v && atoi(v) > 1)
++        return RECOMP_RESOLUTION_MIN_ROWS * clamp_int(atoi(v), 1, 8);
++    return recomp_resolution_rows_for(RECOMP_RESOLUTION_NATIVE, wide);
++}
++
+ void recomp_window_fit(int max_w, int max_h, int *w, int *h)
+ {
+     long long cw, ch;
+@@ -1325,7 +1477,7 @@ void recomp_window_fit(int max_w, int max_h, int *w, int *h)
+ void recomp_widescreen_resolve(RecompWidescreen *out)
+ {
+     recomp_widescreen_resolve_from(
+-        recomp_config_bool("RECOMP_WIDESCREEN", "widescreen", 0),
++        recomp_config_bool("RECOMP_WIDESCREEN", "widescreen", recomp_title_default_widescreen()),
+         recomp_config_lookup("RECOMP_HOR_PLUS", "hor_plus"),
+         recomp_config_lookup("RECOMP_HOR_PLUS_REG", "hor_plus_register"),
+         g_wide_mode, g_wide_register, out);
+@@ -1339,5 +1491,5 @@ int recomp_widescreen_guest_flag_from(int on, RecompWideMode mode)
+ int recomp_widescreen_guest_flag(void)
+ {
+     return recomp_widescreen_guest_flag_from(
+-        recomp_config_bool("RECOMP_WIDESCREEN", "widescreen", 0), g_wide_mode);
++        recomp_config_bool("RECOMP_WIDESCREEN", "widescreen", recomp_title_default_widescreen()), g_wide_mode);
+ }
+diff --git a/src/config/recomp_config.h b/src/config/recomp_config.h
+index 2f8b7a6..4108758 100644
+--- a/src/config/recomp_config.h
++++ b/src/config/recomp_config.h
+@@ -225,6 +225,43 @@ void recomp_window_size(int guest_w, int guest_h, int widescreen, int *w, int *h
+  * and a max of 0 or less is no limit. */
+ void recomp_window_fit(int max_w, int max_h, int *w, int *h);
+ 
++/* ---------------------------------------------------------- resolution */
++
++/* How tall the picture is rendered: `resolution` in the settings file
++ * (RECOMP_RESOLUTION), as rows, or native, the display's own. The scene
++ * is drawn at that many rows and as wide as the guest's frame is at that
++ * height, then filtered onto the window, so a picture taller than the
++ * window is supersampled and one at the display's height is drawn pixel
++ * for pixel when fullscreen. */
++#define RECOMP_RESOLUTION_NATIVE   0
++#define RECOMP_RESOLUTION_MIN_ROWS 480
++#define RECOMP_RESOLUTION_MAX_ROWS 4320
++/* What the launcher and the in-game menu offer, native first. */
++#define RECOMP_RESOLUTION_CHOICES  8
++extern const int recomp_resolution_choices[RECOMP_RESOLUTION_CHOICES];
++
++/* "native" (or "auto", or 0) is RECOMP_RESOLUTION_NATIVE; a number is rows,
++ * kept inside MIN..MAX. -1 for anything else. */
++int  recomp_resolution_parse(const char *v);
++/* The primary display's size in pixels, as the display reports it (not as
++ * Windows scales it for a program that is not DPI aware). 0 x 0 when
++ * nothing has said: on Windows it is asked; elsewhere a host that knows
++ * says so with recomp_set_native_size. */
++void recomp_native_size(int *w, int *h);
++void recomp_set_native_size(int w, int h);
++/* The rows `resolution` renders at for a picture shown at 16:9
++ * (widescreen) or 4:3: native is the tallest picture of that shape that
++ * fits the display (1440 on 2560x1440, 1440 on 3440x1440, 1350 on
++ * 1800x1350...), 1080 when the display is not known. */
++int  recomp_resolution_rows_for(int resolution, int widescreen);
++/* What the launcher and menu show for it: "1920x1080", "Native
++ * (2560x1440)", "Console (854x480)". */
++void recomp_resolution_label(int resolution, int widescreen, char *out, size_t n);
++/* The runtime's answer, read once by the renderer: RECOMP_RESOLUTION, else
++ * RECOMP_RES_SCALE (480 x it), else the file's `resolution`, else an older
++ * file's resolution_scale above 1, else native. */
++int  recomp_resolution_rows(void);
++
+ /* ------------------------------------------------------------ settings */
+ 
+ /* hor_plus and hor_plus_register left for the title to decide. Written to
+@@ -239,6 +276,14 @@ void recomp_window_fit(int max_w, int max_h, int *w, int *h);
+  * through the lookups above -- that keeps the environment override
+  * visible where each setting is used -- but the file's shape is here. */
+ typedef struct RecompSettings {
++    /* The picture's height in rows (720, 1080, 1440, 2160...), or
++     * RECOMP_RESOLUTION_NATIVE for the display's own. Its width follows
++     * from the shape the picture is shown at: 1080 is 1920x1080 in
++     * widescreen, 1440x1080 at 4:3. */
++    int  resolution;
++    /* The setting before `resolution`, a whole multiple of the console's
++     * 480 rows: still read from an older file (above 1 it is 480 x it
++     * rows), never written. */
+     int  resolution_scale;      /* 1..8 */
+     int  widescreen;            /* 0 or 1: the one switch; see RecompWidescreen */
+     double hor_plus;            /* RECOMP_HOR_PLUS_AUTO, or an override: 0 leaves
+@@ -299,6 +344,10 @@ int  recomp_title_crop_left_wide(void);
+ int  recomp_title_pixel_offset_scaled(void);
+ /* Default pad bindings: LB and RB as the triggers, not Black and White. */
+ int  recomp_title_bumpers_as_triggers(void);
++/* Widescreen on in a new settings file, and where the file says nothing
++ * (RECOMP_TITLE_DEFAULT_WIDESCREEN): for a title with a 16:9 mode of its
++ * own that plays best in it. */
++int  recomp_title_default_widescreen(void);
+ 
+ /* Where the title's own settings file (RECOMP_TITLE_SETTINGS_FILE) is, when
+  * not beside the running executable: a release's launcher names the game's
+diff --git a/src/d3d/d3d8_display.c b/src/d3d/d3d8_display.c
+index 12cd60c..683e0cd 100644
+--- a/src/d3d/d3d8_display.c
++++ b/src/d3d/d3d8_display.c
+@@ -30,24 +30,19 @@ static int               g_policy_read;
+ const D3D8DisplayPolicy *d3d8_display_policy(void)
+ {
+     if (!g_policy_read) {
+-        const char *v = recomp_config_lookup("RECOMP_RES_SCALE", "resolution_scale");
+-        long n = 1;
+-
++        const char *v = getenv("RECOMP_RES_SCALE");
+ 
+         g_policy_read = 1;
+-        g_policy.scale = 1;
+-
+         if (v && *v) {
+             char *endp = NULL;
+-            n = strtol(v, &endp, 10);
+-            if (endp == v || (endp && *endp) || n < 1 || n > D3D8_DISPLAY_MAX_SCALE) {
++            long n = strtol(v, &endp, 10);
++            if (endp == v || (endp && *endp) || n < 1 || n > D3D8_DISPLAY_MAX_SCALE)
+                 fprintf(stderr, "D3D8 display: RECOMP_RES_SCALE=%s is not a whole "
+-                        "number from 1 to %d; rendering at the guest's own size\n",
+-                        v, D3D8_DISPLAY_MAX_SCALE);
+-                n = 1;
+-            }
+-            g_policy.scale = (UINT)n;
++                        "number from 1 to %d; ignored\n", v, D3D8_DISPLAY_MAX_SCALE);
+         }
++        /* The picture's height (recomp_resolution_rows: `resolution`, or
++         * the older resolution_scale, or the display's own). */
++        g_policy.rows = (UINT)recomp_resolution_rows();
+ 
+         g_policy.anisotropy = 0;           /* off: the title's own filtering */
+         v = recomp_config_lookup("RECOMP_ANISO", "anisotropy");
+@@ -62,10 +57,10 @@ const D3D8DisplayPolicy *d3d8_display_policy(void)
+             g_policy.anisotropy = (UINT)a;
+         }
+ 
+-        if (g_policy.scale > 1)
+-            fprintf(stderr, "D3D8 display: supersampling %ux, box filtered at present\n",
+-                    g_policy.scale);
+-        g_policy.widescreen = recomp_config_bool("RECOMP_WIDESCREEN", "widescreen", 0);
++        fprintf(stderr, "D3D8 display: the picture is rendered %u rows tall, filtered "
++                "onto the window at present\n", g_policy.rows);
++        g_policy.widescreen = recomp_config_bool("RECOMP_WIDESCREEN", "widescreen",
++                                                 recomp_title_default_widescreen());
+ 
+         v = recomp_config_lookup("RECOMP_WIDESCREEN_2D", "widescreen_2d");
+         /* auto -- what a new settings file says -- is the title's own
+@@ -181,8 +176,14 @@ void d3d8_display_scene_size(UINT guest_w, UINT guest_h,
+ {
+     const D3D8DisplayPolicy *p = d3d8_display_policy();
+ 
+-    if (scene_w) *scene_w = guest_w * p->scale;
+-    if (scene_h) *scene_h = guest_h * p->scale;
++    UINT rows = p->rows > guest_h ? p->rows : guest_h;
++
++    /* As tall as the resolution asks (never below the guest's own), and as
++     * wide as the guest's frame is at that height: the same shape, so its
++     * pixels stay square and a 720x480 anamorphic buffer stays 3:2. */
++    if (scene_w) *scene_w = guest_h ? (UINT)(((unsigned long long)guest_w * rows + guest_h / 2) / guest_h)
++                                    : guest_w;
++    if (scene_h) *scene_h = guest_h ? rows : guest_h;
+ }
+ 
+ /* A frame the title called 4:3 (xbox_D3D8SetWideFrames(FALSE)) in
+diff --git a/src/d3d/d3d8_display.h b/src/d3d/d3d8_display.h
+index c1c8647..dc12532 100644
+--- a/src/d3d/d3d8_display.h
++++ b/src/d3d/d3d8_display.h
+@@ -20,12 +20,16 @@
+ 
+ /* Read once, from the environment, before the first device is created.
+  *
+- * RECOMP_RES_SCALE=<1..8> is the supersample factor. 1 renders at the
+- * guest's own size and must be indistinguishable from having none of this
+- * code at all -- the scene target is skipped entirely in that case.
++ * rows: how tall the scene is rendered (recomp_resolution_rows: the
++ * `resolution` setting, RECOMP_RESOLUTION, or RECOMP_RES_SCALE=<1..8> as
++ * that many times 480). 480 for a 640x480 guest is its own size and must be
++ * indistinguishable from having none of this code at all. Any other height
++ * is a scale that need not be whole (1080 is 2.25x); every path that maps
++ * the guest's pixels onto the scene's already works in ratios, and the
++ * resolve filters any ratio.
+  */
+ typedef struct D3D8DisplayPolicy {
+-    UINT scale;
++    UINT rows;
+     /* RECOMP_WIDESCREEN: the console is 16:9, and the title's frame is
+      * therefore anamorphic -- authored squeezed, to be stretched back out
+      * by the display. Only true of a title with a 16:9 mode of its own,
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index d554966..0a9afa9 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -122,10 +122,12 @@ static const Item ITEMS[] = {
+       { "0", "1" }, { "Off", "On" },
+       "Shows more of the world to the sides instead of the original 4:3 picture. "
+       "Menus keep their 4:3 frame." },
+-    { TAB_DISPLAY, "Picture", "Internal resolution", "resolution_scale", "RECOMP_RES_SCALE", LIVE_NONE, 0, 0, 8,
+-      { "1", "2", "3", "4", "5", "6", "7", "8" }, { "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x" },
+-      "Renders the 3D world at a multiple of the Xbox's 640x480 and filters it down. "
+-      "3x is about 1440p, 4x about 4K. Higher is sharper and asks more of the graphics card." },
++    /* Names written by item_name: they follow the widescreen setting. */
++    { TAB_DISPLAY, "Picture", "Resolution", "resolution", "RECOMP_RESOLUTION", LIVE_NONE, 0, 0, 8,
++      { "native", "480", "720", "1080", "1440", "2160", "2880", "4320" },
++      { "Native", "Console", "720p", "1080p", "1440p", "4K", "5K", "8K" },
++      "How sharp the picture is. Native matches your display. Higher than your display is "
++      "supersampled: smoother edges, and more work for the graphics card." },
+     { TAB_DISPLAY, "Picture", "Texture sharpness", "anisotropy", "RECOMP_ANISO", LIVE_NONE, 0, 0, 6,
+       { "0", "1", "2", "4", "8", "16" }, { "Off", "1x", "2x", "4x", "8x", "16x" },
+       "Anisotropic filtering: keeps the ground, decks and water sharp at a slant. "
+@@ -220,6 +222,25 @@ static int value_index(const Item *it, const char *v)
+     return -1;
+ }
+ 
++/* What value i is called. The resolution's names are its sizes at the shape
++ * the picture will have (the widescreen setting, as the file holds it, since
++ * both apply at the next start): 1080 is 1920x1080, or 1440x1080 at 4:3. */
++static const char *item_name(const Item *it, int i)
++{
++    static char buf[2][32];
++    static int next;
++
++    if (strcmp(it->key, "resolution") == 0 && i >= 0 && i < RECOMP_RESOLUTION_CHOICES) {
++        char *b = buf[next++ & 1];
++        int wide = recomp_config_bool("RECOMP_WIDESCREEN", "widescreen",
++                                      recomp_title_default_widescreen());
++
++        recomp_resolution_label(recomp_resolution_choices[i], wide, b, sizeof buf[0]);
++        return b;
++    }
++    return it->names[i];
++}
++
+ static int default_index(const Item *it)
+ {
+     int i = value_index(it, recomp_config_default(it->key));
+@@ -255,6 +276,15 @@ static int current_index(const Item *it)
+         break;
+     default:
+         v = recomp_config_lookup(it->env, it->key);
++        if ((!v || !*v) && strcmp(it->key, "resolution") == 0) {
++            /* A file from before `resolution`: its resolution_scale, as the
++             * renderer reads it (recomp_resolution_rows). */
++            const char *sc = recomp_config_lookup("RECOMP_RES_SCALE", "resolution_scale");
++            if (sc && atoi(sc) > 1 && atoi(sc) <= 8) {
++                snprintf(buf, sizeof buf, "%d", RECOMP_RESOLUTION_MIN_ROWS * atoi(sc));
++                v = buf;
++            }
++        }
+         if (!v || !*v)
+             v = recomp_config_default(it->key);
+         break;
+@@ -481,7 +511,7 @@ static const char *menu_text(void)
+             const Item *it = &ITEMS[r->item];
+             int sel = i == g_sel && g_button < 0;
+             ADD("%s%s %-*s < %-10s >%s\n", sel ? "\x01" : "", sel ? ">" : " ",
+-                w, it->label, it->names[current_index(it)], it->live == LIVE_NONE ? " *" : "");
++                w, it->label, item_name(it, current_index(it)), it->live == LIVE_NONE ? " *" : "");
+         }
+     }
+     ADD("%s%s Resume\n", g_button == 0 ? "\x01" : "", g_button == 0 ? ">" : " ");
+@@ -577,7 +607,7 @@ static void publish(void)
+             mr->index = current_index(it);
+             mr->count = it->n;
+             mr->def = default_index(it);
+-            snprintf(mr->value, sizeof mr->value, "%s", it->names[mr->index]);
++            snprintf(mr->value, sizeof mr->value, "%s", item_name(it, mr->index));
+             mr->tags = it->live == LIVE_NONE ? D3D8_MENU_TAG_RESTART : D3D8_MENU_TAG_NOW;
+             if (it->experimental) mr->tags |= D3D8_MENU_TAG_EXPERIMENTAL;
+             if (mr->index != mr->def) mr->tags |= D3D8_MENU_TAG_CHANGED;
+@@ -602,12 +632,12 @@ static void publish(void)
+         int o = 0, k;
+         snprintf(m.info_title, sizeof m.info_title, "%s", it->label);
+         snprintf(m.info_text, sizeof m.info_text, "%s", it->help);
+-        snprintf(m.info_default, sizeof m.info_default, "%s", it->names[default_index(it)]);
++        snprintf(m.info_default, sizeof m.info_default, "%s", item_name(it, default_index(it)));
+         snprintf(m.info_when, sizeof m.info_when, "%s",
+                  it->live == LIVE_NONE ? "Next time the game starts" : "At once");
+         for (k = 0; k < it->n && o < (int)sizeof m.info_options; k++)
+             o += snprintf(m.info_options + o, sizeof m.info_options - (size_t)o, "%s%s",
+-                          k ? ", " : "", it->names[k]);
++                          k ? ", " : "", item_name(it, k));
+         if (env_set(it) && it->live != LIVE_TITLE)
+             snprintf(m.warning, sizeof m.warning,
+                      "%s is set, and wins over this setting until it is removed.", it->env);
+diff --git a/src/host/host_sdl.c b/src/host/host_sdl.c
+index 31484b5..1f54831 100644
+--- a/src/host/host_sdl.c
++++ b/src/host/host_sdl.c
+@@ -3,7 +3,7 @@
+  */
+ #include "host.h"
+ #include "host_mac.h"
+-#include "recomp_config.h"                /* recomp_window_fit */
++#include "recomp_config.h"                /* recomp_window_fit, recomp_set_native_size */
+ #include "recomp_icon.h"                  /* the window icon */
+ #include "rhi.h"                          /* RhiNativeWindow */
+ #include "platform/host_main.h"            /* host_set_suspended */
+@@ -263,6 +263,17 @@ static int start_video(int background)
+         fprintf(stderr, "[HOST] SDL video failed to start: %s\n", SDL_GetError());
+         return 0;
+     }
++    {
++        /* The display's own size, for resolution = native
++         * (recomp_resolution_rows_for): SDL gives it in points and a
++         * density. */
++        const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
++
++        if (dm && dm->w > 0 && dm->h > 0) {
++            float density = dm->pixel_density > 0.0f ? dm->pixel_density : 1.0f;
++            recomp_set_native_size((int)(dm->w * density + 0.5f), (int)(dm->h * density + 0.5f));
++        }
++    }
+ #ifdef __ANDROID__
+     SDL_AddEventWatch(app_lifecycle, NULL);
+ #endif
+diff --git a/src/launcher/launcher.c b/src/launcher/launcher.c
+index 4719eec..99ff651 100644
+--- a/src/launcher/launcher.c
++++ b/src/launcher/launcher.c
+@@ -111,6 +111,14 @@ static const char *const k_aniso_names[] = { "Off", "1x", "2x", "4x", "8x", "16x
+ static const int         k_aniso_values[] = { 0, 1, 2, 4, 8, 16 };
+ static int            g_aniso_index;       /* into k_aniso_values */
+ static int            g_widescreen;        /* the row; settings_save applies it */
++/* Resolution: native or a picture height (recomp_resolution_choices); the
++ * choice names are only counted, row_value writes the label, which follows
++ * the widescreen row (1080 is 1920x1080 or 1440x1080). */
++static const char *const k_res_names[RECOMP_RESOLUTION_CHOICES + 1] = {
++    "", "", "", "", "", "", "", "", NULL
++};
++static int            g_res_index;         /* into recomp_resolution_choices */
++static int            g_res_loaded = -1;   /* the index shown for a height set by hand */
+ 
+ static Row  g_video_rows[12];
+ static int  g_video_count;
+@@ -182,8 +190,9 @@ static void build_rows(void)
+     Row *r = g_video_rows;
+ 
+     r->label = "Resolution";
+-    r->help  = "Render larger than the console, then filter back down. Costs little.";
+-    r->kind  = ROW_INT; r->lo = 1; r->hi = 8; r->ival = &g_settings.resolution_scale;
++    r->help  = "How sharp the picture is. Native matches your display. Higher than"
++               " your display is supersampled: smoother, and harder on the graphics card.";
++    r->kind  = ROW_CHOICE; r->choices = k_res_names; r->ival = &g_res_index;
+     r++;
+ 
+ #ifndef LAUNCHER_NO_WIDESCREEN
+@@ -368,10 +377,7 @@ static void row_value(const Row *r, char *out, size_t n)
+         snprintf(out, n, "%s", *r->ival ? "On" : "Off");
+         break;
+     case ROW_INT:
+-        if (r->ival == &g_settings.resolution_scale)
+-            snprintf(out, n, *r->ival == 1 ? "Console (640x480)" : "%dx (%dx%d)",
+-                     *r->ival, 640 * *r->ival, 480 * *r->ival);
+-        else if (*r->ival == 1)
++        if (*r->ival == 1)
+             snprintf(out, n, "Off");
+         else if (r->ival == &g_settings.frame_interp)
+             snprintf(out, n, "%dx (%d frames a second)", *r->ival, 60 * *r->ival);
+@@ -379,7 +385,13 @@ static void row_value(const Row *r, char *out, size_t n)
+             snprintf(out, n, "%dx", *r->ival);
+         break;
+     case ROW_CHOICE:
+-        if (r->ival == &g_link_mode)
++        if (r->ival == &g_res_index)
++#ifndef LAUNCHER_NO_WIDESCREEN
++            recomp_resolution_label(recomp_resolution_choices[*r->ival], g_widescreen, out, n);
++#else
++            recomp_resolution_label(recomp_resolution_choices[*r->ival], 0, out, n);
++#endif
++        else if (r->ival == &g_link_mode)
+             snprintf(out, n, "%s", link_mode_label(*r->ival));
+         else if (r->ival == &g_aniso_index)
+             snprintf(out, n, "%s", k_aniso_names[*r->ival]);
+@@ -1079,6 +1091,23 @@ static void settings_load(void)
+             }
+     }
+ 
++    /* The choice nearest the file's rows. A height set by hand between two
++     * is shown as the nearer and kept as it is unless the row is moved. */
++    g_res_index = 0;
++    g_res_loaded = -1;
++    if (g_settings.resolution != RECOMP_RESOLUTION_NATIVE) {
++        int i, best = -1;
++        for (i = 1; i < RECOMP_RESOLUTION_CHOICES; i++) {
++            int d = abs(recomp_resolution_choices[i] - g_settings.resolution);
++            if (best < 0 || d < best) {
++                best = d;
++                g_res_index = i;
++            }
++        }
++        if (best != 0)
++            g_res_loaded = g_res_index;
++    }
++
+     g_aniso_index = 0;
+     {
+         int i;
+@@ -1142,6 +1171,8 @@ static int settings_save(void)
+     snprintf(g_settings.frame_cap, sizeof g_settings.frame_cap, "%s",
+              k_frame_caps[g_frame_cap_index]);
+     g_settings.anisotropy = k_aniso_values[g_aniso_index];
++    if (g_res_index != g_res_loaded)
++        g_settings.resolution = recomp_resolution_choices[g_res_index];
+     if (g_link_mode != LINK_BY_HAND)
+         snprintf(g_settings.syslink, sizeof g_settings.syslink, "%s",
+                  k_link_modes[g_link_mode]);
+diff --git a/src/launcher/launcher_sdl.c b/src/launcher/launcher_sdl.c
+index 59d3bf4..5b2fde0 100644
+--- a/src/launcher/launcher_sdl.c
++++ b/src/launcher/launcher_sdl.c
+@@ -37,6 +37,7 @@
+ #include <unistd.h>
+ 
+ #include "launcher.h"
++#include "recomp_config.h"         /* recomp_set_native_size */
+ #include "launcher_theme.h"
+ 
+ extern char **environ;
+@@ -518,6 +519,17 @@ int main(int argc, char **argv)
+         fprintf(stderr, "launcher: SDL_Init: %s\n", SDL_GetError());
+         return 1;
+     }
++    {
++        /* The display's own size, for resolution = native
++         * (recomp_resolution_rows_for): SDL gives it in points and a
++         * density. */
++        const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
++
++        if (dm && dm->w > 0 && dm->h > 0) {
++            float density = dm->pixel_density > 0.0f ? dm->pixel_density : 1.0f;
++            recomp_set_native_size((int)(dm->w * density + 0.5f), (int)(dm->h * density + 0.5f));
++        }
++    }
+ #if defined(__APPLE__)
+     /* SDL gives a Mac window OpenGL unless told the program brings its own
+      * graphics, and offscreen has no OpenGL here. Nothing draws with it:
+diff --git a/tests/config_smoke/test_config.c b/tests/config_smoke/test_config.c
+index 590f2ca..4afcaae 100644
+--- a/tests/config_smoke/test_config.c
++++ b/tests/config_smoke/test_config.c
+@@ -314,6 +314,55 @@ static void test_window_size(void)
+     check_int(h, 500, "too wide and too tall: the tighter limit wins");
+ }
+ 
++/* The resolution: a height or native, its label at each shape, and an
++ * older file's resolution_scale read as rows. */
++static void test_resolution(void)
++{
++    char label[48];
++    const char *rt = "test_config_res.conf";
++    RecompSettings s;
++
++    check_int(recomp_resolution_parse("native"), RECOMP_RESOLUTION_NATIVE, "native");
++    check_int(recomp_resolution_parse("1080"), 1080, "rows");
++    check_int(recomp_resolution_parse("1440p"), 1440, "rows with a p");
++    check_int(recomp_resolution_parse("100"), 480, "too few rows: the console's");
++    check_int(recomp_resolution_parse("99999"), 4320, "too many rows: the most");
++    check_int(recomp_resolution_parse("big"), -1, "not a resolution");
++
++    recomp_set_native_size(2560, 1440);
++    check_int(recomp_resolution_rows_for(RECOMP_RESOLUTION_NATIVE, 1), 1440, "native 16:9 on 2560x1440");
++    check_int(recomp_resolution_rows_for(RECOMP_RESOLUTION_NATIVE, 0), 1440, "native 4:3 on 2560x1440");
++    recomp_set_native_size(1920, 1200);
++    check_int(recomp_resolution_rows_for(RECOMP_RESOLUTION_NATIVE, 1), 1080, "native 16:9 on 16:10");
++    check_int(recomp_resolution_rows_for(RECOMP_RESOLUTION_NATIVE, 0), 1200, "native 4:3 on 16:10");
++    recomp_set_native_size(2560, 1440);
++
++    recomp_resolution_label(1080, 1, label, sizeof label);
++    check_str(label, "1920x1080", "1080 in widescreen");
++    recomp_resolution_label(1080, 0, label, sizeof label);
++    check_str(label, "1440x1080", "1080 at 4:3");
++    recomp_resolution_label(2160, 1, label, sizeof label);
++    check_str(label, "3840x2160", "4K");
++    recomp_resolution_label(480, 1, label, sizeof label);
++    check_str(label, "Console (854x480)", "the console's, wide");
++    recomp_resolution_label(RECOMP_RESOLUTION_NATIVE, 1, label, sizeof label);
++    check_str(label, "Native (2560x1440)", "native, wide");
++
++    write_file(rt, "resolution_scale = 3\n");
++    check(recomp_settings_read(rt, &s) != 0, "older file read");
++    check_int(s.resolution, 1440, "older file: 3x is 1440 rows");
++    write_file(rt, "resolution_scale = 1\n");
++    recomp_settings_read(rt, &s);
++    check_int(s.resolution, RECOMP_RESOLUTION_NATIVE, "older file: 1x, the old default, is native");
++    write_file(rt, "resolution_scale = 3\nresolution = 2160\n");
++    recomp_settings_read(rt, &s);
++    check_int(s.resolution, 2160, "resolution wins over resolution_scale");
++    write_file(rt, "widescreen = 0\n");
++    recomp_settings_read(rt, &s);
++    check_int(s.resolution, RECOMP_RESOLUTION_NATIVE, "no line: native");
++    remove(rt);
++}
++
+ int main(void)
+ {
+     const char *path = "test_config_tmp.conf";
+@@ -388,7 +437,7 @@ int main(void)
+         RecompSettings out, back;
+ 
+         recomp_settings_defaults(&out);
+-        out.resolution_scale  = 3;
++        out.resolution        = 1080;
+         out.widescreen        = 1;
+         out.hor_plus          = 0.75;
+         out.hor_plus_register = 60;
+@@ -399,7 +448,7 @@ int main(void)
+ 
+         check(recomp_settings_write(rt, &out) != 0, "settings written");
+         check(recomp_settings_read(rt, &back) != 0, "settings read back");
+-        check_int(back.resolution_scale, 3, "round trip: scale");
++        check_int(back.resolution, 1080, "round trip: resolution");
+         check_int(back.widescreen, 1, "round trip: widescreen");
+         check(back.hor_plus > 0.74 && back.hor_plus < 0.76, "round trip: hor_plus");
+         check_int(back.hor_plus_register, 60, "round trip: register");
+@@ -498,6 +547,7 @@ int main(void)
+     test_guest_flag();
+     test_older_files();
+     test_window_size();
++    test_resolution();
+ 
+     /* The same resolution as the runtime asks for it: from the settings
+      * of this process -- the file above says widescreen = 1 and

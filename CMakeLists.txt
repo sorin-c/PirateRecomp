@@ -225,6 +225,10 @@ if(TARGET xbox_config)
         # Frame interpolation off unless pirates.ini or the F2 menu turns it
         # on (frame_interp = 2 shows 60 where the game runs at 30)
         RECOMP_TITLE_DEFAULT_FRAME_INTERP=1
+        # Widescreen on in a new pirates.ini (Sorin, 22 Nov): the game has a
+        # 16:9 mode of its own, and the resolution is offered as 16:9 sizes
+        # (1920x1080, 2560x1440...), native by default (toolkit patch 0061)
+        RECOMP_TITLE_DEFAULT_WIDESCREEN=1
         # LB and RB pull the triggers in the default pad bindings, as LT and
         # RT do (Sorin, 19 Nov); Black and White keep their keys (W, Q)
         RECOMP_TITLE_BUMPERS_AS_TRIGGERS=1
