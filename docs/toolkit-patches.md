@@ -561,3 +561,10 @@ Each one, with the reason it exists:
   (`RECOMP_VIBRATION`, 0-150 %, default 100) scales the pad's rumble, live.
   `recomp_config_default(key)` says what a key is when the file does not
   set it. If the panel's renderer cannot start, the old text panel is drawn.
+
+- **0059-builder-log-path-first** (`tools/builder/src/main.rs`). When a step
+  of the player's build fails, the launcher shows the builder's message in a
+  box of a few lines. The message ended with the whole log's path after 25
+  lines of output, so the box cut it off and players could not tell where the
+  log was. The path now comes first: `The whole log is in
+  %LOCALAPPDATA%\xboxrecomp\builds\<title id>\build.log`, then the last lines.
