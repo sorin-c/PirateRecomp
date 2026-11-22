@@ -264,3 +264,16 @@ index 4719eec..c362552 100644
      r->label = "Frame interpolation";
      r->help  = "Draw frames between the game's own: smoother motion while the game"
                 " still runs at 60. Best with Variable refresh rate.";
+diff --git a/src/launcher/launcher.h b/src/launcher/launcher.h
+index 1631fdd..e3a541a 100644
+--- a/src/launcher/launcher.h
++++ b/src/launcher/launcher.h
+@@ -16,7 +16,7 @@
+ #include <stdint.h>
+ 
+ #define LAUNCHER_WINDOW_W 900
+-#define LAUNCHER_WINDOW_H 800           /* eight Video rows, their help, the footer */
++#define LAUNCHER_WINDOW_H 862           /* nine Video rows, their help, the footer */
+ 
+ /* Keys, as the front end reports them and as launcher.c asks after them. A
+  * letter or a digit is itself, upper case ('A'..'Z', '0'..'9'), as a
