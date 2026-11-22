@@ -1,0 +1,456 @@
+diff --git a/src/launcher/launcher.c b/src/launcher/launcher.c
+index 2111451..a1e47b2 100644
+--- a/src/launcher/launcher.c
++++ b/src/launcher/launcher.c
+@@ -485,6 +485,25 @@ static double g_build_progress;
+ static char   g_build_label[96], g_build_detail[200];
+ static int    g_build_cancelled;
+ static uint64_t g_build_started, g_build_ms; /* lhost_ticks; how long it took */
++
++/* The builder's stages (tools/builder STAGES), in order, as the steps the
++ * build screen lists. */
++#define BUILD_STEPS 6
++static const char *const k_build_step_key[BUILD_STEPS] = {
++    "game", "check", "lift", "configure", "compile", "install"
++};
++static const char *const k_build_step_name[BUILD_STEPS] = {
++    "Prepare the game files", "Check the disc", "Translate the game to C",
++    "Set up the build", "Compile the game", "Finish"
++};
++static int      g_build_step;                    /* -1 before the first */
++static uint64_t g_step_started[BUILD_STEPS], g_step_ms[BUILD_STEPS];
++/* Time left: measured from the first stage after the game's files, whose
++ * speed is the disk's rather than the machine's. g_eta_end is when the
++ * build should end (lhost_ticks), smoothed so the figure does not jump. */
++static uint64_t g_eta_t0, g_eta_end, g_eta_last;
++static double   g_eta_p0;
++static int      g_eta_have;
+ static int    g_setup_sel;              /* 0 the path, 1 image, 2 folder, 3 build */
+ 
+ static int read_small_file(const char *path, char *buf, size_t n)
+@@ -1700,6 +1719,12 @@ static void release_start_build(void)
+     g_rel_error[0] = g_rel_note[0] = '\0';
+     g_rel_unsupported = g_build_cancelled = 0;
+     g_build_progress = 0.0;
++    g_build_step = -1;
++    memset(g_step_started, 0, sizeof g_step_started);
++    memset(g_step_ms, 0, sizeof g_step_ms);
++    g_eta_t0 = g_eta_end = g_eta_last = 0;
++    g_eta_p0 = 0.0;
++    g_eta_have = 0;
+     snprintf(g_build_label, sizeof g_build_label, "Starting");
+     g_build_detail[0] = '\0';
+     g_build_started = lhost_ticks();
+@@ -1719,7 +1744,26 @@ static void release_line(const char *line)
+     if (!json_str(line, "event", ev, sizeof ev))
+         return;
+     if (strcmp(ev, "progress") == 0) {
++        char stage[24];
++        uint64_t now = lhost_ticks();
++        int i;
++
+         g_build_progress = json_num(line, "overall");
++        if (json_str(line, "stage", stage, sizeof stage))
++            for (i = 0; i < BUILD_STEPS; i++)
++                if (strcmp(stage, k_build_step_key[i]) == 0 && i > g_build_step) {
++                    if (g_build_step >= 0)
++                        g_step_ms[g_build_step] = now - g_step_started[g_build_step];
++                    /* Stages skipped over took no time. */
++                    while (++g_build_step < i)
++                        g_step_started[g_build_step] = now;
++                    g_step_started[i] = now;
++                    if (i > 0 && !g_eta_t0) {
++                        g_eta_t0 = now;
++                        g_eta_p0 = g_build_progress;
++                    }
++                    break;
++                }
+         json_str(line, "label", g_build_label, sizeof g_build_label);
+         if (!json_str(line, "detail", g_build_detail, sizeof g_build_detail))
+             g_build_detail[0] = '\0';
+@@ -1732,6 +1776,29 @@ static void release_line(const char *line)
+     }
+ }
+ 
++/* Once a second: where the build's end should be, from how fast the bar
++ * has moved since the game's files were ready. A raw figure swings with
++ * each stage's real speed, so it is eased in. */
++static void release_eta(void)
++{
++    uint64_t now = lhost_ticks(), spent;
++    double moved = g_build_progress - g_eta_p0, raw_end;
++
++    if (!g_eta_t0 || g_rel_relinking || now - g_eta_last < 1000)
++        return;
++    g_eta_last = now;
++    spent = now - g_eta_t0;
++    if (spent < 8000 || moved < 0.03)
++        return;
++    raw_end = (double)now + (double)spent / moved * (1.0 - g_build_progress);
++    if (!g_eta_have) {
++        g_eta_end = (uint64_t)raw_end;
++        g_eta_have = 1;
++    } else {
++        g_eta_end = (uint64_t)(0.8 * (double)g_eta_end + 0.2 * raw_end);
++    }
++}
++
+ static void release_tick(void)
+ {
+     char line[4096];
+@@ -1739,6 +1806,7 @@ static void release_tick(void)
+ 
+     while (n++ < 64 && lhost_job_line(line, sizeof line))
+         release_line(line);
++    release_eta();
+     code = lhost_job_status();
+     if (code < 0)
+         return;
+@@ -1845,10 +1913,69 @@ static void draw_setup(void)
+                11, 400, THEME_TEXT_DIM, THEME_LEFT);
+ }
+ 
++/* "1:05": minutes and seconds. */
++static void fmt_clock(char *out, size_t n, uint64_t ms)
++{
++    unsigned s = (unsigned)(ms / 1000);
++
++    snprintf(out, n, "%u:%02u", s / 60, s % 60);
++}
++
++static void eta_text(char *out, size_t n)
++{
++    uint64_t now = lhost_ticks();
++    unsigned left;
++
++    if (!g_eta_have) {
++        snprintf(out, n, "Working out the time left");
++        return;
++    }
++    left = g_eta_end > now ? (unsigned)((g_eta_end - now + 500) / 1000) : 0;
++    if (left >= 90)
++        snprintf(out, n, "About %u min left", (left + 30) / 60);
++    else if (left >= 45)
++        snprintf(out, n, "About a minute left");
++    else if (left >= 10)
++        snprintf(out, n, "Less than a minute left");
++    else
++        snprintf(out, n, "Almost done");
++}
++
++/* The builder's stages, each done, running or still to come. */
++static void draw_build_steps(int top)
++{
++    ThemeRect p, r;
++    char t[48];
++    uint64_t now = lhost_ticks();
++    int i;
++
++    p.x = 60; p.y = top; p.w = g_cw - 120; p.h = 30 + BUILD_STEPS * 30;
++    theme_panel(p, 0.2);
++    r.x = p.x + 30; r.w = p.w - 60; r.h = 24;
++    for (i = 0; i < BUILD_STEPS; i++) {
++        int done = i < g_build_step, now_on = i == g_build_step;
++
++        r.y = p.y + 16 + i * 30;
++        theme_text(r, k_build_step_name[i], 12, now_on ? 700 : 400,
++                   done ? THEME_GREEN : now_on ? THEME_TEXT : THEME_TEXT_DIM,
++                   THEME_LEFT);
++        if (done) {
++            fmt_clock(t, sizeof t, g_step_ms[i]);
++            theme_text(r, t, 11, 400, THEME_GREEN_DIM, THEME_RIGHT);
++        } else if (now_on) {
++            char c[16];
++
++            fmt_clock(c, sizeof c, now - g_step_started[i]);
++            snprintf(t, sizeof t, "Working  %s", c);
++            theme_text(r, t, 11, 700, THEME_TEXT, THEME_RIGHT);
++        }
++    }
++}
++
+ static void draw_building(void)
+ {
+     ThemeRect p, r, b;
+-    char pct[16];
++    char pct[16], eta[64], spent[32], c[16];
+ 
+     p.x = 60; p.y = 130; p.w = g_cw - 120; p.h = 300;
+     theme_panel(p, 0.3);
+@@ -1861,17 +1988,27 @@ static void draw_building(void)
+     theme_text(r, pct, 13, 700, THEME_TEXT, THEME_RIGHT);
+     b.x = r.x; b.y = r.y + 40; b.w = r.w; b.h = 16;
+     theme_bar(b, g_build_progress, g_pulse * 2.0);   /* a sweep every ~1.4 s */
+-    r.y = b.y + 34; r.h = 22;
++    r.y = b.y + 30; r.h = 22;
++    if (!g_rel_relinking) {
++        eta_text(eta, sizeof eta);
++        theme_text(r, eta, 12, 700, THEME_TEXT, THEME_LEFT);
++        fmt_clock(c, sizeof c, lhost_ticks() - g_build_started);
++        snprintf(spent, sizeof spent, "%s so far", c);
++        theme_text(r, spent, 11, 400, THEME_TEXT_DIM, THEME_RIGHT);
++        r.y += 28;
++    }
+     theme_text(r, g_build_detail, 11, 400, THEME_TEXT_DIM, THEME_LEFT);
+-    r.y += 44; r.h = 70;
++    r.y += 36; r.h = 50;
+     theme_text_wrapped(r, g_rel_relinking
+                           ? "Linking the game to its files again. Nothing is rebuilt."
+                           : "This happens once. Later starts go straight to the game. "
+                             "It is building from your own copy, on this computer.",
+                        11, THEME_TEXT_DIM);
++    if (!g_rel_relinking)
++        draw_build_steps(p.y + p.h + 20);
+ 
+     r.x = 60; r.y = g_ch - 44; r.w = g_cw - 260; r.h = 24;
+-    theme_text(r, g_pad_seen ? "B  Cancel" : "Esc  Cancel", 11, 400,
++    theme_text(r, "Esc  Cancel", 11, 400,
+                THEME_TEXT_DIM, THEME_LEFT);
+     b.w = 150; b.h = 42; b.x = g_cw - 60 - b.w; b.y = g_ch - 74;
+     theme_panel(b, 0.5);
+@@ -2524,6 +2661,12 @@ void launcher_tick(void)
+     if (g_rel == REL_BUILDING)
+         release_tick();
+     g_pad_seen = pad_poll(&dx, &dy, &a, &b, &t);
++    /* A pad's B never cancels a build: it is the button a player presses
++     * without thinking (it is "back" everywhere else), and a cancelled
++     * build starts over from the beginning. Escape, the CANCEL button and
++     * closing the window still cancel. */
++    if (g_rel == REL_BUILDING)
++        b = 0;
+     if (g_capturing)
+         capture_tick();             /* the press is the answer, not a move */
+     else if (g_pad_seen && (dx || dy || a || b || t))
+diff --git a/tools/builder/src/main.rs b/tools/builder/src/main.rs
+index 5e7ace0..81f899e 100644
+--- a/tools/builder/src/main.rs
++++ b/tools/builder/src/main.rs
+@@ -143,14 +143,17 @@ struct Stamp {
+ // ── progress ────────────────────────────────────────────────────────────────
+ 
+ /// The share of the whole build each stage is drawn as. Measured on
+-/// TimeSplitters 2: extraction is disk-bound, the pipeline about 19 s and the
+-/// compile about 30 s on a 6-core machine.
++/// Sid Meier's Pirates! (22 Nov 2026, a 16-thread desktop, the game's files
++/// already extracted): the translation about 155 s, configure and compile
++/// about 90 s. Extraction is disk-bound and reports its own files. The
++/// launcher's time left is worked out from how fast this moves, so the
++/// closer these are to the real times, the steadier it is.
+ const STAGES: &[(&str, &str, f64)] = &[
+     ("game", "Preparing the game files", 0.12),
+     ("check", "Checking the disc", 0.01),
+-    ("lift", "Translating the game to C", 0.35),
++    ("lift", "Translating the game to C", 0.55),
+     ("configure", "Setting up the build", 0.02),
+-    ("compile", "Compiling", 0.48),
++    ("compile", "Compiling", 0.28),
+     ("install", "Finishing", 0.02),
+ ];
+ 
+@@ -680,8 +683,16 @@ fn lossy_lines<R: std::io::Read>(r: R) -> impl Iterator<Item = String> {
+ 
+ /// Run a tool, its output appended to the log and each line handed to
+ /// `on_line`; on failure, the error carries the last lines it printed.
+-fn run(cmd: &mut Command, log: &Path, what: &str, mut on_line: impl FnMut(&str))
++fn run(cmd: &mut Command, log: &Path, what: &str, on_line: impl FnMut(&str))
+     -> Result<(), Failure>
++{
++    run_with_err(cmd, log, what, on_line, |_| {})
++}
++
++/// `run`, with each line the tool prints on stderr handed to `on_err` too
++/// (on the thread that reads stderr).
++fn run_with_err(cmd: &mut Command, log: &Path, what: &str, mut on_line: impl FnMut(&str),
++                on_err: fn(&str)) -> Result<(), Failure>
+ {
+     let mut logf = fs::OpenOptions::new().create(true).append(true).open(log)
+         .or_else(|e| fail(format!("cannot write {}: {e}", log.display())))?;
+@@ -702,6 +713,7 @@ fn run(cmd: &mut Command, log: &Path, what: &str, mut on_line: impl FnMut(&str))
+     let errs = std::thread::spawn(move || {
+         for line in lossy_lines(err) {
+             let _ = writeln!(log2.lock().unwrap(), "{line}");
++            on_err(&line);
+             let mut t = tail2.lock().unwrap();
+             t.push_back(line);
+             if t.len() > 25 { t.pop_front(); }
+@@ -746,19 +758,72 @@ fn sync_tree(from: &Path, to: &Path) -> Result<(), Failure> {
+ 
+ // ── 3-5. lift, build, install ───────────────────────────────────────────────
+ 
+-/// recompile.py's "  2/4  disasm" as each stage starts, as progress.
++/// The lift's progress, in thousandths of the stage. recompile.py's four
++/// steps take seconds except the last, tools.recomp, which on Pirates is
++/// ~40 s loading its tables, ~90 s lifting 16,000 functions and ~10 s
++/// writing them; it says where it is on stderr ("Loading data files...",
++/// "Loaded ...", "[n/N] translated", "=== Split Translation Complete"), and
++/// each of those moves the bar, so a long lift is not one long stop.
++const LIFT_TOTAL: u64 = 1000;
++const LIFT_STEP_START: [u64; 4] = [0, 20, 60, 100];   // 1/4 .. 4/4
++const LIFT_LOADED: u64 = 350;
++const LIFT_TRANSLATED: u64 = 920;
++const LIFT_WRITTEN: u64 = 980;
++
++/// recompile.py's "  2/4  disasm" as each stage starts (stdout).
+ fn lift_progress(line: &str) {
+     let t = line.trim_start();
+     if let Some((n, rest)) = t.split_once('/') {
+         let mut words = rest.split_whitespace();
+         if let (Ok(n), Some("4")) = (n.parse::<u64>(), words.next()) {
+             if (1..=4).contains(&n) {
+-                progress("lift", n, 5, words.next().unwrap_or(""));
++                let step = words.next().unwrap_or("");
++                let detail = match step {
++                    "parse" => "Reading the game's executable",
++                    "disasm" => "Finding the game's code",
++                    "identify" => "Naming the game's functions",
++                    "lift" => "Loading the game's code",
++                    _ => step,
++                };
++                progress("lift", LIFT_STEP_START[n as usize - 1], LIFT_TOTAL, detail);
+             }
+         }
+     }
+ }
+ 
++/// What tools.recomp says on stderr while it lifts, as progress.
++fn lift_err_progress(line: &str) {
++    if let Some((at, detail)) = lift_err_at(line) {
++        progress("lift", at, LIFT_TOTAL, &detail);
++    }
++}
++
++/// Where a tools.recomp stderr line puts the lift, if anywhere.
++fn lift_err_at(line: &str) -> Option<(u64, String)> {
++    let t = line.trim_start();
++    if t.starts_with("Loaded ") && t.contains(" functions") {
++        return Some((LIFT_LOADED, "Translating the functions".into()));
++    }
++    if t.starts_with("=== Split Translation Complete") {
++        return Some((LIFT_WRITTEN, "Writing the C files".into()));
++    }
++    // "[8000/15967] translated (16 processes)", or with no process pool
++    // "[8001/15967] Translating sub_00123456..."
++    let (nums, after) = t.strip_prefix('[')?.split_once(']')?;
++    let after = after.trim_start();
++    if !after.starts_with("translated") && !after.starts_with("Translating") {
++        return None;
++    }
++    let (d, n) = nums.split_once('/')?;
++    let (d, n) = (d.trim().parse::<u64>().ok()?, n.trim().parse::<u64>().ok()?);
++    if n == 0 {
++        return None;
++    }
++    let d = d.min(n);
++    Some((LIFT_LOADED + (LIFT_TRANSLATED - LIFT_LOADED) * d / n,
++          format!("Translated {d} of {n} functions")))
++}
++
+ fn lift(release: &Release, image: &Image, user: &Path, log: &Path) -> Result<(), Failure> {
+     let r = &release.dir;
+     let project = user.join("project");
+@@ -784,7 +849,9 @@ fn lift(release: &Release, image: &Image, user: &Path, log: &Path) -> Result<(),
+             // UTF-8 to the pipe whatever the system code page is: the
+             // pipeline prints the disc's title, which can hold a "\u{2122}".
+             .env("PYTHONUTF8", "1").env("PYTHONIOENCODING", "utf-8")
+-            .env("TMPDIR", &tmp);
++            .env("TMPDIR", &tmp)
++            // tools.recomp's "[n/N] translated" lines, for the progress bar.
++            .env("RECOMP_PROGRESS", "1");
+     };
+ 
+     // A title's own lift. It finds the pipeline where its toolkit submodule
+@@ -802,15 +869,15 @@ fn lift(release: &Release, image: &Image, user: &Path, log: &Path) -> Result<(),
+         let Some((script, args)) = hook.split_first() else {
+             return fail("release.json's lift names no script");
+         };
+-        progress("lift", 0, 5, &image.name);
++        progress("lift", 0, LIFT_TOTAL, &image.name);
+         let mut cmd = Command::new(python_exe(r));
+         cmd.arg(project.join(script));
+         for a in args {
+             cmd.arg(a.replace("{xbe_dir}", &xdir.display().to_string()));
+         }
+         python(&mut cmd, &project);
+-        run(&mut cmd, log, "the translation to C", lift_progress)?;
+-        progress("lift", 5, 5, "");
++        run_with_err(&mut cmd, log, "the translation to C", lift_progress, lift_err_progress)?;
++        progress("lift", LIFT_TOTAL, LIFT_TOTAL, "");
+         return Ok(());
+     }
+ 
+@@ -821,7 +888,7 @@ fn lift(release: &Release, image: &Image, user: &Path, log: &Path) -> Result<(),
+     // Which XDK functions sit where in this image, for the replacements the
+     // lifter links in by name. A recipe may carry them; otherwise they are
+     // found here, by signature, as tools.xdk_symbols does at a desk.
+-    progress("lift", 0, 5, "naming the XDK functions");
++    progress("lift", 0, LIFT_TOTAL, "Naming the XDK functions");
+     // Beside the XBE, named after it, where recompile.py looks.
+     let stem = Path::new(name).file_stem().map(|s| s.to_string_lossy().into_owned())
+         .unwrap_or_else(|| "default".into());
+@@ -857,8 +924,8 @@ fn lift(release: &Release, image: &Image, user: &Path, log: &Path) -> Result<(),
+     } else if image.config.is_some() {
+         cmd.arg("--no-xbe-patches");
+     }
+-    run(&mut cmd, log, "the translation to C", lift_progress)?;
+-    progress("lift", 5, 5, "");
++    run_with_err(&mut cmd, log, "the translation to C", lift_progress, lift_err_progress)?;
++    progress("lift", LIFT_TOTAL, LIFT_TOTAL, "");
+     Ok(())
+ }
+ 
+@@ -1309,6 +1376,22 @@ mod tests {
+         let _ = fs::remove_dir_all(&d);
+     }
+ 
++    #[test]
++    fn the_lift_moves_while_tools_recomp_works() {
++        assert_eq!(lift_err_at("Loaded 15967 functions, 16086 labels, 20850 classifications, 0 ABI entries in 39.5s"),
++                   Some((LIFT_LOADED, "Translating the functions".into())));
++        assert_eq!(lift_err_at("  [8000/16000] translated (16 processes)").map(|x| x.0),
++                   Some(LIFT_LOADED + (LIFT_TRANSLATED - LIFT_LOADED) / 2));
++        assert_eq!(lift_err_at("  [16000/16000] translated (16 processes)").map(|x| x.0),
++                   Some(LIFT_TRANSLATED));
++        assert_eq!(lift_err_at("  [1/16000] Translating sub_00011000...").map(|x| x.0),
++                   Some(LIFT_LOADED));
++        assert_eq!(lift_err_at("=== Split Translation Complete (97.8s) ===").map(|x| x.0),
++                   Some(LIFT_WRITTEN));
++        assert_eq!(lift_err_at("[1/117] Guest hooks: config/hooks"), None);
++        assert_eq!(lift_err_at("  hle: XMVPlaybackStart: not found in this XBE"), None);
++    }
++
+     #[test]
+     fn a_rebuild_keeps_the_saves() {
+         let d = scratch("saves");
+diff --git a/tools/recomp/translator.py b/tools/recomp/translator.py
+index f070d60..2fbea08 100644
+--- a/tools/recomp/translator.py
++++ b/tools/recomp/translator.py
+@@ -2968,6 +2968,10 @@ class BatchTranslator:
+         """
+         import sys
+ 
++        # RECOMP_PROGRESS=1 (the self-building release's builder sets it)
++        # prints the "[n/N]" lines without the rest of verbose's output, so
++        # a launcher can show the lift moving rather than one long stop.
++        progress = verbose or os.environ.get("RECOMP_PROGRESS") == "1"
+         jobs = max(1, min(int(jobs or 1), len(work)))
+         if sys.platform == "win32":
+             jobs = min(jobs, 61)    # ProcessPoolExecutor's limit there
+@@ -2985,7 +2989,7 @@ class BatchTranslator:
+         if jobs <= 1:
+             codes = []
+             for i, (addr, name, func_info) in enumerate(work):
+-                if verbose and (i % 500 == 0 or i == len(work) - 1):
++                if progress and (i % 500 == 0 or i == len(work) - 1):
+                     print(f"  [{i+1}/{len(work)}] Translating {name}...",
+                           file=sys.stderr)
+                 codes.append(self.translator.translate_function(addr, func_info))
+@@ -3027,7 +3031,7 @@ class BatchTranslator:
+                         for mnemonic, addrs in unimplemented.items():
+                             lifter.unimplemented.setdefault(
+                                 mnemonic, []).extend(addrs)
+-                    if verbose and (len(codes) // 500 != (len(codes) - len(results)) // 500
++                    if progress and (len(codes) // 500 != (len(codes) - len(results)) // 500
+                                     or len(codes) == len(work)):
+                         print(f"  [{len(codes)}/{len(work)}] translated "
+                               f"({jobs} processes)", file=sys.stderr)

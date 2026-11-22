@@ -568,3 +568,17 @@ Each one, with the reason it exists:
   lines of output, so the box cut it off and players could not tell where the
   log was. The path now comes first: `The whole log is in
   %LOCALAPPDATA%\xboxrecomp\builds\<title id>\build.log`, then the last lines.
+
+- **0061-build-screen-progress** (`src/launcher/launcher.c`,
+  `tools/builder/src/main.rs`, `tools/recomp/translator.py`). The
+  self-building release's build screen. A pad's B no longer cancels a build
+  (it is "back" everywhere else and a cancelled build starts over); Escape,
+  the CANCEL button and closing the window still do. The bar used to sit at
+  41% for the ~2.5 minutes Pirates' translation takes: tools.recomp now
+  prints its "[n/N] translated" lines when `RECOMP_PROGRESS=1` (the builder
+  sets it), and the builder reads tools.recomp's stderr, so the bar moves
+  through loading, translating and writing. The stage weights are Pirates'
+  measured times (translation 55%, compile 28%). The screen lists the six
+  steps with each one's time, the time so far and an estimate of the time
+  left, worked out from how fast the bar moved since the game's files were
+  ready and eased so it does not jump.
