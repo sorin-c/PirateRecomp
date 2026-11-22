@@ -1235,7 +1235,7 @@ index 2cd92b5..f7bef41 100644
   * person and any script: Start+Back on port 1 opens or closes the menu, and
   * while it is open (or the combination is still held) the sample is the
 diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
-index a6f655b..a64b8e2 100644
+index a6f655b..22c303c 100644
 --- a/src/hle/hle_settings_menu.c
 +++ b/src/hle/hle_settings_menu.c
 @@ -2,21 +2,27 @@
@@ -1496,7 +1496,7 @@ index a6f655b..a64b8e2 100644
      case LIVE_INTERP:
          snprintf(buf, sizeof buf, "%d", hle_frame_interp());
          v = buf;
-@@ -140,35 +213,113 @@ static int current_index(const Item *it)
+@@ -140,35 +213,111 @@ static int current_index(const Item *it)
      case LIVE_FULLSCREEN:
          v = hle_fullscreen() ? "1" : "0";
          break;
@@ -1542,8 +1542,6 @@ index a6f655b..a64b8e2 100644
 +        ROW(D3D8_MENU_ROW_INFO, -1, "Renderer");
 +        snprintf(g_rows[g_row_count - 1].value, sizeof g_rows[0].value, "%s",
 +                 rhi_backend_name() ? rhi_backend_name() : "-");
-+        ROW(D3D8_MENU_ROW_INFO, -1, "Built");
-+        snprintf(g_rows[g_row_count - 1].value, sizeof g_rows[0].value, "%s", __DATE__);
 +        ROW(D3D8_MENU_ROW_INFO, -1, "Settings file");
 +        if (path) {
 +            const char *base = strrchr(path, '\\');
@@ -1622,7 +1620,7 @@ index a6f655b..a64b8e2 100644
      }
      fprintf(stderr, "[MENU] %s = %s%s%s\n", it->key, it->vals[i],
              it->live == LIVE_NONE ? " (at the next start)" : "",
-@@ -176,6 +327,56 @@ static void change(int dir)
+@@ -176,6 +325,56 @@ static void change(int dir)
      fflush(stderr);
  }
  
@@ -1679,7 +1677,7 @@ index a6f655b..a64b8e2 100644
  int hle_settings_menu_open(void)
  {
      return g_open;
-@@ -185,39 +386,179 @@ void hle_settings_menu_toggle(void)
+@@ -185,39 +384,179 @@ void hle_settings_menu_toggle(void)
  {
      build_list();
      g_open = !g_open;
@@ -1856,7 +1854,7 @@ index a6f655b..a64b8e2 100644
 +    } else if (g_tab == TAB_ABOUT) {
 +        snprintf(m.info_title, sizeof m.info_title, "About");
 +        snprintf(m.info_text, sizeof m.info_text,
-+                 "The renderer, the build, where your settings are kept, and the keys "
++                 "The renderer, where your settings are kept, and the keys "
 +                 "the recomp adds. Useful when you report a problem.");
 +    }
 +    if (g_restart_count)
@@ -1873,7 +1871,7 @@ index a6f655b..a64b8e2 100644
  void hle_settings_menu_keys(int dy, int dx, int ok, int back)
  {
      if (!g_open)
-@@ -227,17 +568,37 @@ void hle_settings_menu_keys(int dy, int dx, int ok, int back)
+@@ -227,17 +566,37 @@ void hle_settings_menu_keys(int dy, int dx, int ok, int back)
          return;
      }
      if (dy)
@@ -1915,7 +1913,7 @@ index a6f655b..a64b8e2 100644
  static long now_ms(void)
  {
      return (long)((double)clock() * 1000.0 / CLOCKS_PER_SEC);
-@@ -256,6 +617,11 @@ void hle_settings_menu_input(unsigned port, RecompInputGamepad *g)
+@@ -256,6 +615,11 @@ void hle_settings_menu_input(unsigned port, RecompInputGamepad *g)
      if (port == 0) {
          unsigned b = g->buttons, pressed = b & ~g_prev_buttons;
          int a = g->analog_buttons[HOST_ANALOG_A] > 30, bb = g->analog_buttons[HOST_ANALOG_B] > 30;
@@ -1927,7 +1925,7 @@ index a6f655b..a64b8e2 100644
          int stick_y = g->thumb_ly > 16000 ? -1 : g->thumb_ly < -16000 ? 1 : 0;
          int stick_x = g->thumb_lx > 16000 ? 1 : g->thumb_lx < -16000 ? -1 : 0;
          static int prev_sy, prev_sx;
-@@ -273,6 +639,9 @@ void hle_settings_menu_input(unsigned port, RecompInputGamepad *g)
+@@ -273,6 +637,9 @@ void hle_settings_menu_input(unsigned port, RecompInputGamepad *g)
  
              if (!dy && stick_y != prev_sy) dy = stick_y;
              if (!dx && stick_x != prev_sx) dx = stick_x;
@@ -1937,7 +1935,7 @@ index a6f655b..a64b8e2 100644
              hle_settings_menu_keys(dy, dx, a && !g_prev_a, back);
              if (back)
                  g_swallow = 1;           /* Back (or Start) still down: not the game's */
-@@ -297,6 +666,9 @@ void hle_settings_menu_input(unsigned port, RecompInputGamepad *g)
+@@ -297,6 +664,9 @@ void hle_settings_menu_input(unsigned port, RecompInputGamepad *g)
          g_prev_buttons = b;
          g_prev_a = a;
          g_prev_b = bb;
