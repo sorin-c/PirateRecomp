@@ -1,0 +1,266 @@
+diff --git a/src/config/recomp_config.c b/src/config/recomp_config.c
+index 7dc674a..28e3749 100644
+--- a/src/config/recomp_config.c
++++ b/src/config/recomp_config.c
+@@ -445,6 +445,7 @@ void recomp_settings_defaults(RecompSettings *s)
+     s->fps_overlay       = 0;
+     s->fullscreen        = 0;
+     s->vrr               = 1;
++    s->vsync             = 1;
+     s->frame_interp      = recomp_settings_default_frame_interp();
+     s->mouse_look        = 0;
+     s->mouse_sensitivity = RECOMP_MOUSE_SENSITIVITY_DEFAULT;
+@@ -486,6 +487,7 @@ const char *recomp_config_default(const char *key)
+     else if (strcmp(key, "fps_overlay") == 0)  i = d.fps_overlay;
+     else if (strcmp(key, "fullscreen") == 0)   i = d.fullscreen;
+     else if (strcmp(key, "vrr") == 0)          i = d.vrr;
++    else if (strcmp(key, "vsync") == 0)        i = d.vsync;
+     else if (strcmp(key, "frame_interp") == 0) i = d.frame_interp < 1 ? 1 : d.frame_interp;
+     else if (strcmp(key, "frame_cap") == 0)    return "adaptive";
+     else if (strcmp(key, "priority") == 0)     return "1";
+@@ -558,6 +560,8 @@ int recomp_settings_read(const char *path, RecompSettings *s)
+             s->fullscreen = !off_word(v);
+         if ((v = from_table("vrr")) != NULL)
+             s->vrr = !off_word(v);
++        if ((v = from_table("vsync")) != NULL)
++            s->vsync = !off_word(v);
+         if ((v = from_table("frame_interp")) != NULL)
+             s->frame_interp = clamp_int(atoi(v), 1, 4);
+         if ((v = from_table("mouse_look")) != NULL)
+@@ -742,6 +746,14 @@ int recomp_settings_write(const char *path, const RecompSettings *s)
+         "# must have it switched on. 0 turns it off.             [RECOMP_VRR]\n"
+         "vrr = %d\n"
+         "\n"
++        "# VSync: every frame waits for the display's next refresh, so a frame\n"
++        "# is never shown half drawn over the last one (tearing). With variable\n"
++        "# refresh on it only holds back frames faster than the display, which\n"
++        "# is how G-SYNC and FreeSync are meant to be run. It caps the frame\n"
++        "# rate at the display's refresh rate; the game's speed is unchanged.\n"
++        "# 0 turns it off.                                     [RECOMP_VSYNC]\n"
++        "vsync = %d\n"
++        "\n"
+         "# Frame interpolation: draw frames between the game's own, so 2 shows\n"
+         "# 120 a second while the game itself still runs at 60. Best with\n"
+         "# variable refresh. 1 is off.                   [RECOMP_FRAME_INTERP]\n"
+@@ -759,7 +771,7 @@ int recomp_settings_write(const char *path, const RecompSettings *s)
+         s->resolution_scale, s->widescreen, hor_plus, reg,
+         s->widescreen_2d[0] ? s->widescreen_2d : "auto",
+         s->anisotropy, s->frame_cap[0] ? s->frame_cap : "adaptive", s->fps_overlay,
+-        s->fullscreen, s->vrr, s->frame_interp < 1 ? 1 : s->frame_interp,
++        s->fullscreen, s->vrr, s->vsync, s->frame_interp < 1 ? 1 : s->frame_interp,
+         s->mouse_look ? 1 : 0,
+         RECOMP_MOUSE_SENSITIVITY_MIN, RECOMP_MOUSE_SENSITIVITY_MAX,
+         RECOMP_MOUSE_SENSITIVITY_DEFAULT, 100000 / RECOMP_MOUSE_SENSITIVITY_DEFAULT,
+diff --git a/src/config/recomp_config.h b/src/config/recomp_config.h
+index 2f8b7a6..a4325f0 100644
+--- a/src/config/recomp_config.h
++++ b/src/config/recomp_config.h
+@@ -250,6 +250,7 @@ typedef struct RecompSettings {
+     int  fps_overlay;           /* 0 or 1 */
+     int  fullscreen;            /* 0 or 1: borderless, on the window's monitor */
+     int  vrr;                   /* 0 or 1: present for variable refresh when fullscreen */
++    int  vsync;                 /* 0 or 1: every present waits for the display's refresh */
+     int  frame_interp;          /* 1 (off) to 4: frames shown for each the game draws */
+     /* Mouse look (src/input/input_bindings.c): the mouse moves controller
+      * 1's right stick, on top of whatever is bound to it. Per title, unlike
+diff --git a/src/d3d/d3d8_device.c b/src/d3d/d3d8_device.c
+index 198c460..71b9b66 100644
+--- a/src/d3d/d3d8_device.c
++++ b/src/d3d/d3d8_device.c
+@@ -2981,6 +2981,42 @@ void xbox_D3D8SetPresentInterval(UINT interval)
+     g_present_interval = interval;
+ }
+ 
++/* The player's VSync (xbox_D3D8SetVsync): -1 until the device that is the
++ * title's display says, and then each present waits for a refresh (1) or
++ * not (0) whatever the interval above. Without it a frame presented while
++ * the display is mid-refresh tears: in fullscreen the swap chain presents
++ * with ALLOW_TEARING for variable refresh, and a frame that comes sooner
++ * than the display's fastest refresh (a scene running unlocked at about
++ * the refresh rate) is shown at once, part way down the screen. With
++ * variable refresh on, a wait only holds back a frame faster than the
++ * display; below that, frames are still shown as they are made. The
++ * title's pacing is the flip gate's, not the present's, so the title's
++ * speed does not change; an uncapped scene is held to the refresh rate.
++ * Any thread sets it; the presenting thread reads it at each present. */
++static volatile LONG g_vsync = -1;
++
++void xbox_D3D8SetVsync(int on)
++{
++    LONG v = on ? 1 : 0;
++
++    if (InterlockedExchange(&g_vsync, v) != v) {
++        fprintf(stderr, "[D3D8] vsync %s\n", v ? "on" : "off");
++        fflush(stderr);
++    }
++}
++
++int xbox_D3D8Vsync(void)
++{
++    return InterlockedCompareExchange(&g_vsync, 0, 0) == 1;
++}
++
++static UINT present_interval(void)
++{
++    LONG v = InterlockedCompareExchange(&g_vsync, 0, 0);
++
++    return v < 0 ? g_present_interval : (UINT)v;
++}
++
+ /* RECOMP_FRAME_WORK=1, for measuring: what a frame costs the thread that
+  * draws it, apart from the present. Every five seconds, to stderr: frames,
+  * the mean frame, the mean time blocked in the present, and the frame's own
+@@ -3058,7 +3094,7 @@ static HRESULT __stdcall dev_Swap(IDirect3DDevice8 *self, DWORD Flags)
+         LARGE_INTEGER a, b;
+         int on = frame_work_on();
+         if (on) QueryPerformanceCounter(&a);
+-        hr = (HRESULT)rhi_present(g_present_interval);
++        hr = (HRESULT)rhi_present(present_interval());
+         if (on) { QueryPerformanceCounter(&b); frame_work_note(a.QuadPart, b.QuadPart); }
+         return hr;
+     }
+@@ -3152,7 +3188,7 @@ void xbox_D3D8InterpPresent(void)
+         return;
+     follow_vrr();
+     present_scene();
+-    rhi_present(g_present_interval);
++    rhi_present(present_interval());
+ }
+ 
+ void xbox_D3D8Represent(void)
+@@ -3160,7 +3196,7 @@ void xbox_D3D8Represent(void)
+     if (!rhi_device_ready())
+         return;
+     present_scene();
+-    rhi_present(g_present_interval);
++    rhi_present(present_interval());
+ }
+ 
+ void xbox_D3D8InterpEnd(void)
+diff --git a/src/d3d/d3d8_xbox.h b/src/d3d/d3d8_xbox.h
+index 70c6c68..8b13224 100644
+--- a/src/d3d/d3d8_xbox.h
++++ b/src/d3d/d3d8_xbox.h
+@@ -1194,6 +1194,14 @@ IDirect3DDevice8 *xbox_GetD3DDevice(void);
+  * 0 presents without waiting, for a device that is not the title's display.
+  */
+ void xbox_D3D8SetPresentInterval(UINT interval);
++/**
++ * The player's VSync, for the device that is the title's display: on, every
++ * present waits for the display's next refresh (interval 1) whatever
++ * SetPresentInterval said; off, presents use that interval. Never called
++ * (a tool such as d3d8_replay), the interval alone decides. Any thread.
++ */
++void xbox_D3D8SetVsync(int on);
++int  xbox_D3D8Vsync(void);
+ /* Keep a copy of every frame as it is about to be presented -- after the
+  * display resolve, in the swap chain -- as RGBA8, for a tool that checks
+  * what reaches the screen rather than the scene (d3d8_replay --present).
+diff --git a/src/hle/hle_d3d8.c b/src/hle/hle_d3d8.c
+index 0550153..957de86 100644
+--- a/src/hle/hle_d3d8.c
++++ b/src/hle/hle_d3d8.c
+@@ -1303,6 +1303,10 @@ static void shadow_create(uint32_t pp_va)
+      * frames it presents itself; a vsync wait on this side device throttled
+      * Burnout 2's whole loop to 27 frames a second. */
+     xbox_D3D8SetPresentInterval(0);
++    /* ...unless the player asks for VSync (on by default): then each present
++     * waits for the display's refresh, which is what stops tearing. The
++     * title's pace is the flip gate's either way. */
++    xbox_D3D8SetVsync(recomp_config_bool("RECOMP_VSYNC", "vsync", 1));
+     /* The size the title's screen-space geometry is measured in, whatever
+      * size the host ends up rendering at. */
+     xbox_D3D8SetGuestSize(width, height);
+@@ -3264,6 +3268,16 @@ void hle_set_fps_overlay(int on)
+     g_overlay_set = on ? 1 : 0;
+ }
+ 
++int hle_vsync(void)
++{
++    return xbox_D3D8Vsync();
++}
++
++void hle_set_vsync(int on)
++{
++    xbox_D3D8SetVsync(on);
++}
++
+ const char *hle_frame_cap(void)
+ {
+     return xbox_Nv2aFlipGateModeName();
+diff --git a/src/hle/hle_settings.h b/src/hle/hle_settings.h
+index f7bef41..81c634f 100644
+--- a/src/hle/hle_settings.h
++++ b/src/hle/hle_settings.h
+@@ -25,6 +25,10 @@ void        hle_set_frame_cap(const char *name);
+ int  hle_frame_interp(void);
+ void hle_set_frame_interp(int n);
+ 
++/* VSync: every present waits for the display's refresh (vsync). */
++int  hle_vsync(void);
++void hle_set_vsync(int on);
++
+ /* Borderless fullscreen (Alt+Enter on Windows). */
+ int  hle_fullscreen(void);
+ void hle_set_fullscreen(int on);
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index d554966..c1af620 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -84,7 +84,7 @@ enum {
+ 
+ /* LIVE_TITLE: the title reads the key itself while it runs
+  * (recomp_config_lookup returns what the menu set), so it applies at once. */
+-enum { LIVE_NONE, LIVE_CAP, LIVE_INTERP, LIVE_FPS, LIVE_FULLSCREEN, LIVE_TITLE, LIVE_VIBRATION };
++enum { LIVE_NONE, LIVE_CAP, LIVE_INTERP, LIVE_FPS, LIVE_FULLSCREEN, LIVE_TITLE, LIVE_VIBRATION, LIVE_VSYNC };
+ 
+ enum { TAB_DISPLAY, TAB_GAME, TAB_CONTROLS, TAB_ABOUT, TAB_COUNT };
+ static const char *const TAB_NAMES[TAB_COUNT] = { "Display", "Game", "Controls", "About" };
+@@ -115,6 +115,12 @@ static const Item ITEMS[] = {
+       { "0", "1" }, { "Off", "On" },
+       "In fullscreen, hands each frame to a G-SYNC or FreeSync display the moment it is ready. "
+       "The display and its driver must have it switched on. Turn it off if you see stutter." },
++    { TAB_DISPLAY, "Window", "VSync", "vsync", "RECOMP_VSYNC", LIVE_VSYNC, 0, 0, 2,
++      { "0", "1" }, { "Off", "On" },
++      "Waits for the display's refresh before showing each frame, so no frame is shown torn "
++      "across another. With variable refresh it only holds back frames faster than the "
++      "display. Caps the frame rate at the display's refresh rate; the game's speed is "
++      "unchanged." },
+     { TAB_DISPLAY, "Window", "Frame-rate counter", "fps_overlay", "RECOMP_FPS_OVERLAY", LIVE_FPS, 0, 0, 2,
+       { "0", "1" }, { "Off", "On" },
+       "Shows frames per second in the top-left corner. F9 toggles it too." },
+@@ -249,6 +255,9 @@ static int current_index(const Item *it)
+     case LIVE_FULLSCREEN:
+         v = hle_fullscreen() ? "1" : "0";
+         break;
++    case LIVE_VSYNC:
++        v = hle_vsync() ? "1" : "0";
++        break;
+     case LIVE_VIBRATION:
+         snprintf(buf, sizeof buf, "%d", recomp_bindings_vibration());
+         v = buf;
+@@ -352,6 +361,7 @@ static void set_index(const Item *it, int i)
+     case LIVE_INTERP:     hle_set_frame_interp(atoi(it->vals[i])); break;
+     case LIVE_FPS:        hle_set_fps_overlay(i); break;
+     case LIVE_FULLSCREEN: hle_set_fullscreen(i); break;
++    case LIVE_VSYNC:      hle_set_vsync(i); break;
+     case LIVE_VIBRATION:  recomp_bindings_set_vibration(atoi(it->vals[i])); break;
+     case LIVE_TITLE:      break;
+     default:              g_restart_count++; break;
+diff --git a/src/launcher/launcher.c b/src/launcher/launcher.c
+index 4719eec..c362552 100644
+--- a/src/launcher/launcher.c
++++ b/src/launcher/launcher.c
+@@ -244,6 +244,12 @@ static void build_rows(void)
+     r->kind  = ROW_BOOL; r->ival = &g_settings.vrr;
+     r++;
+ 
++    r->label = "VSync";
++    r->help  = "Wait for the screen's refresh: no tearing. Caps the frame rate at the"
++               " refresh rate; the game's speed is unchanged.";
++    r->kind  = ROW_BOOL; r->ival = &g_settings.vsync;
++    r++;
++
+     r->label = "Frame interpolation";
+     r->help  = "Draw frames between the game's own: smoother motion while the game"
+                " still runs at 60. Best with Variable refresh rate.";

@@ -30,6 +30,7 @@ Back pressed alone still reaches the game as usual.
 | Widescreen (16:9) | next start |
 | Texture sharpness (off, 1x, 2x, 4x, 8x, 16x) | next start |
 | Variable refresh | next start |
+| VSync | at once |
 | Movies (skip all, skip intro, play all) | next start |
 | Legal screen (skip, show) | next start |
 | Sound | next start |
@@ -41,6 +42,15 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
 
 ## Display and frame rate
 
+- **VSync.** `vsync` (F2 Display tab "VSync", applies at once, on by
+  default): each frame waits for the monitor's next refresh before it is
+  shown, so no frame is drawn torn across the one before. With variable
+  refresh (`vrr`, G-SYNC or FreeSync) on, only a frame that comes faster
+  than the monitor's top refresh rate waits, which is the usual way to run
+  G-SYNC; that is where the tearing came from, in scenes set to 144 or
+  unlocked running at about the 144 Hz refresh. VSync caps the frame rate at
+  the refresh rate and never changes the game's speed. `vsync = 0` shows
+  frames the moment they are ready, as before.
 - **Frame interpolation.** The game runs its world at 30 fps at sea, in
   battles, duels and the town sneak. Frame interpolation (`frame_interp = 2`,
   off by default) draws the frame in between, so you see 60 while the game
@@ -128,6 +138,7 @@ defaults. Every line names the environment variable that overrides it, so a
 | `fullscreen` | `0` | Fullscreen window. |
 | `anisotropy` | `0` | Texture sharpness: `0` off (the game's own filtering), `1`, `2`, `4`, `8` or `16`. |
 | `vrr` | `0` | Variable refresh rate. |
+| `vsync` | `1` | Wait for the monitor's refresh: no tearing, frame rate at most the refresh rate. `0` off. |
 | `pad_follow_input` | `1` | Controller 1 is the pad used last. |
 | `pad_directinput` | `0` | SDL's DirectInput back end. |
 | `skip_intro` | `1` | `1` skips every movie, `intro` only the logos and title movie, `0` plays all. |

@@ -568,3 +568,18 @@ Each one, with the reason it exists:
   lines of output, so the box cut it off and players could not tell where the
   log was. The path now comes first: `The whole log is in
   %LOCALAPPDATA%\xboxrecomp\builds\<title id>\build.log`, then the last lines.
+
+- **0060-vsync-setting** (`src/d3d/d3d8_device.c`, `d3d8_xbox.h`,
+  `src/hle/hle_d3d8.c`, `hle_settings.h`, `hle_settings_menu.c`,
+  `src/config/recomp_config.c/.h`, `src/launcher/launcher.c`). New setting
+  `vsync` (`RECOMP_VSYNC`, default on), a live row in the F2 Display tab and
+  a launcher row. The game's device always presented with interval 0 (the
+  flip gate paces the game, not the present), and in fullscreen the D3D11
+  swap chain presents those with ALLOW_TEARING for variable refresh. A scene
+  set to 144 or unlocked runs at about the monitor's 144 Hz, so frames that
+  came sooner than the monitor's fastest refresh were shown mid-scan: tearing
+  even with G-SYNC on. With `vsync` on each present uses interval 1 (D3D11)
+  or FIFO (Vulkan, whose swap chain is remade on the switch), so a frame
+  waits for the refresh; with variable refresh only the frames faster than
+  the display wait. `xbox_D3D8SetVsync` is called only by the HLE device,
+  so `d3d8_replay` still never waits.
