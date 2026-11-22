@@ -569,7 +569,7 @@ Each one, with the reason it exists:
   log was. The path now comes first: `The whole log is in
   %LOCALAPPDATA%\xboxrecomp\builds\<title id>\build.log`, then the last lines.
 
-- **0061-build-screen-progress** (`src/launcher/launcher.c`,
+- **0062-build-screen-progress** (`src/launcher/launcher.c`,
   `tools/builder/src/main.rs`, `tools/recomp/translator.py`). The
   self-building release's build screen. A pad's B no longer cancels a build
   (it is "back" everywhere else and a cancelled build starts over); Escape,
