@@ -1,0 +1,50 @@
+diff --git a/src/d3d/d3d8_menu.cpp b/src/d3d/d3d8_menu.cpp
+index b8dc652..2b11d0a 100644
+--- a/src/d3d/d3d8_menu.cpp
++++ b/src/d3d/d3d8_menu.cpp
+@@ -514,7 +514,6 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
+         {
+             struct { int bit; const char *s; Rgba c; } tags[] = {
+                 { D3D8_MENU_TAG_EXPERIMENTAL, "Experimental", kExp },
+-                { D3D8_MENU_TAG_CHANGED, "Changed", kBrass },
+                 { D3D8_MENU_TAG_ENV, "Set by environment", kWarn },
+             };
+             bool any = false;
+diff --git a/src/d3d/d3d8_overlay.h b/src/d3d/d3d8_overlay.h
+index ed17e9c..bb73910 100644
+--- a/src/d3d/d3d8_overlay.h
++++ b/src/d3d/d3d8_overlay.h
+@@ -101,7 +101,7 @@ typedef struct {
+     char info_default[40];
+     char info_when[48];            /* set only when a restart is needed */
+     char info_options[160];
+-    char status[96];              /* e.g. "2 changes apply at the next start" */
++    char status[96];              /* footer note; empty unless set */
+     char warning[112];            /* e.g. the settings file could not be written */
+ } D3D8Menu;
+ 
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index 40a0634..a9721c7 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -620,7 +620,7 @@ static void publish(void)
+             snprintf(mr->value, sizeof mr->value, "%s", item_name(it, mr->index));
+             mr->tags = it->live == LIVE_NONE ? D3D8_MENU_TAG_RESTART : D3D8_MENU_TAG_NOW;
+             if (it->experimental) mr->tags |= D3D8_MENU_TAG_EXPERIMENTAL;
+-            if (mr->index != mr->def) mr->tags |= D3D8_MENU_TAG_CHANGED;
++            /* No "Changed" tag (Sorin): the ringed pip shows the default. */
+             if (env_set(it) && it->live != LIVE_TITLE) mr->tags |= D3D8_MENU_TAG_ENV;
+         }
+     }
+@@ -657,9 +657,8 @@ static void publish(void)
+                  "The renderer, where your settings are kept, and the keys "
+                  "the recomp adds. Useful when you report a problem.");
+     }
+-    if (g_restart_count)
+-        snprintf(m.status, sizeof m.status, "%d %s at the next start", g_restart_count,
+-                 g_restart_count == 1 ? "change applies" : "changes apply");
++    /* No count of changes waiting for a restart in the footer (Sorin): the
++     * description pane says so for each setting that needs one. */
+     if (g_save_failed)
+         snprintf(m.warning, sizeof m.warning,
+                  "Could not save the settings file: the last change lasts until you quit.");

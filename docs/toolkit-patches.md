@@ -643,3 +643,10 @@ Each one, with the reason it exists:
   1 it is 480 x it rows; 1, the old default, is native) and from
   `RECOMP_RES_SCALE`. Also `RECOMP_TITLE_DEFAULT_WIDESCREEN`: a title's
   widescreen default, which this game sets to on.
+
+- **0064-settings-menu-no-changed-tag** (`src/hle/hle_settings_menu.c`,
+  `src/d3d/d3d8_menu.cpp`, `d3d8_overlay.h`). Sorin's feedback on the F2
+  panel: a row no longer gets a "Changed" tag when its value is not the
+  default (the ringed pip still marks the default), and the footer no
+  longer counts the changes that wait for a restart; the description pane
+  (0061) already says when a setting needs one.
