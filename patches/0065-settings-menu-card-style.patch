@@ -1,5 +1,5 @@
 diff --git a/src/d3d/d3d8_menu.cpp b/src/d3d/d3d8_menu.cpp
-index 2b11d0a..fa23295 100644
+index 2b11d0a..2e5f2dd 100644
 --- a/src/d3d/d3d8_menu.cpp
 +++ b/src/d3d/d3d8_menu.cpp
 @@ -10,9 +10,12 @@
@@ -62,7 +62,7 @@ index 2b11d0a..fa23295 100644
  void triangle(float cx, float cy, float s, int dir, Rgba c)
  {
      /* dir -1 points left, 1 right */
-@@ -424,32 +414,31 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
+@@ -424,32 +414,33 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
          text(g.small, x1 - 26 * u - w, y0 + 26 * u, kMuted, m.subtitle);
      }
  
@@ -101,16 +101,18 @@ index 2b11d0a..fa23295 100644
 +    /* Body: rows left, description right; the buttons under the description. */
 +    const float foot_y0 = y1 - 66 * u;
 +    const float split = x0 + 610 * u;
-+    const Box list = { x0 + 20 * u, tab_y1 + 1, split - 18 * u, y1 - 18 * u };
-+    dl->AddLine(ImVec2(split, tab_y1 + 16 * u), ImVec2(split, list.y1), col(kLine), 1.0f * u);
++    /* The list starts a little under the tab line, so a scrolled card is cut
++     * off in the open, not against the line. */
++    const Box list = { x0 + 20 * u, tab_y1 + 12 * u, split - 18 * u, y1 - 18 * u };
++    dl->AddLine(ImVec2(split, list.y0), ImVec2(split, list.y1), col(kLine), 1.0f * u);
  
      /* Row heights, to scroll. */
 -    const float pad_top = 14 * u, gap = 5 * u, group_h = 30 * u, row_h = 54 * u, info_h = 34 * u;
-+    const float pad_top = 14 * u, gap = 6 * u, group_h = 40 * u, row_h = 48 * u, info_h = 40 * u;
++    const float pad_top = 2 * u, gap = 6 * u, group_h = 40 * u, row_h = 48 * u, info_h = 40 * u;
      float total = pad_top, sel_top = -1, sel_bot = -1;
      for (int i = 0; i < m.row_count; i++) {
          const D3D8MenuRow &r = m.rows[i];
-@@ -478,25 +467,21 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
+@@ -478,25 +469,21 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
      for (int i = 0; i < m.row_count; i++) {
          const D3D8MenuRow &r = m.rows[i];
          if (r.kind == D3D8_MENU_ROW_GROUP) {
@@ -144,7 +146,7 @@ index 2b11d0a..fa23295 100644
              dl->PopClipRect();
              y += info_h + gap;
              continue;
-@@ -504,55 +489,46 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
+@@ -504,55 +491,46 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
          Box b = { list.x0, y, list.x1, y + row_h };
          const bool sel = i == m.sel && m.button < 0;
          const bool visible = b.y1 > list.y0 && b.y0 < list.y1;
@@ -229,7 +231,7 @@ index 2b11d0a..fa23295 100644
  
          /* The pointer. */
          if (visible) {
-@@ -572,78 +548,40 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
+@@ -572,78 +550,40 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
          if (hover >= 0 && hover != m.sel)
              push_action(D3D8_MENU_ACT_HOVER, hover, 0);
      }
@@ -238,7 +240,7 @@ index 2b11d0a..fa23295 100644
      if (total > view_h + 1) {
          float bh = view_h * view_h / total, by = list.y0 + (view_h - bh) * (g_scroll / (total - view_h));
 -        dl->AddRectFilled(ImVec2(list.x1 + 6 * u, by), ImVec2(list.x1 + 9 * u, by + bh), col(kLine), 2 * u);
-+        dl->AddRectFilled(ImVec2(list.x1 + 7 * u, list.y0 + 4 * u), ImVec2(list.x1 + 12 * u, list.y1 - 4 * u), col(kRow), 2.5f * u);
++        dl->AddRectFilled(ImVec2(list.x1 + 7 * u, list.y0), ImVec2(list.x1 + 12 * u, list.y1), col(kRow), 2.5f * u);
 +        dl->AddRectFilled(ImVec2(list.x1 + 7 * u, by), ImVec2(list.x1 + 12 * u, by + bh), col(kScroll), 2.5f * u);
      }
  
