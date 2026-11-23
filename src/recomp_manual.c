@@ -2055,7 +2055,8 @@ void sub_000FD780(void)
 {
     if (g_sea_menu_depth > 0) {
         static int said = -2;
-        int rate = sea60_read_rate();
+        int setting = sea60_read_rate();
+        int rate = setting;
 
         if (g_sea_menu_map > 0 && rate != 30)
             rate = 60;                     /* the map scrolls a step a frame */
@@ -2063,7 +2064,7 @@ void sub_000FD780(void)
             said = rate;
             if (rate == 30 || rate == 60)
                 fprintf(stderr, "[SEA60] pause menu at sea: the vblank's 60 (sea_fps = %d%s)\n",
-                        rate, g_sea_menu_map > 0 ? ", world map" : "");
+                        setting < 0 ? 0 : setting, g_sea_menu_map > 0 ? ", world map" : "");
             else if (rate < 0)
                 fprintf(stderr, "[SEA60] pause menu at sea: unlocked (sea_fps = 0)\n");
             else
