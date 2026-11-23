@@ -593,3 +593,33 @@ Each one, with the reason it exists:
   effect." only for a setting that needs a restart. The "Takes effect" line
   in the pane is gone. Numbered 0061 because the VSync patch (PR #66) takes
   0060; it applies with or without 0060.
+
+- **0062-build-screen-progress** (`src/launcher/` launcher.c, launcher.h,
+  launcher_theme*.c/.h, launcher_win32.c, launcher_sdl.c, CMakeLists.txt;
+  `tools/builder/src/main.rs`, `tools/recomp/translator.py`,
+  `tools/release/make_release.py`). The self-building release's first-run
+  screens.
+  - **Cancelling.** Neither a pad's B nor Escape cancels a build any more
+    (both are the "back" a player presses without thinking, and a cancelled
+    build starts over). The CANCEL button (a click) and closing the window
+    still do.
+  - **Progress.** The bar used to sit at one figure through the whole
+    translation. tools.recomp prints its "[n/N] translated" lines when
+    `RECOMP_PROGRESS=1` (the builder sets it), the builder reads its stderr
+    as well as stdout, CMake's configure moves the bar a line at a time, and
+    the stage weights are a measured Pirates build (133 s: files 3.5 s,
+    translation 44 s, configure 24 s, compile 62 s).
+  - **Steps and time left.** The six steps are shown with each one's time,
+    with the time so far and an estimate of the time left (from how fast
+    the bar moved since the game's files were ready, eased so it does not
+    jump).
+  - **The sea look.** A recipe's `"look": "sea"` (release/pirates.json) puts
+    the disc, build and done screens in brass on dark sea blue, the F2
+    menu's colours: the game's name in a serif (Georgia; the desktop's serif
+    on Linux; macOS keeps its system face), a rope trim, a brass bar, the
+    steps as ports along a sea route, "Set sail" when it is built, and a
+    footer with the version and links (Show log, Open logs folder, and the
+    recipe's `"home_url"`). The settings tabs keep the toolkit's look. New
+    theme calls: theme_set_look, theme_set_serif, theme_fill(_vgrad),
+    theme_disc, theme_diamond, theme_hline, theme_hdash, theme_rope; and
+    lhost_open (ShellExecute, SDL_OpenURL).
