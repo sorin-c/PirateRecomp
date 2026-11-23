@@ -1401,6 +1401,7 @@ static void sea60_begin_frame(void)
 {
     int64_t now = pirates_host_us();
     int dt_us, gap, rate = sea60_read_rate(), on = rate != 30;
+    int was_on = g_sea60.active;
 
     if (rate != g_sea60.setting) {
         g_sea60.setting = rate;
@@ -1444,6 +1445,11 @@ static void sea60_begin_frame(void)
         g_sea60.acc_us = 0;
         if (!on) {
             /* Turned off while sailing: the game gets its 30 fps value back. */
+            /* And a console frame's time until the game writes its own at
+             * 0x91DBC: the AI before that (sub_00084E60 at 0x9194C) would
+             * step the dock word by the last fast frame's time / 10, 0. */
+            if (was_on)
+                S60_MEM32(0x004C72F8u) = SEA60_TICK_US / 1000;
             if (g_sea60.ts_valid && !gap && S60_MEM32(0x0040D4C4u) == g_sea60.ts_last)
                 S60_MEM32(0x0040D4C4u) = g_sea60.ts_x;
             g_sea60.cal_acc = 0;
@@ -1789,6 +1795,34 @@ void recomp_guest_hook(uint32_t va)
         g_sea60.in_loop = 0;
         if (g_sea60.gate_rate)               /* the sea's own rate ends with it */
             sea60_set_gate(0);
+        return;
+    }
+    /* A ship's dock/fade word (+0x456500, 0..100: the hull is not drawn
+     * from 50, and at 100 in port the ship is removed, 0x88CB7) moves by
+     * the frame time / 10 a frame, the remainder dropped: 3 a frame at 30,
+     * but 0 under 10 ms, so above about 100 fps a ship that reached a port
+     * circled among its buildings (only its flags showing) until a long
+     * frame came. Given the console's 33 ms on the tick, nothing between.
+     * sub_00084E60 (0x8513E) runs outside the sea loop's window, so these
+     * are served before the in_loop test. A ship stepped many times in one
+     * host frame -- the AI run 150 or 500 times over for a newly placed
+     * ship, with 0x400 set in 0x49C298 (from a town event at 0x1DD01, or at
+     * sea from sub_0007D4B7 and 0x89040) -- is given a console frame for
+     * every step, as at 30, whatever the tick, and wherever the frame time
+     * was last left; otherwise only the sea's own frames (one began in the
+     * last 250 ms) are given the tick's. */
+    if (va == 0x0008513Eu || va == 0x00088D3Au) {
+        uint32_t step;
+        if (!g_sea60.active)
+            return;
+        if (S60_MEM32(0x0049C298u) & 0x400)
+            step = 33u;
+        else if (g_sea60.last_us != 0 && pirates_host_us() - g_sea60.last_us <= 250000)
+            step = g_sea60.tick ? 33u : 0u;
+        else
+            return;
+        if (va == 0x0008513Eu) g_edx = step;   /* frame time read at 0x85131 */
+        else                   g_ecx = step;   /* the first step on arrival */
         return;
     }
     if (!g_sea60.active || !g_sea60.in_loop)
