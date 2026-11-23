@@ -5,6 +5,8 @@
   "exe": "pirates_recomp",
   "launcher": "pirates_launcher",
   "release_name": "PirateRecomp",
+  "look": "sea",
+  "home_url": "https://github.com/sorin-c/PirateRecomp",
   "xbe": "default.xbe",
   "images": [
     {

@@ -569,6 +569,22 @@ Each one, with the reason it exists:
   log was. The path now comes first: `The whole log is in
   %LOCALAPPDATA%\xboxrecomp\builds\<title id>\build.log`, then the last lines.
 
+- **0060-vsync-setting** (`src/d3d/d3d8_device.c`, `d3d8_xbox.h`,
+  `src/hle/hle_d3d8.c`, `hle_settings.h`, `hle_settings_menu.c`,
+  `src/config/recomp_config.c/.h`, `src/launcher/launcher.c/.h`). New setting
+  `vsync` (`RECOMP_VSYNC`, default on), a live row in the F2 Display tab and
+  a launcher row; the launcher window is one row taller (862 high) so the
+  ninth Video row's help no longer runs into the footer. The game's device always presented with interval 0 (the
+  flip gate paces the game, not the present), and in fullscreen the D3D11
+  swap chain presents those with ALLOW_TEARING for variable refresh. A scene
+  set to 144 or unlocked runs at about the monitor's 144 Hz, so frames that
+  came sooner than the monitor's fastest refresh were shown mid-scan: tearing
+  even with G-SYNC on. With `vsync` on each present uses interval 1 (D3D11)
+  or FIFO (Vulkan, whose swap chain is remade on the switch), so a frame
+  waits for the refresh; with variable refresh only the frames faster than
+  the display wait. `xbox_D3D8SetVsync` is called only by the HLE device,
+  so `d3d8_replay` still never waits.
+
 - **0061-settings-menu-restart-note** (`src/d3d/d3d8_menu.cpp`,
   `d3d8_overlay.h`, `src/hle/hle_settings_menu.c`). The F2 panel no longer
   shows "Applies now" / "After restart" under each row (Sorin's feedback on
@@ -577,6 +593,36 @@ Each one, with the reason it exists:
   effect." only for a setting that needs a restart. The "Takes effect" line
   in the pane is gone. Numbered 0061 because the VSync patch (PR #66) takes
   0060; it applies with or without 0060.
+
+- **0062-build-screen-progress** (`src/launcher/` launcher.c, launcher.h,
+  launcher_theme*.c/.h, launcher_win32.c, launcher_sdl.c, CMakeLists.txt;
+  `tools/builder/src/main.rs`, `tools/recomp/translator.py`,
+  `tools/release/make_release.py`). The self-building release's first-run
+  screens.
+  - **Cancelling.** Neither a pad's B nor Escape cancels a build any more
+    (both are the "back" a player presses without thinking, and a cancelled
+    build starts over). The CANCEL button (a click) and closing the window
+    still do.
+  - **Progress.** The bar used to sit at one figure through the whole
+    translation. tools.recomp prints its "[n/N] translated" lines when
+    `RECOMP_PROGRESS=1` (the builder sets it), the builder reads its stderr
+    as well as stdout, CMake's configure moves the bar a line at a time, and
+    the stage weights are a measured Pirates build (133 s: files 3.5 s,
+    translation 44 s, configure 24 s, compile 62 s).
+  - **Steps and time left.** The six steps are shown with each one's time,
+    with the time so far and an estimate of the time left (from how fast
+    the bar moved since the game's files were ready, eased so it does not
+    jump).
+  - **The sea look.** A recipe's `"look": "sea"` (release/pirates.json) puts
+    the disc, build and done screens in brass on dark sea blue, the F2
+    menu's colours: the game's name in a serif (Georgia; the desktop's serif
+    on Linux; macOS keeps its system face), a rope trim, a brass bar, the
+    steps as ports along a sea route, "Set sail" when it is built, and a
+    footer with the version and links (Show log, Open logs folder, and the
+    recipe's `"home_url"`). The settings tabs keep the toolkit's look. New
+    theme calls: theme_set_look, theme_set_serif, theme_fill(_vgrad),
+    theme_disc, theme_diamond, theme_hline, theme_hdash, theme_rope; and
+    lhost_open (ShellExecute, SDL_OpenURL).
 
 - **0063-resolution-by-height-native-default** (`src/config/recomp_config.c`,
   `.h`, `src/d3d/d3d8_display.c`, `.h`, `src/launcher/launcher.c`,

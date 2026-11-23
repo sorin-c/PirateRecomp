@@ -15,7 +15,7 @@ index 84fe92d..2e5c526 100644
      target_compile_options(xbox_config PRIVATE /W4 $<$<NOT:$<CONFIG:Debug>>:/O2>)
  else()
 diff --git a/src/config/recomp_config.c b/src/config/recomp_config.c
-index 7dc674a..2bf7628 100644
+index 28e3749..7a0b5a2 100644
 --- a/src/config/recomp_config.c
 +++ b/src/config/recomp_config.c
 @@ -422,6 +422,15 @@ int recomp_title_bumpers_as_triggers(void)
@@ -45,7 +45,7 @@ index 7dc674a..2bf7628 100644
      s->hor_plus          = RECOMP_HOR_PLUS_AUTO;
      s->hor_plus_register = RECOMP_REGISTER_AUTO;
      snprintf(s->widescreen_2d, sizeof s->widescreen_2d, "auto");
-@@ -480,6 +490,8 @@ const char *recomp_config_default(const char *key)
+@@ -481,6 +491,8 @@ const char *recomp_config_default(const char *key)
  #endif
      recomp_settings_defaults(&d);
      i = -1;
@@ -54,7 +54,7 @@ index 7dc674a..2bf7628 100644
      if (strcmp(key, "resolution_scale") == 0)  i = d.resolution_scale;
      else if (strcmp(key, "widescreen") == 0)   i = d.widescreen;
      else if (strcmp(key, "anisotropy") == 0)   i = d.anisotropy;
-@@ -525,6 +537,13 @@ int recomp_settings_read(const char *path, RecompSettings *s)
+@@ -527,6 +539,13 @@ int recomp_settings_read(const char *path, RecompSettings *s)
  
          if ((v = from_table("resolution_scale")) != NULL)
              s->resolution_scale = clamp_int(atoi(v), 1, 8);
@@ -68,7 +68,7 @@ index 7dc674a..2bf7628 100644
          if ((v = from_table("widescreen")) != NULL)
              s->widescreen = !off_word(v);
          /* A number is an override and is kept as one; "auto", like no
-@@ -616,7 +635,7 @@ static void make_parents(const char *path)
+@@ -620,7 +639,7 @@ static void make_parents(const char *path)
  int recomp_settings_write(const char *path, const RecompSettings *s)
  {
      RecompSettings d;
@@ -77,7 +77,7 @@ index 7dc674a..2bf7628 100644
      FILE *f;
  
      if (!path)
-@@ -625,6 +644,11 @@ int recomp_settings_write(const char *path, const RecompSettings *s)
+@@ -629,6 +648,11 @@ int recomp_settings_write(const char *path, const RecompSettings *s)
          recomp_settings_defaults(&d);
          s = &d;
      }
@@ -89,7 +89,7 @@ index 7dc674a..2bf7628 100644
  
  #if defined(RECOMP_TITLE_SETTINGS_HEADER)
      /* The values the title's keys have in the file now, so a save from the
-@@ -681,10 +705,12 @@ int recomp_settings_write(const char *path, const RecompSettings *s)
+@@ -685,10 +709,12 @@ int recomp_settings_write(const char *path, const RecompSettings *s)
          "#\n"
          "# Delete this file to go back to the defaults.\n"
          "\n"
@@ -106,7 +106,7 @@ index 7dc674a..2bf7628 100644
          "\n"
          "# Widescreen: play at 16:9 rather than 4:3. The game is told the\n"
          "# console is widescreen and its picture is shown at 16:9; what more\n"
-@@ -756,7 +782,7 @@ int recomp_settings_write(const char *path, const RecompSettings *s)
+@@ -768,7 +794,7 @@ int recomp_settings_write(const char *path, const RecompSettings *s)
          "# How far a movement pushes the stick, %d to %d; %d is the default, a\n"
          "# full push at %d mouse counts a second.  [RECOMP_MOUSE_SENSITIVITY]\n"
          "mouse_sensitivity = %d\n",
@@ -114,8 +114,8 @@ index 7dc674a..2bf7628 100644
 +        res, s->widescreen, hor_plus, reg,
          s->widescreen_2d[0] ? s->widescreen_2d : "auto",
          s->anisotropy, s->frame_cap[0] ? s->frame_cap : "adaptive", s->fps_overlay,
-         s->fullscreen, s->vrr, s->frame_interp < 1 ? 1 : s->frame_interp,
-@@ -1302,6 +1328,135 @@ void recomp_window_size(int guest_w, int guest_h, int widescreen, int *w, int *h
+         s->fullscreen, s->vrr, s->vsync, s->frame_interp < 1 ? 1 : s->frame_interp,
+@@ -1314,6 +1340,135 @@ void recomp_window_size(int guest_w, int guest_h, int widescreen, int *w, int *h
      if (h) *h = guest_h;
  }
  
@@ -251,7 +251,7 @@ index 7dc674a..2bf7628 100644
  void recomp_window_fit(int max_w, int max_h, int *w, int *h)
  {
      long long cw, ch;
-@@ -1325,7 +1480,7 @@ void recomp_window_fit(int max_w, int max_h, int *w, int *h)
+@@ -1337,7 +1492,7 @@ void recomp_window_fit(int max_w, int max_h, int *w, int *h)
  void recomp_widescreen_resolve(RecompWidescreen *out)
  {
      recomp_widescreen_resolve_from(
@@ -260,7 +260,7 @@ index 7dc674a..2bf7628 100644
          recomp_config_lookup("RECOMP_HOR_PLUS", "hor_plus"),
          recomp_config_lookup("RECOMP_HOR_PLUS_REG", "hor_plus_register"),
          g_wide_mode, g_wide_register, out);
-@@ -1339,5 +1494,5 @@ int recomp_widescreen_guest_flag_from(int on, RecompWideMode mode)
+@@ -1351,5 +1506,5 @@ int recomp_widescreen_guest_flag_from(int on, RecompWideMode mode)
  int recomp_widescreen_guest_flag(void)
  {
      return recomp_widescreen_guest_flag_from(
@@ -268,7 +268,7 @@ index 7dc674a..2bf7628 100644
 +        recomp_config_bool("RECOMP_WIDESCREEN", "widescreen", recomp_title_default_widescreen()), g_wide_mode);
  }
 diff --git a/src/config/recomp_config.h b/src/config/recomp_config.h
-index 2f8b7a6..4108758 100644
+index a4325f0..6205f9b 100644
 --- a/src/config/recomp_config.h
 +++ b/src/config/recomp_config.h
 @@ -225,6 +225,43 @@ void recomp_window_size(int guest_w, int guest_h, int widescreen, int *w, int *h
@@ -330,7 +330,7 @@ index 2f8b7a6..4108758 100644
      int  resolution_scale;      /* 1..8 */
      int  widescreen;            /* 0 or 1: the one switch; see RecompWidescreen */
      double hor_plus;            /* RECOMP_HOR_PLUS_AUTO, or an override: 0 leaves
-@@ -299,6 +344,10 @@ int  recomp_title_crop_left_wide(void);
+@@ -300,6 +345,10 @@ int  recomp_title_crop_left_wide(void);
  int  recomp_title_pixel_offset_scaled(void);
  /* Default pad bindings: LB and RB as the triggers, not Black and White. */
  int  recomp_title_bumpers_as_triggers(void);
@@ -435,10 +435,10 @@ index c1c8647..dc12532 100644
       * therefore anamorphic -- authored squeezed, to be stretched back out
       * by the display. Only true of a title with a 16:9 mode of its own,
 diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
-index 4a8112f..4ee50b4 100644
+index 322e3f0..40a0634 100644
 --- a/src/hle/hle_settings_menu.c
 +++ b/src/hle/hle_settings_menu.c
-@@ -122,10 +122,12 @@ static const Item ITEMS[] = {
+@@ -128,10 +128,12 @@ static const Item ITEMS[] = {
        { "0", "1" }, { "Off", "On" },
        "Shows more of the world to the sides instead of the original 4:3 picture. "
        "Menus keep their 4:3 frame." },
@@ -455,7 +455,7 @@ index 4a8112f..4ee50b4 100644
      { TAB_DISPLAY, "Picture", "Texture sharpness", "anisotropy", "RECOMP_ANISO", LIVE_NONE, 0, 0, 6,
        { "0", "1", "2", "4", "8", "16" }, { "Off", "1x", "2x", "4x", "8x", "16x" },
        "Anisotropic filtering: keeps the ground, decks and water sharp at a slant. "
-@@ -220,6 +222,25 @@ static int value_index(const Item *it, const char *v)
+@@ -226,6 +228,25 @@ static int value_index(const Item *it, const char *v)
      return -1;
  }
  
@@ -481,7 +481,7 @@ index 4a8112f..4ee50b4 100644
  static int default_index(const Item *it)
  {
      int i = value_index(it, recomp_config_default(it->key));
-@@ -255,6 +276,15 @@ static int current_index(const Item *it)
+@@ -264,6 +285,15 @@ static int current_index(const Item *it)
          break;
      default:
          v = recomp_config_lookup(it->env, it->key);
@@ -497,7 +497,7 @@ index 4a8112f..4ee50b4 100644
          if (!v || !*v)
              v = recomp_config_default(it->key);
          break;
-@@ -481,7 +511,7 @@ static const char *menu_text(void)
+@@ -491,7 +521,7 @@ static const char *menu_text(void)
              const Item *it = &ITEMS[r->item];
              int sel = i == g_sel && g_button < 0;
              ADD("%s%s %-*s < %-10s >%s\n", sel ? "\x01" : "", sel ? ">" : " ",
@@ -506,7 +506,7 @@ index 4a8112f..4ee50b4 100644
          }
      }
      ADD("%s%s Resume\n", g_button == 0 ? "\x01" : "", g_button == 0 ? ">" : " ");
-@@ -577,7 +607,7 @@ static void publish(void)
+@@ -587,7 +617,7 @@ static void publish(void)
              mr->index = current_index(it);
              mr->count = it->n;
              mr->def = default_index(it);
@@ -515,7 +515,7 @@ index 4a8112f..4ee50b4 100644
              mr->tags = it->live == LIVE_NONE ? D3D8_MENU_TAG_RESTART : D3D8_MENU_TAG_NOW;
              if (it->experimental) mr->tags |= D3D8_MENU_TAG_EXPERIMENTAL;
              if (mr->index != mr->def) mr->tags |= D3D8_MENU_TAG_CHANGED;
-@@ -602,12 +632,12 @@ static void publish(void)
+@@ -612,12 +642,12 @@ static void publish(void)
          int o = 0, k;
          snprintf(m.info_title, sizeof m.info_title, "%s", it->label);
          snprintf(m.info_text, sizeof m.info_text, "%s", it->help);
@@ -562,10 +562,10 @@ index 31484b5..1f54831 100644
      SDL_AddEventWatch(app_lifecycle, NULL);
  #endif
 diff --git a/src/launcher/launcher.c b/src/launcher/launcher.c
-index 4719eec..8859323 100644
+index e3f1776..be5d5a4 100644
 --- a/src/launcher/launcher.c
 +++ b/src/launcher/launcher.c
-@@ -111,6 +111,14 @@ static const char *const k_aniso_names[] = { "Off", "1x", "2x", "4x", "8x", "16x
+@@ -112,6 +112,14 @@ static const char *const k_aniso_names[] = { "Off", "1x", "2x", "4x", "8x", "16x
  static const int         k_aniso_values[] = { 0, 1, 2, 4, 8, 16 };
  static int            g_aniso_index;       /* into k_aniso_values */
  static int            g_widescreen;        /* the row; settings_save applies it */
@@ -580,7 +580,7 @@ index 4719eec..8859323 100644
  
  static Row  g_video_rows[12];
  static int  g_video_count;
-@@ -182,8 +190,8 @@ static void build_rows(void)
+@@ -183,8 +191,8 @@ static void build_rows(void)
      Row *r = g_video_rows;
  
      r->label = "Resolution";
@@ -591,7 +591,7 @@ index 4719eec..8859323 100644
      r++;
  
  #ifndef LAUNCHER_NO_WIDESCREEN
-@@ -368,10 +376,7 @@ static void row_value(const Row *r, char *out, size_t n)
+@@ -375,10 +383,7 @@ static void row_value(const Row *r, char *out, size_t n)
          snprintf(out, n, "%s", *r->ival ? "On" : "Off");
          break;
      case ROW_INT:
@@ -603,7 +603,7 @@ index 4719eec..8859323 100644
              snprintf(out, n, "Off");
          else if (r->ival == &g_settings.frame_interp)
              snprintf(out, n, "%dx (%d frames a second)", *r->ival, 60 * *r->ival);
-@@ -379,7 +384,13 @@ static void row_value(const Row *r, char *out, size_t n)
+@@ -386,7 +391,13 @@ static void row_value(const Row *r, char *out, size_t n)
              snprintf(out, n, "%dx", *r->ival);
          break;
      case ROW_CHOICE:
@@ -618,7 +618,7 @@ index 4719eec..8859323 100644
              snprintf(out, n, "%s", link_mode_label(*r->ival));
          else if (r->ival == &g_aniso_index)
              snprintf(out, n, "%s", k_aniso_names[*r->ival]);
-@@ -1079,6 +1090,23 @@ static void settings_load(void)
+@@ -1116,6 +1127,23 @@ static void settings_load(void)
              }
      }
  
@@ -642,7 +642,7 @@ index 4719eec..8859323 100644
      g_aniso_index = 0;
      {
          int i;
-@@ -1142,6 +1170,8 @@ static int settings_save(void)
+@@ -1179,6 +1207,8 @@ static int settings_save(void)
      snprintf(g_settings.frame_cap, sizeof g_settings.frame_cap, "%s",
               k_frame_caps[g_frame_cap_index]);
      g_settings.anisotropy = k_aniso_values[g_aniso_index];
@@ -652,7 +652,7 @@ index 4719eec..8859323 100644
          snprintf(g_settings.syslink, sizeof g_settings.syslink, "%s",
                   k_link_modes[g_link_mode]);
 diff --git a/src/launcher/launcher_sdl.c b/src/launcher/launcher_sdl.c
-index 59d3bf4..5b2fde0 100644
+index c9ea699..a26e9f0 100644
 --- a/src/launcher/launcher_sdl.c
 +++ b/src/launcher/launcher_sdl.c
 @@ -37,6 +37,7 @@
@@ -663,7 +663,7 @@ index 59d3bf4..5b2fde0 100644
  #include "launcher_theme.h"
  
  extern char **environ;
-@@ -518,6 +519,17 @@ int main(int argc, char **argv)
+@@ -542,6 +543,17 @@ int main(int argc, char **argv)
          fprintf(stderr, "launcher: SDL_Init: %s\n", SDL_GetError());
          return 1;
      }
