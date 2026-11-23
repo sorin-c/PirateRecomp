@@ -1767,6 +1767,24 @@ void recomp_guest_hook(uint32_t va)
             sea60_set_gate(0);
         return;
     }
+    /* A ship's dock/fade word (+0x456500, 0..100: the hull is not drawn
+     * from 50, and at 100 in port the ship is removed, 0x88CB7) moves by
+     * the frame time / 10 a frame, the remainder dropped: 3 a frame at 30,
+     * but 0 under 10 ms, so above about 100 fps a ship that reached a port
+     * circled among its buildings (only its flags showing) until a long
+     * frame came. Given the console's 33 ms on the tick, nothing between.
+     * sub_00084E60 (0x8513E) runs outside the sea loop's window, so these
+     * are served before the in_loop test, for the sea's frames only (a sea
+     * frame began in the last 250 ms). */
+    if (va == 0x0008513Eu || va == 0x00088D3Au) {
+        if (g_sea60.active && g_sea60.last_us != 0 &&
+            pirates_host_us() - g_sea60.last_us <= 250000) {
+            uint32_t step = g_sea60.tick ? 33u : 0u;
+            if (va == 0x0008513Eu) g_edx = step;   /* frame time read at 0x85131 */
+            else                   g_ecx = step;   /* the first step on arrival */
+        }
+        return;
+    }
     if (!g_sea60.active || !g_sea60.in_loop)
         return;
     skip = !g_sea60.tick;
