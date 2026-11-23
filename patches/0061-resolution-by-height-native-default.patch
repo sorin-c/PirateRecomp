@@ -559,7 +559,7 @@ index 31484b5..1f54831 100644
      SDL_AddEventWatch(app_lifecycle, NULL);
  #endif
 diff --git a/src/launcher/launcher.c b/src/launcher/launcher.c
-index 4719eec..99ff651 100644
+index 4719eec..8859323 100644
 --- a/src/launcher/launcher.c
 +++ b/src/launcher/launcher.c
 @@ -111,6 +111,14 @@ static const char *const k_aniso_names[] = { "Off", "1x", "2x", "4x", "8x", "16x
@@ -577,19 +577,18 @@ index 4719eec..99ff651 100644
  
  static Row  g_video_rows[12];
  static int  g_video_count;
-@@ -182,8 +190,9 @@ static void build_rows(void)
+@@ -182,8 +190,8 @@ static void build_rows(void)
      Row *r = g_video_rows;
  
      r->label = "Resolution";
 -    r->help  = "Render larger than the console, then filter back down. Costs little.";
 -    r->kind  = ROW_INT; r->lo = 1; r->hi = 8; r->ival = &g_settings.resolution_scale;
-+    r->help  = "How sharp the picture is. Native matches your display. Higher than"
-+               " your display is supersampled: smoother, and harder on the graphics card.";
++    r->help  = "Native matches your display. Higher is supersampled: sharper, and costs more.";
 +    r->kind  = ROW_CHOICE; r->choices = k_res_names; r->ival = &g_res_index;
      r++;
  
  #ifndef LAUNCHER_NO_WIDESCREEN
-@@ -368,10 +377,7 @@ static void row_value(const Row *r, char *out, size_t n)
+@@ -368,10 +376,7 @@ static void row_value(const Row *r, char *out, size_t n)
          snprintf(out, n, "%s", *r->ival ? "On" : "Off");
          break;
      case ROW_INT:
@@ -601,7 +600,7 @@ index 4719eec..99ff651 100644
              snprintf(out, n, "Off");
          else if (r->ival == &g_settings.frame_interp)
              snprintf(out, n, "%dx (%d frames a second)", *r->ival, 60 * *r->ival);
-@@ -379,7 +385,13 @@ static void row_value(const Row *r, char *out, size_t n)
+@@ -379,7 +384,13 @@ static void row_value(const Row *r, char *out, size_t n)
              snprintf(out, n, "%dx", *r->ival);
          break;
      case ROW_CHOICE:
@@ -616,7 +615,7 @@ index 4719eec..99ff651 100644
              snprintf(out, n, "%s", link_mode_label(*r->ival));
          else if (r->ival == &g_aniso_index)
              snprintf(out, n, "%s", k_aniso_names[*r->ival]);
-@@ -1079,6 +1091,23 @@ static void settings_load(void)
+@@ -1079,6 +1090,23 @@ static void settings_load(void)
              }
      }
  
@@ -640,7 +639,7 @@ index 4719eec..99ff651 100644
      g_aniso_index = 0;
      {
          int i;
-@@ -1142,6 +1171,8 @@ static int settings_save(void)
+@@ -1142,6 +1170,8 @@ static int settings_save(void)
      snprintf(g_settings.frame_cap, sizeof g_settings.frame_cap, "%s",
               k_frame_caps[g_frame_cap_index]);
      g_settings.anisotropy = k_aniso_values[g_aniso_index];
@@ -680,7 +679,7 @@ index 59d3bf4..5b2fde0 100644
      /* SDL gives a Mac window OpenGL unless told the program brings its own
       * graphics, and offscreen has no OpenGL here. Nothing draws with it:
 diff --git a/tests/config_smoke/test_config.c b/tests/config_smoke/test_config.c
-index 590f2ca..4afcaae 100644
+index 590f2ca..7fa4a5e 100644
 --- a/tests/config_smoke/test_config.c
 +++ b/tests/config_smoke/test_config.c
 @@ -314,6 +314,55 @@ static void test_window_size(void)
@@ -757,7 +756,19 @@ index 590f2ca..4afcaae 100644
          check_int(back.widescreen, 1, "round trip: widescreen");
          check(back.hor_plus > 0.74 && back.hor_plus < 0.76, "round trip: hor_plus");
          check_int(back.hor_plus_register, 60, "round trip: register");
-@@ -498,6 +547,7 @@ int main(void)
+@@ -458,7 +507,10 @@ int main(void)
+         check(recomp_settings_write(rt, &out) != 0, "default settings written");
+         check(file_has_line(rt, "# hor_plus = auto"), "auto hor_plus is a comment");
+         check(file_has_line(rt, "# hor_plus_register = auto"), "auto register is a comment");
+-        check(file_has_line(rt, "widescreen = 0"), "widescreen is off by default");
++        /* Off unless the title asks for it (RECOMP_TITLE_DEFAULT_WIDESCREEN). */
++        check(file_has_line(rt, recomp_title_default_widescreen() ? "widescreen = 1"
++                                                                  : "widescreen = 0"),
++              "widescreen is the title's default");
+         check(recomp_settings_read(rt, &back) != 0, "default settings read back");
+         check_near(back.hor_plus, RECOMP_HOR_PLUS_AUTO, "round trip: auto hor_plus");
+         check_int(back.hor_plus_register, RECOMP_REGISTER_AUTO, "round trip: auto register");
+@@ -498,6 +550,7 @@ int main(void)
      test_guest_flag();
      test_older_files();
      test_window_size();
