@@ -1758,6 +1758,30 @@ void recomp_guest_hook(uint32_t va)
     if (btl_guest_hook(va))                 /* the battle's */
         return;
 
+    /* The sea's parchment map (BLACK at sea; sub_00091170 at 0x91A3B): the
+     * game centres it on the ship's whole map cell (0x4C70EC/E8, the
+     * position / 4,000,000) times 2000, while the camera follows the
+     * position / 2000. So the map stood still and then jumped a cell, about
+     * 1% of the screen, twice a second when sailing fast, at any frame rate;
+     * the smooth sea under it at a high one made it plain. It is given the
+     * position / 2000, the camera's own units, from the same source the
+     * cell was taken from (0x85A38: bit 0x80 of 0x49C298 follows 0x49D040/60,
+     * else our ship). At the call to sub_00059D40 the x is in eax and the y
+     * on top of the stack. sea_map_snap = 1 (RECOMP_PIRATES_SEA_MAP_SNAP)
+     * keeps the console's whole cells. */
+    if (va == 0x00091A65u) {
+        static int snap = -1;
+        int follow;
+        if (snap < 0)
+            snap = recomp_config_bool("RECOMP_PIRATES_SEA_MAP_SNAP", "sea_map_snap", 0);
+        if (!snap) {
+            follow = (S60_MEM32(0x0049C298u) & 0x80) != 0;
+            g_eax = (uint32_t)(S60_MEM32(follow ? 0x0049D040u : 0x004564BCu) / 2000);
+            S60_MEM32(g_esp) = S60_MEM32(follow ? 0x0049D060u : 0x004564C0u) / 2000;
+        }
+        return;
+    }
+
     /* The sea loop's frame runs from the tick read at 0x9190F past its
      * frame wait to 0x9267B; it leaves through 0x92681 (both of its exits).
      * Hooks act only in between, with sea_60 on. */

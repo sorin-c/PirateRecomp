@@ -404,6 +404,10 @@
   {
    "address": "0x000E11B0",
    "note": "main menu: a row's y, rows 34 apart (30 with MINIGAMES)"
+  },
+  {
+   "address": "0x00091A65",
+   "note": "sea map: the parchment map centred on the position / 2000, not the whole map cell x 2000"
   }
  ]
 }
