@@ -13,7 +13,7 @@ index c88d077..135ba57 100644
          target_link_libraries(${TARGET} PRIVATE SDL3::SDL3
              "-framework CoreText" "-framework CoreGraphics"
 diff --git a/src/launcher/launcher.c b/src/launcher/launcher.c
-index 2111451..a94ead7 100644
+index 2111451..c735d39 100644
 --- a/src/launcher/launcher.c
 +++ b/src/launcher/launcher.c
 @@ -16,6 +16,7 @@
@@ -316,7 +316,7 @@ index 2111451..a94ead7 100644
              done_ok();
          return;
      }
-@@ -2019,13 +2177,304 @@ void launcher_picked(const char *path)
+@@ -2019,13 +2177,305 @@ void launcher_picked(const char *path)
      release_start_build();
  }
  
@@ -524,6 +524,7 @@ index 2111451..a94ead7 100644
 +                   THEME_CENTRE);
 +    }
 +
++    /* hit_play's rectangle, which setup_click tests for a cancel. */
 +    b.w = 150; b.h = 42; b.x = g_cw - 60 - b.w; b.y = g_ch - 74;
 +    sea_button(b, g_build_cancelled ? "STOPPING" : "CANCEL", 0);
 +}
@@ -636,21 +637,33 @@ index 1631fdd..334d367 100644
  int      lhost_thread(void (*fn)(void));
  /* A flag one thread raises for another to see, with what was written
 diff --git a/src/launcher/launcher_sdl.c b/src/launcher/launcher_sdl.c
-index 59d3bf4..3ef55b5 100644
+index 59d3bf4..b9cd5c5 100644
 --- a/src/launcher/launcher_sdl.c
 +++ b/src/launcher/launcher_sdl.c
-@@ -153,6 +153,17 @@ int lhost_launch(const char *exe, const char *dir)
+@@ -153,6 +153,29 @@ int lhost_launch(const char *exe, const char *dir)
      return 1;
  }
  
 +int lhost_open(const char *target)
 +{
 +    char url[4096];
++    size_t n = 0;
++    const unsigned char *p;
 +
-+    /* SDL opens web addresses; a path goes as a file:// one. */
++    /* SDL opens web addresses; a path goes as a file:// one, with every
++     * byte that is not unreserved (or a slash) percent-encoded, so a space
++     * or a '#' in the folder's name does not end the path early. */
 +    if (strstr(target, "://"))
 +        return SDL_OpenURL(target);
-+    snprintf(url, sizeof url, "file://%s", target);
++    n = (size_t)snprintf(url, sizeof url, "file://");
++    for (p = (const unsigned char *)target; *p && n + 4 < sizeof url; p++) {
++        if ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') ||
++            (*p >= '0' && *p <= '9') || strchr("-._~/", *p))
++            url[n++] = (char)*p;
++        else
++            n += (size_t)snprintf(url + n, sizeof url - n, "%%%02X", *p);
++    }
++    url[n] = '\0';
 +    return SDL_OpenURL(url);
 +}
 +
