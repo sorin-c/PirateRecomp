@@ -1983,36 +1983,71 @@ void sub_000CBEE0(void) { if (!btl_off_tick_bit(4u, 0x20u)) sub_000CBEE0_gen(); 
  *
  * Start at sea opens the pause menu (status, fleet, ship, log, the world
  * map and its "Select City"): the sea loop (sub_00091170) calls the tab
- * dispatcher sub_00131170 (from 0x923E2, 0x92581 and, by way of
- * sub_001313F0, 0x92562) and is blocked until it returns. Each tab runs its
- * own loop, and each of its frames is drawn by sub_000FD780, the renderer
- * the sea uses too, with the world switched off (0x40EA78 bit 0x1000: the
- * int_pause_background.dds backdrop and the menu, nothing simulated). No
- * frame of it waits on the game's clock, so the flip gate's one Swap a
- * vblank held it to 60 whatever sea_fps said. The world map's pulsing
- * cursor runs on the clock (sub_0005BCC0 reads the tick), not on frames.
+ * dispatcher sub_00131170 (returning to 0x923FD or 0x92581) or sub_001313F0,
+ * which calls it (returning to 0x92562), and is blocked until it returns.
+ * Each tab runs its own loop, and each of its frames is drawn by
+ * sub_000FD780, the renderer the sea uses too, with the world switched off
+ * (0x40EA78 bit 0x1000: the int_pause_background.dds backdrop and the menu,
+ * nothing simulated). No frame of it waits on the game's clock, so the flip
+ * gate's one Swap a vblank held it to 60 whatever sea_fps said.
  *
  * So while the menu opened from the sea runs, every frame renews the
  * gate's title rate with the sailing rate (toolkit patch 0044), as the sea
  * frames do: 90..240 by the host clock, unlocked with no wait. At 30 and
- * 60 nothing changes (the vblank, 60, as before). Opened anywhere else (a
- * town) the menu is left alone. Once it closes the sea's next frame sets
- * its own rate, and the gate drops a rate nobody renews after 100 ms. */
-static int g_sea_menu_depth;   /* sub_00131170 calls running, opened at sea */
+ * 60 nothing changes (the vblank, 60, as before). Once it closes the sea's
+ * next frame sets its own rate, and the gate drops a rate nobody renews
+ * after 100 ms.
+ *
+ * Only the menu called from the sea loop itself, by those return
+ * addresses: towns, ship battles and the town sneak run inside the sea's
+ * frame too (sub_00085980 -> the town menu sub_00021D70, sub_000C3950 ->
+ * sub_000C72F0), and their pause menus keep the vblank's 60. A tab switch
+ * inside the menu calls sub_00131170 again and stays counted.
+ *
+ * The world map tab (sub_0005D8C0) stays at 60: the stick scrolls the map a
+ * fixed step a frame, so at 144 one push went more than twice as far. Its
+ * cursor's pulse runs on the clock (sub_0005BCC0 reads the tick). */
+static int g_sea_menu_depth;   /* menu calls running that were opened from the sea loop */
+static int g_sea_menu_map;     /* the world map tab is running inside it */
+
+static uint32_t pirates_return_address(void)
+{
+    return *(volatile uint32_t *)((uintptr_t)g_esp + g_xbox_mem_offset);
+}
 
 extern void sub_00131170_gen(void);
 void sub_00131170(void)
 {
-    /* Inside the sea loop's frame (g_sea60.in_loop, 0x9190F .. 0x92681),
-     * or a tab switch inside a menu opened there (sub_001313F0 calls it
-     * again). */
-    int at_sea = g_sea60.in_loop || g_sea_menu_depth > 0;
+    uint32_t ra = pirates_return_address();
+    int at_sea = g_sea_menu_depth > 0 ||
+                 (g_sea60.in_loop && (ra == 0x000923FDu || ra == 0x00092581u));
 
     if (at_sea)
         g_sea_menu_depth++;
     sub_00131170_gen();
     if (at_sea)
         g_sea_menu_depth--;
+}
+
+extern void sub_001313F0_gen(void);
+void sub_001313F0(void)
+{
+    int at_sea = g_sea60.in_loop && g_sea_menu_depth == 0 &&
+                 pirates_return_address() == 0x00092562u;
+
+    if (at_sea)
+        g_sea_menu_depth++;
+    sub_001313F0_gen();
+    if (at_sea)
+        g_sea_menu_depth--;
+}
+
+extern void sub_0005D8C0_gen(void);
+void sub_0005D8C0(void)
+{
+    g_sea_menu_map++;
+    sub_0005D8C0_gen();
+    g_sea_menu_map--;
 }
 
 extern void sub_000FD780_gen(void);
@@ -2022,10 +2057,13 @@ void sub_000FD780(void)
         static int said = -2;
         int rate = sea60_read_rate();
 
+        if (g_sea_menu_map > 0 && rate != 30)
+            rate = 60;                     /* the map scrolls a step a frame */
         if (rate != said) {
             said = rate;
             if (rate == 30 || rate == 60)
-                fprintf(stderr, "[SEA60] pause menu at sea: the vblank's 60 (sea_fps = %d)\n", rate);
+                fprintf(stderr, "[SEA60] pause menu at sea: the vblank's 60 (sea_fps = %d%s)\n",
+                        rate, g_sea_menu_map > 0 ? ", world map" : "");
             else if (rate < 0)
                 fprintf(stderr, "[SEA60] pause menu at sea: unlocked (sea_fps = 0)\n");
             else
