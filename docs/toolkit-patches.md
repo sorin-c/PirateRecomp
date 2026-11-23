@@ -578,7 +578,7 @@ Each one, with the reason it exists:
   in the pane is gone. Numbered 0061 because the VSync patch (PR #66) takes
   0060; it applies with or without 0060.
 
-- **0062-resolution-by-height-native-default** (`src/config/recomp_config.c`,
+- **0063-resolution-by-height-native-default** (`src/config/recomp_config.c`,
   `.h`, `src/d3d/d3d8_display.c`, `.h`, `src/launcher/launcher.c`,
   `launcher_sdl.c`, `src/hle/hle_settings_menu.c`, `src/host/host_sdl.c`,
   the config smoke test). The resolution was a whole multiple of the
