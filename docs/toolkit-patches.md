@@ -623,3 +623,23 @@ Each one, with the reason it exists:
     theme calls: theme_set_look, theme_set_serif, theme_fill(_vgrad),
     theme_disc, theme_diamond, theme_hline, theme_hdash, theme_rope; and
     lhost_open (ShellExecute, SDL_OpenURL).
+
+- **0063-resolution-by-height-native-default** (`src/config/recomp_config.c`,
+  `.h`, `src/d3d/d3d8_display.c`, `.h`, `src/launcher/launcher.c`,
+  `launcher_sdl.c`, `src/hle/hle_settings_menu.c`, `src/host/host_sdl.c`,
+  the config smoke test). The resolution was a whole multiple of the
+  console's 640x480, so the launcher offered 1920x1440 and 2560x1920
+  where a player looks for 1920x1080 (Sorin, 22 Nov). New setting
+  `resolution` (`RECOMP_RESOLUTION`): the picture's height in rows, or
+  `native`, the default, the tallest picture of its shape the primary
+  display holds (`EnumDisplaySettingsW` on Windows, SDL's desktop mode
+  elsewhere). The scene is rendered that tall and as wide as the guest's
+  frame is at that height, so the scale need not be whole (1080 is 2.25x);
+  every path from guest pixels to scene pixels was already a ratio, and the
+  resolve already filtered any ratio. The launcher and the F2 menu offer
+  native, 480 (console), 720, 1080, 1440, 2160, 2880 and 4320, named at the
+  shape the picture will have (1920x1080 in widescreen, 1440x1080 at 4:3).
+  `resolution_scale` is still read from a file without `resolution` (above
+  1 it is 480 x it rows; 1, the old default, is native) and from
+  `RECOMP_RES_SCALE`. Also `RECOMP_TITLE_DEFAULT_WIDESCREEN`: a title's
+  widescreen default, which this game sets to on.

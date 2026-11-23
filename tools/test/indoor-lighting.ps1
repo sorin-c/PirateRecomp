@@ -27,8 +27,10 @@ if (-not (Test-Path (Join-Path $Reference "tavern.png")) -or -not (Test-Path (Jo
     Write-Host "FAIL: no xemu references (tavern.png, nation.png) in $Reference"
     exit 1
 }
-# 4:3, as the references are; any VAR=value given comes after and wins.
-$Env = @("RECOMP_WIDESCREEN=0") + @($Env | Where-Object { $_ })
+# 4:3 at the console's 640x480, as the references are (and as every run was
+# before the resolution defaulted to the display's); any VAR=value given
+# comes after and wins.
+$Env = @("RECOMP_WIDESCREEN=0", "RECOMP_RESOLUTION=480") + @($Env | Where-Object { $_ })
 & $d start -Tag $Tag @Env | Out-Null
 try {
     & $d wait 37 | Out-Null
