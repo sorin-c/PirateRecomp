@@ -648,5 +648,7 @@ Each one, with the reason it exists:
   `src/d3d/d3d8_menu.cpp`, `d3d8_overlay.h`). Sorin's feedback on the F2
   panel: a row no longer gets a "Changed" tag when its value is not the
   default (the ringed pip still marks the default), and the footer no
-  longer counts the changes that wait for a restart; the description pane
-  (0061) already says when a setting needs one.
+  longer counts the changes that wait for a restart (nor does the text
+  fallback panel); the description pane (0061) already says when a
+  setting needs one. The unused `D3D8_MENU_TAG_CHANGED` and the restart
+  counter are removed.
