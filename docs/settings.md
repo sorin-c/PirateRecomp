@@ -67,9 +67,12 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   clock, so it needs a monitor that refreshes at least that fast, or
   variable refresh (`vrr`), to show every frame: the picture is presented in
   step with the monitor, so on a 144 Hz monitor 240 and unlocked show about
-  140 frames a second. Duels, towns, the
-  town sneak, the map and the menus keep their own pacing, and the frame
-  cap (`frame_cap`) still applies to them. While sailing faster than 30,
+  140 frames a second. The pause menu opened while sailing (Start: fleet,
+  ship, log) runs at the same rate when it is above 60, and at 60
+  otherwise; its world map stays at 60, since the stick scrolls the map a
+  fixed step a frame. Duels, towns, the town sneak, and the menus elsewhere
+  keep their own pacing, and the frame cap (`frame_cap`) still applies to
+  them. While sailing faster than 30,
   frame interpolation is not used at sea (battles and duels still use it
   when `frame_interp` is on). `sea_60 = 1`, the setting before this one,
   still sails at 60 while `sea_fps` is 30. Experimental: measured against
