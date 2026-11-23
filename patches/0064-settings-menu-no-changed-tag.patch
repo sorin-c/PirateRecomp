@@ -1,0 +1,84 @@
+diff --git a/src/d3d/d3d8_menu.cpp b/src/d3d/d3d8_menu.cpp
+index b8dc652..2b11d0a 100644
+--- a/src/d3d/d3d8_menu.cpp
++++ b/src/d3d/d3d8_menu.cpp
+@@ -514,7 +514,6 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
+         {
+             struct { int bit; const char *s; Rgba c; } tags[] = {
+                 { D3D8_MENU_TAG_EXPERIMENTAL, "Experimental", kExp },
+-                { D3D8_MENU_TAG_CHANGED, "Changed", kBrass },
+                 { D3D8_MENU_TAG_ENV, "Set by environment", kWarn },
+             };
+             bool any = false;
+diff --git a/src/d3d/d3d8_overlay.h b/src/d3d/d3d8_overlay.h
+index ed17e9c..e3d769f 100644
+--- a/src/d3d/d3d8_overlay.h
++++ b/src/d3d/d3d8_overlay.h
+@@ -74,7 +74,6 @@ enum {
+     D3D8_MENU_TAG_NOW          = 1,   /* applies at once */
+     D3D8_MENU_TAG_RESTART      = 2,   /* applies at the next start */
+     D3D8_MENU_TAG_EXPERIMENTAL = 4,
+-    D3D8_MENU_TAG_CHANGED      = 8,   /* not the default */
+     D3D8_MENU_TAG_ENV          = 16   /* an environment variable overrides it */
+ };
+ 
+@@ -101,7 +100,7 @@ typedef struct {
+     char info_default[40];
+     char info_when[48];            /* set only when a restart is needed */
+     char info_options[160];
+-    char status[96];              /* e.g. "2 changes apply at the next start" */
++    char status[96];              /* footer note; empty unless set */
+     char warning[112];            /* e.g. the settings file could not be written */
+ } D3D8Menu;
+ 
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index 40a0634..95c1297 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -187,7 +187,6 @@ static int  g_tab;
+ static int  g_sel = -1;                  /* index into g_rows of the selected setting */
+ static int  g_button = -1;               /* the footer button with the focus, or -1 */
+ static unsigned g_serial;
+-static int  g_restart_count;
+ static int  g_save_failed;               /* the last change missed the settings file */
+ static int  g_swallow;                   /* Start+Back still down after a toggle */
+ static unsigned g_prev_buttons;
+@@ -394,7 +393,7 @@ static void set_index(const Item *it, int i)
+     case LIVE_VSYNC:      hle_set_vsync(i); break;
+     case LIVE_VIBRATION:  recomp_bindings_set_vibration(atoi(it->vals[i])); break;
+     case LIVE_TITLE:      break;
+-    default:              g_restart_count++; break;
++    default:              break;   /* applies at the next start */
+     }
+     fprintf(stderr, "[MENU] %s = %s%s%s\n", it->key, it->vals[i],
+             it->live == LIVE_NONE ? " (at the next start)" : "",
+@@ -526,7 +525,7 @@ static const char *menu_text(void)
+     }
+     ADD("%s%s Resume\n", g_button == 0 ? "\x01" : "", g_button == 0 ? ">" : " ");
+     ADD("%s%s Quit game\n\n", g_button == 1 ? "\x01" : "", g_button == 1 ? ">" : " ");
+-    ADD("  * at the next start%s\n", g_restart_count ? ": restart to apply" : "");
++    ADD("  * at the next start\n");
+     if (g_save_failed)
+         ADD("  ! Could not save the settings file: this change lasts until you quit\n");
+     ADD("  Up/Down choose   Left/Right/A change   Y default   B/F2 close");
+@@ -620,7 +619,7 @@ static void publish(void)
+             snprintf(mr->value, sizeof mr->value, "%s", item_name(it, mr->index));
+             mr->tags = it->live == LIVE_NONE ? D3D8_MENU_TAG_RESTART : D3D8_MENU_TAG_NOW;
+             if (it->experimental) mr->tags |= D3D8_MENU_TAG_EXPERIMENTAL;
+-            if (mr->index != mr->def) mr->tags |= D3D8_MENU_TAG_CHANGED;
++            /* No "Changed" tag (Sorin): the ringed pip shows the default. */
+             if (env_set(it) && it->live != LIVE_TITLE) mr->tags |= D3D8_MENU_TAG_ENV;
+         }
+     }
+@@ -657,9 +656,8 @@ static void publish(void)
+                  "The renderer, where your settings are kept, and the keys "
+                  "the recomp adds. Useful when you report a problem.");
+     }
+-    if (g_restart_count)
+-        snprintf(m.status, sizeof m.status, "%d %s at the next start", g_restart_count,
+-                 g_restart_count == 1 ? "change applies" : "changes apply");
++    /* No count of changes waiting for a restart in the footer (Sorin): the
++     * description pane says so for each setting that needs one. */
+     if (g_save_failed)
+         snprintf(m.warning, sizeof m.warning,
+                  "Could not save the settings file: the last change lasts until you quit.");

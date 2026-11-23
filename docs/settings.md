@@ -153,6 +153,7 @@ defaults. Every line names the environment variable that overrides it, so a
 | `pad_directinput` | `0` | SDL's DirectInput back end. |
 | `skip_intro` | `1` | `1` skips every movie, `intro` only the logos and title movie, `0` plays all. |
 | `skip_legal` | `1` | `1` skips the legal screen at boot (the copyright lines, the ESRB notice, the Bink and Miles logos), `0` shows it as the disc does. |
+| `sea_map_snap` | `0` | `1` keeps the console's sea map (BLACK at sea) moving in whole map cells, a jump about twice a second when sailing fast; `0` scrolls it smoothly with the ship. |
 | `mute` | `0` | No sound. |
 | `minigames` | `0` | Shows the developers' MINIGAMES (*DEBUG!*) menu entry. |
 | `priority` | `1` | Windows: runs the game above normal priority, so other work on the PC (a build, a download) does not slow it; test runs stay at normal (only `RECOMP_PRIORITY=1` raises one). `0` for normal. |
