@@ -652,3 +652,14 @@ Each one, with the reason it exists:
   fallback panel); the description pane (0061) already says when a
   setting needs one. The unused `D3D8_MENU_TAG_CHANGED` and the restart
   counter are removed.
+
+- **0065-settings-menu-card-style** (`src/d3d/d3d8_menu.cpp`,
+  `d3d8_overlay.h`, `src/hle/hle_settings_menu.c`). Sorin asked for the F2
+  panel to look like the menus other recomps use. Filled tabs (the current
+  one in brass, no LB/RB pills); a card per setting with the value between
+  arrows at the right and a small "default" under it when it is the
+  default (no pips); section headings in brass at the label's size; the
+  description pane shows only the setting's text, the restart note (0061)
+  and any warning; the footer's pad hints are gone and the buttons are
+  Continue and Quit game at the bottom right. Same colours, same fonts,
+  same input; Resume is renamed Continue in the text fallback too.

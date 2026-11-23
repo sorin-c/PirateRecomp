@@ -1,0 +1,374 @@
+diff --git a/src/d3d/d3d8_menu.cpp b/src/d3d/d3d8_menu.cpp
+index 2b11d0a..2e5f2dd 100644
+--- a/src/d3d/d3d8_menu.cpp
++++ b/src/d3d/d3d8_menu.cpp
+@@ -10,9 +10,12 @@
+  * the pointer is hit-tested here against the same rectangles that were
+  * drawn and reported back as actions.
+  *
+- * The look: a dark sea-blue panel with brass, tabs along the top, the rows
+- * on the left, and the selected row's description on the right, which is
+- * also where a setting that needs a restart says so.
++ * The look (0065, after the menus other recomps use): a dark sea-blue
++ * panel, filled tabs with the current one in brass, a card per setting with
++ * its value between arrows on the right and "default" under it, section
++ * headings in brass, the selected setting's description on the right
++ * (which is also where a setting that needs a restart says so), and
++ * Continue / Quit game at the bottom right.
+  *
+  * Drawing goes through rhi.h like the rest of the renderer, so it is the
+  * same on D3D11 and Vulkan: one dynamic vertex and index buffer, the font
+@@ -98,19 +101,17 @@ const Rgba kLine      = { 0.77f, 0.63f, 0.36f, 0.35f };
+ const Rgba kRow       = { 1.0f, 1.0f, 1.0f, 0.045f };
+ const Rgba kRowSel    = { 0.84f, 0.67f, 0.33f, 0.16f };
+ const Rgba kBrass     = hex(0xD6AA54);
+-const Rgba kBrassDim  = hex(0x9C7C43);
+ const Rgba kText      = hex(0xEBE4D4);
+-const Rgba kBodyText  = hex(0xCFD6DC);
+ const Rgba kMuted     = hex(0x9AA6B2);
+ const Rgba kRestart   = hex(0xE0A66A);
+ const Rgba kExp       = hex(0xC79BE0);
+ const Rgba kWarn      = hex(0xE5736A);
+-const Rgba kPip       = { 1.0f, 1.0f, 1.0f, 0.18f };
+-const Rgba kPill      = { 1.0f, 1.0f, 1.0f, 0.12f };
+-const Rgba kButton    = { 1.0f, 1.0f, 1.0f, 0.08f };
+-const Rgba kPadA      = hex(0x3F8F3A);
+-const Rgba kPadB      = hex(0xB5382F);
+-const Rgba kPadY      = hex(0xC8A02A);
++const Rgba kRowEdge   = { 1.0f, 1.0f, 1.0f, 0.07f };
++const Rgba kTab       = { 1.0f, 1.0f, 1.0f, 0.07f };
++const Rgba kTabOn     = hex(0xC99A45);
++const Rgba kTabOnText = hex(0x1A1206);
++const Rgba kScroll    = { 0.84f, 0.67f, 0.33f, 0.55f };
++const Rgba kButton    = { 1.0f, 1.0f, 1.0f, 0.09f };
+ 
+ /* The panel in layout units: 1280x720 is the design; u is pixels per unit. */
+ const float PANEL_W = 980.0f, PANEL_H = 580.0f;
+@@ -363,17 +364,6 @@ float text_wrapped(ImFont *f, float x, float y, float w, Rgba c, const char *s)
+     return f->CalcTextSizeA(f->FontSize, 1e9f, w, s).y;
+ }
+ 
+-/* A controller-button pill ("A", "LB"). Returns its width. */
+-float pill(float x, float cy, const char *label, Rgba bg, Rgba fg)
+-{
+-    float tw = text_w(g.small_bold, label);
+-    float w = tw + 12.0f * U, h = 22.0f * U;
+-    if (w < 30.0f * U) w = 30.0f * U;
+-    dl->AddRectFilled(ImVec2(x, cy - h * 0.5f), ImVec2(x + w, cy + h * 0.5f), col(bg), h * 0.5f);
+-    text(g.small_bold, x + (w - tw) * 0.5f, cy - g.small_bold->FontSize * 0.5f, fg, label);
+-    return w;
+-}
+-
+ void triangle(float cx, float cy, float s, int dir, Rgba c)
+ {
+     /* dir -1 points left, 1 right */
+@@ -424,32 +414,33 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
+         text(g.small, x1 - 26 * u - w, y0 + 26 * u, kMuted, m.subtitle);
+     }
+ 
+-    /* Tabs. */
+-    const float tab_y0 = y0 + 58 * u, tab_y1 = y0 + 98 * u, tab_cy = (tab_y0 + tab_y1) * 0.5f;
++    /* Tabs: filled tabs, the current one in brass. The pad's LB/RB still
++     * step through them; the pointer clicks them. */
++    const float tab_y0 = y0 + 60 * u, tab_y1 = y0 + 98 * u, tab_cy = (tab_y0 + tab_y1) * 0.5f;
+     float tx = x0 + 22 * u;
+-    tx += pill(tx, tab_cy, "LB", kPill, kText) + 6 * u;
+     for (int i = 0; i < m.tab_count; i++) {
+-        float w = text_w(g.body_bold, m.tabs[i]) + 32 * u;
++        float w = text_w(g.body_bold, m.tabs[i]) + 44 * u;
+         Box b = { tx, tab_y0, tx + w, tab_y1 };
+         bool on = i == m.tab, hot = ptr_in && inside(b, mx, my);
+-        text(g.body_bold, tx + 16 * u, tab_cy - g.body_bold->FontSize * 0.55f, on ? kBrass : (hot ? kText : kMuted), m.tabs[i]);
+-        if (on)
+-            dl->AddRectFilled(ImVec2(tx, tab_y1 - 3 * u), ImVec2(tx + w, tab_y1), col(kBrass));
++        dl->AddRectFilled(ImVec2(b.x0, b.y0), ImVec2(b.x1, b.y1),
++                          col(on ? kTabOn : kTab, hot && !on ? 1.8f : 1.0f), 5 * u, ImDrawFlags_RoundCornersTop);
++        text(g.body_bold, tx + 22 * u, tab_cy - g.body_bold->FontSize * 0.55f, on ? kTabOnText : kText, m.tabs[i]);
+         if (clicked && inside(b, cx, cy))
+             push_action(D3D8_MENU_ACT_TAB, i, 0);
+-        tx += w + 4 * u;
++        tx += w + 5 * u;
+     }
+-    pill(tx + 6 * u, tab_cy, "RB", kPill, kText);
+-    dl->AddLine(ImVec2(x0, tab_y1), ImVec2(x1, tab_y1), col(kLine), 1.0f * u);
++    dl->AddLine(ImVec2(x0 + 14 * u, tab_y1), ImVec2(x1 - 14 * u, tab_y1), col(kLine), 1.0f * u);
+ 
+-    /* Body: rows left, description right. */
+-    const float foot_y0 = y1 - 58 * u;
+-    const float split = x0 + 596 * u;
+-    const Box list = { x0 + 20 * u, tab_y1 + 1, split - 14 * u, foot_y0 - 1 };
+-    dl->AddLine(ImVec2(split, tab_y1), ImVec2(split, foot_y0), col(kLine), 1.0f * u);
++    /* Body: rows left, description right; the buttons under the description. */
++    const float foot_y0 = y1 - 66 * u;
++    const float split = x0 + 610 * u;
++    /* The list starts a little under the tab line, so a scrolled card is cut
++     * off in the open, not against the line. */
++    const Box list = { x0 + 20 * u, tab_y1 + 12 * u, split - 18 * u, y1 - 18 * u };
++    dl->AddLine(ImVec2(split, list.y0), ImVec2(split, list.y1), col(kLine), 1.0f * u);
+ 
+     /* Row heights, to scroll. */
+-    const float pad_top = 14 * u, gap = 5 * u, group_h = 30 * u, row_h = 54 * u, info_h = 34 * u;
++    const float pad_top = 2 * u, gap = 6 * u, group_h = 40 * u, row_h = 48 * u, info_h = 40 * u;
+     float total = pad_top, sel_top = -1, sel_bot = -1;
+     for (int i = 0; i < m.row_count; i++) {
+         const D3D8MenuRow &r = m.rows[i];
+@@ -478,25 +469,21 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
+     for (int i = 0; i < m.row_count; i++) {
+         const D3D8MenuRow &r = m.rows[i];
+         if (r.kind == D3D8_MENU_ROW_GROUP) {
+-            /* Uppercase, spaced a little. */
+-            char up[48];
+-            size_t k;
+-            for (k = 0; r.label[k] && k < sizeof up - 1; k++)
+-                up[k] = (r.label[k] >= 'a' && r.label[k] <= 'z') ? (char)(r.label[k] - 32) : r.label[k];
+-            up[k] = '\0';
+-            text(g.small_bold, list.x0 + 6 * u, y + 12 * u, kBrassDim, up);
++            /* A section heading, in brass, at the label's size. */
++            text(g.body_bold, list.x0 + 2 * u, y + group_h - g.body_bold->FontSize - 8 * u, kBrass, r.label);
+             y += group_h + gap;
+             continue;
+         }
+         if (r.kind == D3D8_MENU_ROW_INFO) {
+             Box b = { list.x0, y, list.x1, y + info_h };
+-            dl->AddRectFilled(ImVec2(b.x0, b.y0), ImVec2(b.x1, b.y1), col(kRow), 6 * u);
+-            text(g.body, b.x0 + 12 * u, y + (info_h - g.body->FontSize) * 0.5f, kMuted, r.label);
+-            float vw = text_w(g.body_bold, r.value);
+-            float vx = b.x1 - 12 * u - vw;
++            dl->AddRectFilled(ImVec2(b.x0, b.y0), ImVec2(b.x1, b.y1), col(kRow), 4 * u);
++            dl->AddRect(ImVec2(b.x0, b.y0), ImVec2(b.x1, b.y1), col(kRowEdge), 4 * u, 0, 1.0f * u);
++            text(g.body, b.x0 + 16 * u, y + (info_h - g.body->FontSize) * 0.5f, kText, r.label);
++            float vw = text_w(g.body, r.value);
++            float vx = b.x1 - 16 * u - vw;
+             if (vx < b.x0 + 180 * u) vx = b.x0 + 180 * u;
+             dl->PushClipRect(ImVec2(vx, b.y0), ImVec2(b.x1 - 6 * u, b.y1), true);
+-            text(g.body_bold, vx, y + (info_h - g.body_bold->FontSize) * 0.5f, kText, r.value);
++            text(g.body, vx, y + (info_h - g.body->FontSize) * 0.5f, kText, r.value);
+             dl->PopClipRect();
+             y += info_h + gap;
+             continue;
+@@ -504,55 +491,46 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
+         Box b = { list.x0, y, list.x1, y + row_h };
+         const bool sel = i == m.sel && m.button < 0;
+         const bool visible = b.y1 > list.y0 && b.y0 < list.y1;
+-        dl->AddRectFilled(ImVec2(b.x0, b.y0), ImVec2(b.x1, b.y1), col(sel ? kRowSel : kRow), 6 * u);
++        dl->AddRectFilled(ImVec2(b.x0, b.y0), ImVec2(b.x1, b.y1), col(sel ? kRowSel : kRow), 4 * u);
+         if (sel)
+-            dl->AddRect(ImVec2(b.x0, b.y0), ImVec2(b.x1, b.y1), col(kBrass), 6 * u, 0, 1.5f * u);
+-
+-        /* Label and its tags. When it takes effect is not a tag: the
+-         * description says when a restart is needed. A row with no tag
+-         * shows its label centred. */
++            dl->AddRect(ImVec2(b.x0, b.y0), ImVec2(b.x1, b.y1), col(kBrass), 4 * u, 0, 1.5f * u);
++        else
++            dl->AddRect(ImVec2(b.x0, b.y0), ImVec2(b.x1, b.y1), col(kRowEdge), 4 * u, 0, 1.0f * u);
++
++        /* The label on the first line; under it, only the tags that say
++         * something about the setting itself (when it takes effect is in
++         * the description). */
++        const float line1 = y + 7 * u, line2 = y + 28 * u;
++        text(g.body, b.x0 + 16 * u, line1, kText, r.label);
+         {
+             struct { int bit; const char *s; Rgba c; } tags[] = {
+-                { D3D8_MENU_TAG_EXPERIMENTAL, "Experimental", kExp },
+-                { D3D8_MENU_TAG_ENV, "Set by environment", kWarn },
++                { D3D8_MENU_TAG_EXPERIMENTAL, "experimental", kExp },
++                { D3D8_MENU_TAG_ENV, "set by environment", kWarn },
+             };
+-            bool any = false;
+-            for (auto &t : tags)
+-                if (r.tags & t.bit) any = true;
+-            text(g.body_bold, b.x0 + 12 * u,
+-                 any ? y + 8 * u : y + (row_h - g.body_bold->FontSize) * 0.5f, kText, r.label);
+-            float tx2 = b.x0 + 12 * u, ty = y + 32 * u;
++            float tx2 = b.x0 + 16 * u;
+             for (auto &t : tags) {
+                 if (!(r.tags & t.bit)) continue;
+-                text(g.small, tx2, ty, t.c, t.s);
++                text(g.small, tx2, line2, t.c, t.s);
+                 tx2 += text_w(g.small, t.s) + 10 * u;
+             }
+         }
+ 
+-        /* The value between its arrows, the pips under it. */
+-        const float val_w = 120 * u;
+-        const float right = b.x1 - 14 * u;
+-        const float vcx = right - 16 * u - val_w * 0.5f;
+-        const float vcy = y + 20 * u;
+-        Rgba arrow = sel ? kBrass : kMuted;
+-        Box left_hit = { right - 16 * u - val_w - 26 * u, b.y0, right - 16 * u - val_w + 6 * u, b.y1 };
+-        triangle(right - 16 * u - val_w - 8 * u, vcy, 11 * u, -1, arrow);
+-        triangle(right - 6 * u, vcy, 11 * u, 1, arrow);
+-        {
+-            float vw = text_w(g.body_bold, r.value);
+-            text(g.body_bold, vcx - vw * 0.5f, vcy - g.body_bold->FontSize * 0.55f, kText, r.value);
+-        }
+-        if (r.count > 1 && r.count <= 16) {
+-            const float d = 7 * u, sp = 4 * u;
+-            float pw = r.count * d + (r.count - 1) * sp;
+-            float pxs = vcx - pw * 0.5f, pcy = y + 40 * u;
+-            for (int k = 0; k < r.count; k++) {
+-                ImVec2 c(pxs + k * (d + sp) + d * 0.5f, pcy);
+-                dl->AddCircleFilled(c, d * 0.5f, col(k == r.index ? kBrass : kPip), 12);
+-                if (k == r.def)
+-                    dl->AddCircle(c, d * 0.5f + 1.0f * u, col(Rgba{1, 1, 1, 0.55f}), 12, 1.3f * u);
+-            }
++        /* The value on the right between its arrows, "default" under it. */
++        const float ar = b.x1 - 16 * u;                 /* right arrow's right edge */
++        const float as = 10 * u;                        /* arrow size */
++        const float acy = line1 + g.body->FontSize * 0.55f;
++        const float vw = text_w(g.body, r.value);
++        const float vx1 = ar - as - 10 * u;              /* value's right edge */
++        const float vx0 = vx1 - vw;
++        Rgba arrow = sel ? kBrass : kText;
++        triangle(ar - as * 0.5f, acy, as, 1, arrow);
++        triangle(vx0 - 10 * u - as * 0.5f, acy, as, -1, arrow);
++        text(g.body, vx0, line1, kText, r.value);
++        if (r.count > 1 && r.index == r.def) {
++            const char *d = "default";
++            text(g.small, vx1 - text_w(g.small, d), line2, kMuted, d);
+         }
++        Box left_hit = { vx0 - 10 * u - as - 14 * u, b.y0, vx0 + vw * 0.5f, b.y1 };
+ 
+         /* The pointer. */
+         if (visible) {
+@@ -572,78 +550,40 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
+         if (hover >= 0 && hover != m.sel)
+             push_action(D3D8_MENU_ACT_HOVER, hover, 0);
+     }
+-    /* A scroll hint: a thin bar when the list is longer than its box. */
++    /* A scroll bar when the list is longer than its box. */
+     if (total > view_h + 1) {
+         float bh = view_h * view_h / total, by = list.y0 + (view_h - bh) * (g_scroll / (total - view_h));
+-        dl->AddRectFilled(ImVec2(list.x1 + 6 * u, by), ImVec2(list.x1 + 9 * u, by + bh), col(kLine), 2 * u);
++        dl->AddRectFilled(ImVec2(list.x1 + 7 * u, list.y0), ImVec2(list.x1 + 12 * u, list.y1), col(kRow), 2.5f * u);
++        dl->AddRectFilled(ImVec2(list.x1 + 7 * u, by), ImVec2(list.x1 + 12 * u, by + bh), col(kScroll), 2.5f * u);
+     }
+ 
+-    /* The description. */
++    /* The description: the selected setting's text, then the restart note
++     * for a setting that needs one, then any warning. */
+     {
+-        const float ix = split + 24 * u, iw = x1 - 24 * u - ix;
+-        float iy = tab_y1 + 20 * u;
+-        if (m.info_title[0]) {
+-            text(g.heading, ix, iy, kText, m.info_title);
+-            iy += g.heading->FontSize + 12 * u;
+-        }
++        const float ix = split + 26 * u, iw = x1 - 26 * u - ix;
++        float iy = tab_y1 + 24 * u;
+         if (m.info_text[0])
+-            iy += text_wrapped(g.body, ix, iy, iw, kBodyText, m.info_text) + 14 * u;
+-        struct { const char *k, *v; } dl_rows[] = {
+-            { "Default", m.info_default }, { "Options", m.info_options },
+-        };
+-        const float kw = 100 * u;
+-        for (auto &d : dl_rows) {
+-            if (!d.v[0]) continue;
+-            text(g.small, ix, iy, kMuted, d.k);
+-            iy += text_wrapped(g.small, ix + kw, iy, iw - kw, kText, d.v) + 6 * u;
+-        }
+-        if (m.info_when[0]) {
+-            /* Only a setting that needs a restart has one. */
+-            iy += 8 * u;
+-            iy += text_wrapped(g.small_bold, ix, iy, iw, kRestart, m.info_when) + 6 * u;
+-        }
+-        if (m.warning[0]) {
+-            iy += 8 * u;
++            iy += text_wrapped(g.body, ix, iy, iw, kText, m.info_text) + 14 * u;
++        if (m.info_when[0])
++            iy += text_wrapped(g.body_bold, ix, iy, iw, kRestart, m.info_when) + 10 * u;
++        if (m.warning[0])
+             text_wrapped(g.small, ix, iy, iw, kWarn, m.warning);
+-        }
+     }
+ 
+-    /* Footer: the buttons' hints, the status, Resume and Quit. */
+-    dl->AddLine(ImVec2(x0, foot_y0), ImVec2(x1, foot_y0), col(kLine), 1.0f * u);
++    /* Continue and Quit game, bottom right. */
+     {
+         const float fcy = (foot_y0 + y1) * 0.5f;
+-        float fx = x0 + 22 * u;
+-        struct { const char *g1, *g2; Rgba bg; Rgba fg; const char *what; } hints[] = {
+-            { "LB", "RB", kPill, kText, "Tabs" },
+-            { "A", NULL, kPadA, kText, "Change" },
+-            { "Y", NULL, kPadY, hex(0x1A1300), "Default" },
+-            { "B", NULL, kPadB, kText, "Back" },
+-        };
+-        for (auto &h : hints) {
+-            fx += pill(fx, fcy, h.g1, h.bg, h.fg) + 4 * u;
+-            if (h.g2) fx += pill(fx, fcy, h.g2, h.bg, h.fg) + 4 * u;
+-            text(g.small, fx + 2 * u, fcy - g.small->FontSize * 0.55f, kMuted, h.what);
+-            fx += text_w(g.small, h.what) + 16 * u;
+-        }
+-
+-        static const char *const labels[2] = { "Resume", "Quit game" };
+-        float bx = x1 - 22 * u;
++        static const char *const labels[2] = { "Continue", "Quit game" };
++        float bx = x1 - 26 * u;
+         for (int i = 1; i >= 0; i--) {
+-            float w = text_w(g.body_bold, labels[i]) + 36 * u, h = 36 * u;
++            float w = text_w(g.body_bold, labels[i]) + 60 * u, h = 40 * u;
+             Box b = { bx - w, fcy - h * 0.5f, bx, fcy + h * 0.5f };
+             bool on = m.button == i, hot = ptr_in && inside(b, mx, my);
+-            dl->AddRectFilled(ImVec2(b.x0, b.y0), ImVec2(b.x1, b.y1), col(on ? kRowSel : kButton, hot && !on ? 1.6f : 1.0f), 6 * u);
+-            if (on)
+-                dl->AddRect(ImVec2(b.x0, b.y0), ImVec2(b.x1, b.y1), col(kBrass), 6 * u, 0, 1.5f * u);
+-            text(g.body_bold, b.x0 + 18 * u, fcy - g.body_bold->FontSize * 0.55f, kText, labels[i]);
++            dl->AddRectFilled(ImVec2(b.x0, b.y0), ImVec2(b.x1, b.y1), col(on ? kTabOn : kButton, hot && !on ? 1.5f : 1.0f), 4 * u);
++            text(g.body_bold, b.x0 + 30 * u, fcy - g.body_bold->FontSize * 0.55f, on ? kTabOnText : kText, labels[i]);
+             if (clicked && inside(b, cx, cy))
+                 push_action(D3D8_MENU_ACT_BUTTON, i, 0);
+-            bx = b.x0 - 10 * u;
+-        }
+-        if (m.status[0]) {
+-            float sw = text_w(g.small_bold, m.status);
+-            if (fx + sw < bx - 10 * u)
+-                text(g.small_bold, fx, fcy - g.small_bold->FontSize * 0.55f, kRestart, m.status);
++            bx = b.x0 - 12 * u;
+         }
+     }
+ }
+diff --git a/src/d3d/d3d8_overlay.h b/src/d3d/d3d8_overlay.h
+index e3d769f..a4b2609 100644
+--- a/src/d3d/d3d8_overlay.h
++++ b/src/d3d/d3d8_overlay.h
+@@ -91,7 +91,7 @@ typedef struct {
+     int  row_count;
+     D3D8MenuRow rows[D3D8_MENU_MAX_ROWS];
+     int  sel;                     /* a row, or -1 */
+-    int  button;                  /* -1, or the focused footer button: 0 Resume, 1 Quit */
++    int  button;                  /* -1, or the focused footer button: 0 Continue, 1 Quit game */
+     unsigned serial;              /* bumped when sel/tab moved by a key: scroll to it */
+     char title[24];
+     char subtitle[96];
+@@ -114,7 +114,7 @@ enum {
+     D3D8_MENU_ACT_TAB,            /* index: the tab clicked */
+     D3D8_MENU_ACT_HOVER,          /* index: the row the pointer moved onto */
+     D3D8_MENU_ACT_STEP,           /* index: the row; step: -1 or 1 (a click on it or its arrows) */
+-    D3D8_MENU_ACT_BUTTON          /* index: 0 Resume, 1 Quit */
++    D3D8_MENU_ACT_BUTTON          /* index: 0 Continue, 1 Quit game */
+ };
+ typedef struct { int kind, index, step; } D3D8MenuAction;
+ int d3d8_menu_take_action(D3D8MenuAction *out);
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index 95c1297..73c9c43 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -523,7 +523,7 @@ static const char *menu_text(void)
+                 w, it->label, item_name(it, current_index(it)), it->live == LIVE_NONE ? " *" : "");
+         }
+     }
+-    ADD("%s%s Resume\n", g_button == 0 ? "\x01" : "", g_button == 0 ? ">" : " ");
++    ADD("%s%s Continue\n", g_button == 0 ? "\x01" : "", g_button == 0 ? ">" : " ");
+     ADD("%s%s Quit game\n\n", g_button == 1 ? "\x01" : "", g_button == 1 ? ">" : " ");
+     ADD("  * at the next start\n");
+     if (g_save_failed)
+@@ -629,7 +629,7 @@ static void publish(void)
+     snprintf(m.title, sizeof m.title, "Settings");
+     snprintf(m.subtitle, sizeof m.subtitle, "F2 or Start+Back to close");
+     if (g_button == 0) {
+-        snprintf(m.info_title, sizeof m.info_title, "Resume");
++        snprintf(m.info_title, sizeof m.info_title, "Continue");
+         snprintf(m.info_text, sizeof m.info_text, "Closes this menu and goes back to the game.");
+     } else if (g_button == 1) {
+         snprintf(m.info_title, sizeof m.info_title, "Quit game");
