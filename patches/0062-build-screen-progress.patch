@@ -637,10 +637,10 @@ index 1631fdd..334d367 100644
  int      lhost_thread(void (*fn)(void));
  /* A flag one thread raises for another to see, with what was written
 diff --git a/src/launcher/launcher_sdl.c b/src/launcher/launcher_sdl.c
-index 59d3bf4..b9cd5c5 100644
+index 59d3bf4..c9ea699 100644
 --- a/src/launcher/launcher_sdl.c
 +++ b/src/launcher/launcher_sdl.c
-@@ -153,6 +153,29 @@ int lhost_launch(const char *exe, const char *dir)
+@@ -153,6 +153,30 @@ int lhost_launch(const char *exe, const char *dir)
      return 1;
  }
  
@@ -652,8 +652,9 @@ index 59d3bf4..b9cd5c5 100644
 +
 +    /* SDL opens web addresses; a path goes as a file:// one, with every
 +     * byte that is not unreserved (or a slash) percent-encoded, so a space
-+     * or a '#' in the folder's name does not end the path early. */
-+    if (strstr(target, "://"))
++     * or a '#' in the folder's name does not end the path early. Only
++     * http(s) is taken as an address: a path may hold "://" itself. */
++    if (strncmp(target, "http://", 7) == 0 || strncmp(target, "https://", 8) == 0)
 +        return SDL_OpenURL(target);
 +    n = (size_t)snprintf(url, sizeof url, "file://");
 +    for (p = (const unsigned char *)target; *p && n + 4 < sizeof url; p++) {
