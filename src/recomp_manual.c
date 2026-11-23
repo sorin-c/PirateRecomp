@@ -2028,8 +2028,9 @@ void sub_000CBEE0(void) { if (!btl_off_tick_bit(4u, 0x20u)) sub_000CBEE0_gen(); 
  * sub_000C72F0), and their pause menus keep the vblank's 60. A tab switch
  * inside the menu calls sub_00131170 again and stays counted.
  *
- * The world map tab (sub_0005D8C0) is held at 60 (by the gate's title rate,
- * so a frame cap that is off or above 60 does not lift it): the stick
+ * The world map tab (sub_0005D8C0) is held at 60 whatever sea_fps is (by
+ * the gate's title rate, so a frame cap that is off or above 60 does not
+ * lift it either): the stick
  * scrolls the map a fixed step a frame, so at 144 one push went more than
  * twice as far. Its
  * cursor's pulse runs on the clock (sub_0005BCC0 reads the tick). */
@@ -2084,7 +2085,7 @@ void sub_000FD780(void)
         int setting = sea60_read_rate();
         int rate = setting;
 
-        if (g_sea_menu_map > 0 && rate != 30)
+        if (g_sea_menu_map > 0)
             rate = 60;                     /* the map scrolls a step a frame */
         if (rate != said) {
             said = rate;
@@ -2097,7 +2098,7 @@ void sub_000FD780(void)
                 fprintf(stderr, "[SEA60] pause menu at sea: %d frames a second\n", rate);
             fflush(stderr);
         }
-        if (g_sea_menu_map > 0 && setting != 30)
+        if (g_sea_menu_map > 0)
             sea60_set_gate(60);            /* 60 by the host clock, over any frame cap */
         else if (rate != 30 && rate != 60)
             sea60_set_gate(rate);
