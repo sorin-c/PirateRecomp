@@ -1764,6 +1764,30 @@ void recomp_guest_hook(uint32_t va)
     if (btl_guest_hook(va))                 /* the battle's */
         return;
 
+    /* The sea's parchment map (BLACK at sea; sub_00091170 at 0x91A3B): the
+     * game centres it on the ship's whole map cell (0x4C70EC/E8, the
+     * position / 4,000,000) times 2000, while the camera follows the
+     * position / 2000. So the map stood still and then jumped a cell, about
+     * 1% of the screen, twice a second when sailing fast, at any frame rate;
+     * the smooth sea under it at a high one made it plain. It is given the
+     * position / 2000, the camera's own units, from the same source the
+     * cell was taken from (0x85A38: bit 0x80 of 0x49C298 follows 0x49D040/60,
+     * else our ship). At the call to sub_00059D40 the x is in eax and the y
+     * on top of the stack. sea_map_snap = 1 (RECOMP_PIRATES_SEA_MAP_SNAP)
+     * keeps the console's whole cells. */
+    if (va == 0x00091A65u) {
+        static int snap = -1;
+        int follow;
+        if (snap < 0)
+            snap = recomp_config_bool("RECOMP_PIRATES_SEA_MAP_SNAP", "sea_map_snap", 0);
+        if (!snap) {
+            follow = (S60_MEM32(0x0049C298u) & 0x80) != 0;
+            g_eax = (uint32_t)(S60_MEM32(follow ? 0x0049D040u : 0x004564BCu) / 2000);
+            S60_MEM32(g_esp) = S60_MEM32(follow ? 0x0049D060u : 0x004564C0u) / 2000;
+        }
+        return;
+    }
+
     /* The sea loop's frame runs from the tick read at 0x9190F past its
      * frame wait to 0x9267B; it leaves through 0x92681 (both of its exits).
      * Hooks act only in between, with sea_60 on. */
@@ -2012,6 +2036,111 @@ void sub_000D6340(void) { if (!btl_off_tick_bit(0u, 8u)) sub_000D6340_gen(); }  
  * deck, the governor, the tavern). */
 extern void sub_000CBEE0_gen(void);
 void sub_000CBEE0(void) { if (!btl_off_tick_bit(4u, 0x20u)) sub_000CBEE0_gen(); }
+
+/* ── Sid Meier's Pirates!: the pause menu at sea follows sea_fps ─────────
+ *
+ * Start at sea opens the pause menu (status, fleet, ship, log, the world
+ * map and its "Select City"): the sea loop (sub_00091170) calls the tab
+ * dispatcher sub_00131170 (returning to 0x923FD or 0x92581) or sub_001313F0,
+ * which calls it (returning to 0x92562), and is blocked until it returns.
+ * Each tab runs its own loop, and each of its frames is drawn by
+ * sub_000FD780, the renderer the sea uses too, with the world switched off
+ * (0x40EA78 bit 0x1000: the int_pause_background.dds backdrop and the menu,
+ * nothing simulated). No frame of it waits on the game's clock, so the flip
+ * gate's one Swap a vblank held it to 60 whatever sea_fps said.
+ *
+ * So while the menu opened from the sea runs, every frame renews the
+ * gate's title rate with the sailing rate (toolkit patch 0044), as the sea
+ * frames do: 90..240 by the host clock, unlocked with no wait. At 30 and
+ * 60 nothing changes (the vblank, 60, as before). Once it closes the sea's
+ * next frame sets its own rate, and the gate drops a rate nobody renews
+ * after 100 ms.
+ *
+ * Only the menu called from the sea loop itself, by those return
+ * addresses: towns, ship battles and the town sneak run inside the sea's
+ * frame too (sub_00085980 -> the town menu sub_00021D70, sub_000C3950 ->
+ * sub_000C72F0), and their pause menus keep the vblank's 60. A tab switch
+ * inside the menu calls sub_00131170 again and stays counted.
+ *
+ * The world map tab (sub_0005D8C0) is held at 60 whatever sea_fps is (by
+ * the gate's title rate, so a frame cap that is off or above 60 does not
+ * lift it either): the stick
+ * scrolls the map a fixed step a frame, so at 144 one push went more than
+ * twice as far. Its
+ * cursor's pulse runs on the clock (sub_0005BCC0 reads the tick). */
+static int g_sea_menu_depth;   /* menu calls running that were opened from the sea loop */
+static int g_sea_menu_map;     /* the world map tab is running inside it */
+
+static uint32_t pirates_return_address(void)
+{
+    return *(volatile uint32_t *)((uintptr_t)g_esp + g_xbox_mem_offset);
+}
+
+extern void sub_00131170_gen(void);
+void sub_00131170(void)
+{
+    uint32_t ra = pirates_return_address();
+    int at_sea = g_sea_menu_depth > 0 ||
+                 (g_sea60.in_loop && (ra == 0x000923FDu || ra == 0x00092581u));
+
+    if (at_sea)
+        g_sea_menu_depth++;
+    sub_00131170_gen();
+    if (at_sea)
+        g_sea_menu_depth--;
+}
+
+extern void sub_001313F0_gen(void);
+void sub_001313F0(void)
+{
+    int at_sea = g_sea60.in_loop && g_sea_menu_depth == 0 &&
+                 pirates_return_address() == 0x00092562u;
+
+    if (at_sea)
+        g_sea_menu_depth++;
+    sub_001313F0_gen();
+    if (at_sea)
+        g_sea_menu_depth--;
+}
+
+extern void sub_0005D8C0_gen(void);
+void sub_0005D8C0(void)
+{
+    g_sea_menu_map++;
+    sub_0005D8C0_gen();
+    g_sea_menu_map--;
+}
+
+extern void sub_000FD780_gen(void);
+void sub_000FD780(void)
+{
+    if (g_sea_menu_depth > 0) {
+        static int said = -2;
+        int setting = sea60_read_rate();
+        int rate = setting;
+
+        if (g_sea_menu_map > 0)
+            rate = 60;                     /* the map scrolls a step a frame */
+        if (rate != said) {
+            said = rate;
+            if (rate == 30 || rate == 60)
+                fprintf(stderr, "[SEA60] pause menu at sea: 60 (sea_fps = %d%s)\n",
+                        setting < 0 ? 0 : setting, g_sea_menu_map > 0 ? ", world map" : "");
+            else if (rate < 0)
+                fprintf(stderr, "[SEA60] pause menu at sea: unlocked (sea_fps = 0)\n");
+            else
+                fprintf(stderr, "[SEA60] pause menu at sea: %d frames a second\n", rate);
+            fflush(stderr);
+        }
+        if (g_sea_menu_map > 0)
+            sea60_set_gate(60);            /* 60 by the host clock, over any frame cap */
+        else if (rate != 30 && rate != 60)
+            sea60_set_gate(rate);
+        else if (g_sea60.gate_rate)
+            sea60_set_gate(0);
+    }
+    sub_000FD780_gen();
+}
 
 extern void sub_001A958A_gen(void);
 extern int recomp_config_int(const char *env_name, const char *key, int fallback);

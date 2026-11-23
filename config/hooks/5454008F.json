@@ -406,6 +406,10 @@
    "note": "main menu: a row's y, rows 34 apart (30 with MINIGAMES)"
   },
   {
+   "address": "0x00091A65",
+   "note": "sea map: the parchment map centred on the position / 2000, not the whole map cell x 2000"
+  },
+  {
    "address": "0x0008513E",
    "note": "sea_fps: a ship's dock/fade word +0x456500 step (frame time / 10, sub_00084E60): the console's 33 ms on the tick, 0 between"
   },

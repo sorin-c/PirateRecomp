@@ -67,9 +67,12 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   clock, so it needs a monitor that refreshes at least that fast, or
   variable refresh (`vrr`), to show every frame: the picture is presented in
   step with the monitor, so on a 144 Hz monitor 240 and unlocked show about
-  140 frames a second. Duels, towns, the
-  town sneak, the map and the menus keep their own pacing, and the frame
-  cap (`frame_cap`) still applies to them. While sailing faster than 30,
+  140 frames a second. The pause menu opened while sailing (Start: fleet,
+  ship, log) runs at the same rate when it is above 60, and at 60
+  otherwise; its world map stays at 60, since the stick scrolls the map a
+  fixed step a frame. Duels, towns, the town sneak, and the menus elsewhere
+  keep their own pacing, and the frame cap (`frame_cap`) still applies to
+  them. While sailing faster than 30,
   frame interpolation is not used at sea (battles and duels still use it
   when `frame_interp` is on). `sea_60 = 1`, the setting before this one,
   still sails at 60 while `sea_fps` is 30. Experimental: measured against
@@ -150,6 +153,7 @@ defaults. Every line names the environment variable that overrides it, so a
 | `pad_directinput` | `0` | SDL's DirectInput back end. |
 | `skip_intro` | `1` | `1` skips every movie, `intro` only the logos and title movie, `0` plays all. |
 | `skip_legal` | `1` | `1` skips the legal screen at boot (the copyright lines, the ESRB notice, the Bink and Miles logos), `0` shows it as the disc does. |
+| `sea_map_snap` | `0` | `1` keeps the console's sea map (BLACK at sea) moving in whole map cells, a jump about twice a second when sailing fast; `0` scrolls it smoothly with the ship. |
 | `mute` | `0` | No sound. |
 | `minigames` | `0` | Shows the developers' MINIGAMES (*DEBUG!*) menu entry. |
 | `priority` | `1` | Windows: runs the game above normal priority, so other work on the PC (a build, a download) does not slow it; test runs stay at normal (only `RECOMP_PRIORITY=1` raises one). `0` for normal. |
