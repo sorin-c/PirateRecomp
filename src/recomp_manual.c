@@ -1979,6 +1979,67 @@ void sub_000D6340(void) { if (!btl_off_tick_bit(0u, 8u)) sub_000D6340_gen(); }  
 extern void sub_000CBEE0_gen(void);
 void sub_000CBEE0(void) { if (!btl_off_tick_bit(4u, 0x20u)) sub_000CBEE0_gen(); }
 
+/* ── Sid Meier's Pirates!: the pause menu at sea follows sea_fps ─────────
+ *
+ * Start at sea opens the pause menu (status, fleet, ship, log, the world
+ * map and its "Select City"): the sea loop (sub_00091170) calls the tab
+ * dispatcher sub_00131170 (from 0x923E2, 0x92581 and, by way of
+ * sub_001313F0, 0x92562) and is blocked until it returns. Each tab runs its
+ * own loop, and each of its frames is drawn by sub_000FD780, the renderer
+ * the sea uses too, with the world switched off (0x40EA78 bit 0x1000: the
+ * int_pause_background.dds backdrop and the menu, nothing simulated). No
+ * frame of it waits on the game's clock, so the flip gate's one Swap a
+ * vblank held it to 60 whatever sea_fps said. The world map's pulsing
+ * cursor runs on the clock (sub_0005BCC0 reads the tick), not on frames.
+ *
+ * So while the menu opened from the sea runs, every frame renews the
+ * gate's title rate with the sailing rate (toolkit patch 0044), as the sea
+ * frames do: 90..240 by the host clock, unlocked with no wait. At 30 and
+ * 60 nothing changes (the vblank, 60, as before). Opened anywhere else (a
+ * town) the menu is left alone. Once it closes the sea's next frame sets
+ * its own rate, and the gate drops a rate nobody renews after 100 ms. */
+static int g_sea_menu_depth;   /* sub_00131170 calls running, opened at sea */
+
+extern void sub_00131170_gen(void);
+void sub_00131170(void)
+{
+    /* Inside the sea loop's frame (g_sea60.in_loop, 0x9190F .. 0x92681),
+     * or a tab switch inside a menu opened there (sub_001313F0 calls it
+     * again). */
+    int at_sea = g_sea60.in_loop || g_sea_menu_depth > 0;
+
+    if (at_sea)
+        g_sea_menu_depth++;
+    sub_00131170_gen();
+    if (at_sea)
+        g_sea_menu_depth--;
+}
+
+extern void sub_000FD780_gen(void);
+void sub_000FD780(void)
+{
+    if (g_sea_menu_depth > 0) {
+        static int said = -2;
+        int rate = sea60_read_rate();
+
+        if (rate != said) {
+            said = rate;
+            if (rate == 30 || rate == 60)
+                fprintf(stderr, "[SEA60] pause menu at sea: the vblank's 60 (sea_fps = %d)\n", rate);
+            else if (rate < 0)
+                fprintf(stderr, "[SEA60] pause menu at sea: unlocked (sea_fps = 0)\n");
+            else
+                fprintf(stderr, "[SEA60] pause menu at sea: %d frames a second\n", rate);
+            fflush(stderr);
+        }
+        if (rate != 30 && rate != 60)
+            sea60_set_gate(rate);
+        else if (g_sea60.gate_rate)
+            sea60_set_gate(0);
+    }
+    sub_000FD780_gen();
+}
+
 extern void sub_001A958A_gen(void);
 extern int recomp_config_int(const char *env_name, const char *key, int fallback);
 extern int recomp_settings_default_frame_interp(void);
