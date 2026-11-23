@@ -435,7 +435,7 @@ index c1c8647..dc12532 100644
       * therefore anamorphic -- authored squeezed, to be stretched back out
       * by the display. Only true of a title with a 16:9 mode of its own,
 diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
-index d554966..0a9afa9 100644
+index 4a8112f..4ee50b4 100644
 --- a/src/hle/hle_settings_menu.c
 +++ b/src/hle/hle_settings_menu.c
 @@ -122,10 +122,12 @@ static const Item ITEMS[] = {
@@ -521,8 +521,8 @@ index d554966..0a9afa9 100644
          snprintf(m.info_text, sizeof m.info_text, "%s", it->help);
 -        snprintf(m.info_default, sizeof m.info_default, "%s", it->names[default_index(it)]);
 +        snprintf(m.info_default, sizeof m.info_default, "%s", item_name(it, default_index(it)));
-         snprintf(m.info_when, sizeof m.info_when, "%s",
-                  it->live == LIVE_NONE ? "Next time the game starts" : "At once");
+         if (it->live == LIVE_NONE)
+             snprintf(m.info_when, sizeof m.info_when, "Restart the game for this to take effect.");
          for (k = 0; k < it->n && o < (int)sizeof m.info_options; k++)
              o += snprintf(m.info_options + o, sizeof m.info_options - (size_t)o, "%s%s",
 -                          k ? ", " : "", it->names[k]);

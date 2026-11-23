@@ -227,7 +227,7 @@ if(TARGET xbox_config)
         RECOMP_TITLE_DEFAULT_FRAME_INTERP=1
         # Widescreen on in a new pirates.ini (Sorin, 22 Nov): the game has a
         # 16:9 mode of its own, and the resolution is offered as 16:9 sizes
-        # (1920x1080, 2560x1440...), native by default (toolkit patch 0061)
+        # (1920x1080, 2560x1440...), native by default (toolkit patch 0062)
         RECOMP_TITLE_DEFAULT_WIDESCREEN=1
         # LB and RB pull the triggers in the default pad bindings, as LT and
         # RT do (Sorin, 19 Nov); Black and White keep their keys (W, Q)
