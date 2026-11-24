@@ -485,7 +485,7 @@ static int title_main(int argc, char **argv)
     }
 
     /* water_reflection (src/settings_title.h): the sea's reflection
-     * targets drawn at 2 or 4 times the console's size (toolkit patch 0066).
+     * targets drawn at 2 or 4 times the console's size (toolkit patch 0068).
      * Set before the device makes them; a change applies at the next start. */
     {
         int scale = recomp_config_int("RECOMP_PIRATES_WATER_REFLECTION", "water_reflection", 1);

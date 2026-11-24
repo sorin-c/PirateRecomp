@@ -664,7 +664,7 @@ Each one, with the reason it exists:
   Continue and Quit game at the bottom right. Same colours, same fonts,
   same input; Resume is renamed Continue in the text fallback too.
 
-- **0066-offscreen-target-scale** (`src/d3d/d3d8_device.c`,
+- **0068-offscreen-target-scale** (`src/d3d/d3d8_device.c`,
   `d3d8_resources.c`, `d3d8_internal.h`, `d3d8_xbox.h`,
   `src/hle/hle_d3d8.c`, `src/hle/hle_settings_menu.c`). Sorin asked for
   sharper ship reflections at sea. The game draws them into small render
