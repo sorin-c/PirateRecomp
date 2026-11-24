@@ -2109,18 +2109,39 @@ void sub_001313F0(void)
 static int32_t g_sea_map_x, g_sea_map_y;   /* the view the stick last left (clamped at the next frame) */
 static int g_sea_map_frames;                /* frames the stick moved it, this visit */
 
+static struct {
+    int armed;                 /* 0x5E3D0 passed this frame */
+    int32_t x0, y0;            /* the view before the stick's step */
+    double fx, fy;             /* the step owed, in pixels, not yet taken */
+    int64_t last_ns;           /* host time of the last stick pass */
+} g_sea_map;
+
+/* A visit to the map starts and ends with nothing owed and no last frame. */
+static void sea_map_reset(void)
+{
+    memset(&g_sea_map, 0, sizeof g_sea_map);
+    g_sea_map_frames = 0;
+}
+
 extern void sub_0005D8C0_gen(void);
 void sub_0005D8C0(void)
 {
+    static int trace = -1;
+
+    if (trace < 0) {
+        const char *v = getenv("RECOMP_PIRATES_MAP_TRACE");
+        trace = v && *v && strcmp(v, "0") != 0;
+    }
+    sea_map_reset();                   /* nothing carried from another visit */
     g_sea_menu_map++;
     sub_0005D8C0_gen();
     g_sea_menu_map--;
-    if (g_sea_menu_depth > 0 && g_sea_map_frames > 0) {   /* for the tests: where it was left */
+    if (trace && g_sea_menu_depth > 0 && g_sea_map_frames > 0) {   /* for the tests */
         fprintf(stderr, "[SEA60] world map closed: view %d,%d after %d stick frames\n",
                 g_sea_map_x, g_sea_map_y, g_sea_map_frames);
         fflush(stderr);
-        g_sea_map_frames = 0;
     }
+    sea_map_reset();
 }
 
 /* The world map's stick, faster than 60 (sea_fps above 60 or unlocked).
@@ -2139,12 +2160,6 @@ void sub_0005D8C0(void)
  * 100 ms (the map just opened, or back from choosing a city) counts as a
  * 60th; a slow frame counts as at most three. At 30 and 60 the map runs at
  * 60 and nothing changes. */
-static struct {
-    int armed;                 /* 0x5E3D0 passed this frame */
-    int32_t x0, y0;            /* the view before the stick's step */
-    double fx, fy;             /* the step owed, in pixels, not yet taken */
-    int64_t last_ns;           /* host time of the last stick pass */
-} g_sea_map;
 
 static int sea_map_fast(void)
 {
@@ -2221,14 +2236,16 @@ extern void sub_000FD780_gen(void);
 void sub_000FD780(void)
 {
     if (g_sea_menu_depth > 0) {
-        static int said = -2;
+        static int said = -2, said_map = -1;
         int setting = sea60_read_rate();
         int rate = setting;
+        int on_map = g_sea_menu_map > 0;
 
         if (g_sea_menu_map > 0 && (rate == 30 || rate == 60))
             rate = 60;                     /* the map: 60, as before */
-        if (rate != said) {
+        if (rate != said || on_map != said_map) {
             said = rate;
+            said_map = on_map;
             if (rate == 30 || rate == 60)
                 fprintf(stderr, "[SEA60] pause menu at sea: 60 (sea_fps = %d%s)\n",
                         setting < 0 ? 0 : setting, g_sea_menu_map > 0 ? ", world map" : "");
