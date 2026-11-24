@@ -672,3 +672,14 @@ Each one, with the reason it exists:
   and rounded to the nearest 10 wherever it is read or set, so an older
   `pirates.ini` still loads (25 is 30 %, 75 is 80 %, 125 and 150 are
   100 %). A menu item can now hold up to 12 values.
+
+- **0067-settings-menu-hud-layout** (`src/hle/hle_settings_menu.c`). A
+  "HUD layout" row in the F2 Display tab, under Widescreen: Anchored to
+  edges (`hud_layout = edges`, the default) or Centered 4:3 (`centered`).
+  A title row (shown only when the title's settings know the key) that
+  applies at once: the game's widescreen HUD test (`pirates_hud_edge` in
+  `src/recomp_manual.c`) reads the key itself and, when centered, leaves
+  the HUD where the game draws it. Title rows (also sea_fps, battle_fps,
+  town_fps) now show the environment-variable tag and warning like every
+  other row: the variable wins over the menu for them too, and the menu
+  used to hide that. Applies on top of 0066.

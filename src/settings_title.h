@@ -28,6 +28,12 @@ static const struct {
       "# Bink and Miles logos): 1 skips it, 0 shows it as the disc does (five\n"
       "# seconds, longer if the main menu is still loading).\n"
       "#                                         [RECOMP_PIRATES_SKIP_LEGAL]\n" },
+    { "hud_layout", "edges",
+      "# The HUD in widescreen: edges (the default) moves the crew, food,\n"
+      "# compass and the battle bars out to the corners of the screen;\n"
+      "# centered keeps them where the console draws them, in the middle 4:3\n"
+      "# of the picture. No effect at 4:3. Applies at once from the F2 menu.\n"
+      "#                                         [RECOMP_PIRATES_HUD_LAYOUT]\n" },
     { "sea_fps", "30",
       "# Experimental: the frame rate while sailing, at the game's own speed:\n"
       "# 30 (the default) sails as the console does (frame interpolation, if\n"
