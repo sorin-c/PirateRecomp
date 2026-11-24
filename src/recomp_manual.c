@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <stddef.h>   /* ptrdiff_t: not in stdlib.h off MSVC */
 #include <stdlib.h>   /* getenv, exit: the spin verdict below */
+#include <math.h>     /* fabs: the sea map's part of a pixel */
 #include <string.h>   /* strcmp: RECOMP_ICALL_FATAL */
 #include <time.h>     /* timespec_get: the battle camera log */
 
@@ -1766,6 +1767,142 @@ static int btl_guest_hook(uint32_t va)
     return 1;
 }
 
+/* ── Sid Meier's Pirates!: the sea's parchment map, scrolled smoothly ──
+ *
+ * The map at sea (BLACK; sub_00091170 from 0x91A3B, drawn by sub_0005BCC0)
+ * was centred on the ship's whole map cell (0x4C70EC/E8, the position /
+ * 4,000,000) times 2000, while the camera follows the position / 2000: the
+ * map stood still, then jumped a cell (about 1% of the screen) twice a
+ * second when sailing fast, at any frame rate.
+ *
+ * 1. 0x91A65, the call to sub_00059D40 (x in eax, y on top of the stack):
+ *    the position / 2000 instead, from the source the cell was taken from
+ *    (0x85A38: bit 0x80 of 0x49C298 follows 0x49D040/60, else our ship).
+ *
+ * 2. That still moves in whole pixels: sub_00059D40 rounds the map's
+ *    centre, 0x91A84 turns it into the scroll (ecx, edi at 0x91B32), and
+ *    sub_0005AEA0 places the 256-pixel map tiles from it with integer
+ *    divisions -- steps of 1-3 pixels at 480, 13 at 2160. At 0x91B32 the
+ *    same sums are done without the rounding (sea_map_frac); the difference
+ *    from the tiles' integer place is the part of a pixel the game dropped.
+ *    Every sprite sub_000DFDF0 sets up during that call (the tiles) is
+ *    moved by it where it stores its place, 0xE0439 ([esp+0x3C] x - W/2,
+ *    [esp+0x44] -(y - H/2), floats), so the map moves every frame, by as
+ *    little as the frame needs. The towns' icons go through other calls and
+ *    keep their whole pixels.
+ *
+ * sea_map_snap = 1 (RECOMP_PIRATES_SEA_MAP_SNAP) keeps the console's whole
+ * cells and pixels. */
+static struct {
+    int in_draw;          /* inside sub_0005BCC0's call at 0x91B32 */
+    float fx, fy;         /* the tiles' dropped part of a pixel, this frame */
+} g_seamap;
+
+static int sea_map_snap(void)
+{
+    static int snap = -1;
+    if (snap < 0)
+        snap = recomp_config_bool("RECOMP_PIRATES_SEA_MAP_SNAP", "sea_map_snap", 0);
+    return snap;
+}
+
+/* The source of the map's centre, as 0x85A38 takes the cell from. */
+static void sea_map_pos(int32_t *x, int32_t *y)
+{
+    int follow = (S60_MEM32(0x0049C298u) & 0x80) != 0;
+    *x = S60_MEM32(follow ? 0x0049D040u : 0x004564BCu);
+    *y = S60_MEM32(follow ? 0x0049D060u : 0x004564C0u);
+}
+
+/* One axis of sub_0005AEA0's first tile: the scroll s (0x91B32's ecx or
+ * edi), b the tile's size factor (Bx or By): the game's place,
+ * -(floor(r * b / 100)) less whole tiles, r = 2s mod 256; and the exact
+ * one, r taken from the unrounded scroll se. Their difference, or 0 when
+ * the two are not near (a clamp at the map's edge, a jump). */
+static float sea_map_axis(int32_t s, double se, int32_t b)
+{
+    int32_t s2 = s * 2, r = s2 & 255, col = (s2 - r) / 256;
+    double re = se * 2.0 - (double)col * 256.0, d;
+
+    if (b <= 0 || fabs(se - (double)s) > 2.0)
+        return 0.0f;
+    d = -(re * (double)b / 100.0) + (double)((int64_t)r * b / 100);
+    return fabs(d) < 64.0 ? (float)d : 0.0f;
+}
+
+/* At 0x91B32: esi the zoom, ecx and edi the scroll as the game made it.
+ * The same from the unrounded centre: sub_00059D40's f1 and f2 (sub_00061660
+ * without its rounding), 0x91A84's sums without their divisions. */
+static void sea_map_frac(void)
+{
+    int32_t px, py, z = (int32_t)g_esi;
+    int32_t w = S60_MEM32(0x0049C3A4u), h = S60_MEM32(0x0049C3A0u), k, a, ay;
+    double x, y, sx, sy;
+
+    g_seamap.fx = g_seamap.fy = 0.0f;
+    if (z <= 0 || w <= 0 || h <= 40)
+        return;
+    sea_map_pos(&px, &py);
+    x = (double)px / 2000.0;
+    y = (double)py / 2000.0;
+    k = (z - 1) / 2 - 3;
+    sx = x / 462000.0 * 800.0 + 100.0 + 87.0 * k;
+    sy = (292000.0 - y) / 292000.0 * 640.0 + 5.0;
+    sy = sy * (double)(h - 40) / (double)h + 50.0 * k;
+    a = 0x800 / z;
+    ay = 0x50C / z;
+    if (a <= 0 || ay <= 0)
+        return;
+    g_seamap.fx = sea_map_axis((int32_t)g_ecx, sx, w * 100 / a);
+    g_seamap.fy = sea_map_axis((int32_t)g_edi, sy, (h - 40) * 100 / ay);
+    {   /* RECOMP_PIRATES_SEA_MAP_LOG=1 (test): a line a map frame */
+        static int log = -1;
+        if (log < 0)
+            log = recomp_config_bool("RECOMP_PIRATES_SEA_MAP_LOG", "sea_map_log", 0);
+        if (log)
+            fprintf(stderr, "[SEAMAP] z %d scroll %d %d exact %.3f %.3f shift %.3f %.3f\n",
+                    z, (int32_t)g_ecx, (int32_t)g_edi, sx, sy, g_seamap.fx, g_seamap.fy);
+    }
+}
+
+static int sea_map_guest_hook(uint32_t va)
+{
+    switch (va) {
+    case 0x00091A65u: {
+        int32_t x, y;
+        if (sea_map_snap())
+            break;
+        sea_map_pos(&x, &y);
+        g_eax = (uint32_t)(x / 2000);
+        S60_MEM32(g_esp) = y / 2000;
+        break;
+    }
+    case 0x00091B32u:
+        if (sea_map_snap())
+            break;
+        sea_map_frac();
+        g_seamap.in_draw = 1;
+        break;
+    case 0x00091B37u:
+        g_seamap.in_draw = 0;
+        break;
+    case 0x000E0439u:
+        if (g_seamap.in_draw) {
+            float f;
+            memcpy(&f, (const void *)((uintptr_t)(g_esp + 0x3Cu) + g_xbox_mem_offset), 4);
+            f += g_seamap.fx;
+            memcpy((void *)((uintptr_t)(g_esp + 0x3Cu) + g_xbox_mem_offset), &f, 4);
+            memcpy(&f, (const void *)((uintptr_t)(g_esp + 0x44u) + g_xbox_mem_offset), 4);
+            f -= g_seamap.fy;
+            memcpy((void *)((uintptr_t)(g_esp + 0x44u) + g_xbox_mem_offset), &f, 4);
+        }
+        break;
+    default:
+        return 0;
+    }
+    return 1;
+}
+
 void recomp_guest_hook(uint32_t va)
 {
     int skip;
@@ -1796,29 +1933,8 @@ void recomp_guest_hook(uint32_t va)
     if (btl_guest_hook(va))                 /* the battle's */
         return;
 
-    /* The sea's parchment map (BLACK at sea; sub_00091170 at 0x91A3B): the
-     * game centres it on the ship's whole map cell (0x4C70EC/E8, the
-     * position / 4,000,000) times 2000, while the camera follows the
-     * position / 2000. So the map stood still and then jumped a cell, about
-     * 1% of the screen, twice a second when sailing fast, at any frame rate;
-     * the smooth sea under it at a high one made it plain. It is given the
-     * position / 2000, the camera's own units, from the same source the
-     * cell was taken from (0x85A38: bit 0x80 of 0x49C298 follows 0x49D040/60,
-     * else our ship). At the call to sub_00059D40 the x is in eax and the y
-     * on top of the stack. sea_map_snap = 1 (RECOMP_PIRATES_SEA_MAP_SNAP)
-     * keeps the console's whole cells. */
-    if (va == 0x00091A65u) {
-        static int snap = -1;
-        int follow;
-        if (snap < 0)
-            snap = recomp_config_bool("RECOMP_PIRATES_SEA_MAP_SNAP", "sea_map_snap", 0);
-        if (!snap) {
-            follow = (S60_MEM32(0x0049C298u) & 0x80) != 0;
-            g_eax = (uint32_t)(S60_MEM32(follow ? 0x0049D040u : 0x004564BCu) / 2000);
-            S60_MEM32(g_esp) = S60_MEM32(follow ? 0x0049D060u : 0x004564C0u) / 2000;
-        }
+    if (sea_map_guest_hook(va))             /* the sea's parchment map */
         return;
-    }
 
     /* The sea loop's frame runs from the tick read at 0x9190F past its
      * frame wait to 0x9267B; it leaves through 0x92681 (both of its exits).

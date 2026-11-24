@@ -407,7 +407,7 @@
   },
   {
    "address": "0x00091A65",
-   "note": "sea map: the parchment map centred on the position / 2000, not the whole map cell x 2000"
+   "note": "sea map: centred on the position / 2000, not the whole map cell x 2000"
   },
   {
    "address": "0x0008513E",
@@ -416,6 +416,18 @@
   {
    "address": "0x00088D3A",
    "note": "sea_fps: the dock word's first step on arriving in port: 33 ms on the tick, 0 between"
+  },
+  {
+   "address": "0x00091B32",
+   "note": "sea map: the scroll's dropped part of a pixel, before sub_0005BCC0 draws the map"
+  },
+  {
+   "address": "0x00091B37",
+   "note": "sea map: sub_0005BCC0's call ends"
+  },
+  {
+   "address": "0x000E0439",
+   "note": "sea map: a sprite's place (sub_000DFDF0), moved by the dropped part of a pixel during the map's call"
   }
  ]
 }
