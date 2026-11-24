@@ -1734,11 +1734,15 @@ static int btl_guest_hook(uint32_t va)
     return 1;
 }
 
+static int sea_map_guest_hook(uint32_t va);
+
 void recomp_guest_hook(uint32_t va)
 {
     int skip;
 
     if (menu_guest_hook(va))                /* the main menu's EXIT row */
+        return;
+    if (sea_map_guest_hook(va))             /* the world map's stick at sea */
         return;
 
     /* The short-lived effects' ages in a town scene (as btl_guest_hook does
@@ -2062,12 +2066,11 @@ void sub_000CBEE0(void) { if (!btl_off_tick_bit(4u, 0x20u)) sub_000CBEE0_gen(); 
  * sub_000C72F0), and their pause menus keep the vblank's 60. A tab switch
  * inside the menu calls sub_00131170 again and stays counted.
  *
- * The world map tab (sub_0005D8C0) is held at 60 whatever sea_fps is (by
- * the gate's title rate, so a frame cap that is off or above 60 does not
- * lift it either): the stick
- * scrolls the map a fixed step a frame, so at 144 one push went more than
- * twice as far. Its
- * cursor's pulse runs on the clock (sub_0005BCC0 reads the tick). */
+ * The world map tab (sub_0005D8C0) runs at the sailing rate too when it is
+ * above 60 (sea_map_guest_hook below keeps its stick at the speed it has
+ * at 60). At 30 and 60 it is held at 60 by the gate's title rate, as
+ * before, so a frame cap that is off or above 60 does not lift it either.
+ * Its cursor's pulse runs on the clock (sub_0005BCC0 reads the tick). */
 static int g_sea_menu_depth;   /* menu calls running that were opened from the sea loop */
 static int g_sea_menu_map;     /* the world map tab is running inside it */
 
@@ -2103,12 +2106,115 @@ void sub_001313F0(void)
         g_sea_menu_depth--;
 }
 
+static int32_t g_sea_map_x, g_sea_map_y;   /* the view the stick last left (clamped at the next frame) */
+static int g_sea_map_frames;                /* frames the stick moved it, this visit */
+
 extern void sub_0005D8C0_gen(void);
 void sub_0005D8C0(void)
 {
     g_sea_menu_map++;
     sub_0005D8C0_gen();
     g_sea_menu_map--;
+    if (g_sea_menu_depth > 0 && g_sea_map_frames > 0) {   /* for the tests: where it was left */
+        fprintf(stderr, "[SEA60] world map closed: view %d,%d after %d stick frames\n",
+                g_sea_map_x, g_sea_map_y, g_sea_map_frames);
+        fflush(stderr);
+        g_sea_map_frames = 0;
+    }
+}
+
+/* The world map's stick, faster than 60 (sea_fps above 60 or unlocked).
+ *
+ * Each frame the map is not choosing a city ([esp+0x150] set), the loop of
+ * sub_0005D8C0 moves its view (x in ebp, y in edi and [esp+0x18]) at
+ * 0x5E3D0..0x5E44D by the pad's axes for this controller (0x4D6734's
+ * table, 0x4D4170..0x4D4280) times 12 / zoom, each product cut to a whole
+ * number: a fixed step a frame, at the 60 a second the console draws it.
+ * It is clamped to the map from 0x5E451 on.
+ *
+ * So the step the console takes is kept, cut as it cuts it (a slight push
+ * still moves nothing), and only how much of it a frame gets changes: the
+ * step times the frame's time over a 60th of a second, the part of a pixel
+ * left over carried to the next frame. A frame after a gap of more than
+ * 100 ms (the map just opened, or back from choosing a city) counts as a
+ * 60th; a slow frame counts as at most three. At 30 and 60 the map runs at
+ * 60 and nothing changes. */
+static struct {
+    int armed;                 /* 0x5E3D0 passed this frame */
+    int32_t x0, y0;            /* the view before the stick's step */
+    double fx, fy;             /* the step owed, in pixels, not yet taken */
+    int64_t last_ns;           /* host time of the last stick pass */
+} g_sea_map;
+
+static int sea_map_fast(void)
+{
+    int rate;
+
+    if (g_sea_menu_depth <= 0 || g_sea_menu_map <= 0)
+        return 0;
+    rate = sea60_read_rate();
+    return rate != 30 && rate != 60;
+}
+
+static int32_t sea_map_take(double *owed, int32_t step, double frames)
+{
+    int32_t whole;
+
+    if (step == 0) {                   /* the stick let go on this axis */
+        *owed = 0.0;
+        return 0;
+    }
+    *owed += step * frames;
+    whole = (int32_t)*owed;            /* toward 0, as the console cuts */
+    *owed -= whole;
+    return whole;
+}
+
+static int sea_map_guest_hook(uint32_t va)
+{
+    if (va == 0x0005E3D0u) {
+        g_sea_map.armed = sea_map_fast();
+        if (g_sea_map.armed) {
+            g_sea_map.x0 = (int32_t)g_ebp;
+            g_sea_map.y0 = (int32_t)g_edi;
+        }
+        return 1;
+    }
+    if (va == 0x0005E451u) {
+        int64_t now;
+        double frames;
+
+        if (g_sea_menu_depth > 0 && g_sea_menu_map > 0 && !g_sea_map.armed) {
+            if ((int32_t)g_ebp != g_sea_map_x || (int32_t)g_edi != g_sea_map_y)
+                g_sea_map_frames++;
+            g_sea_map_x = (int32_t)g_ebp;
+            g_sea_map_y = (int32_t)g_edi;
+        }
+        if (!g_sea_map.armed)
+            return 1;
+        g_sea_map.armed = 0;
+        now = host_time_ns();
+        frames = 1.0;
+        if (g_sea_map.last_ns && now - g_sea_map.last_ns <= 100000000) {
+            frames = (double)(now - g_sea_map.last_ns) * 60.0 / 1e9;
+            if (frames > 3.0)
+                frames = 3.0;
+        } else {
+            g_sea_map.fx = g_sea_map.fy = 0.0;
+        }
+        g_sea_map.last_ns = now;
+        g_ebp = (uint32_t)(g_sea_map.x0 +
+                           sea_map_take(&g_sea_map.fx, (int32_t)g_ebp - g_sea_map.x0, frames));
+        g_edi = (uint32_t)(g_sea_map.y0 +
+                           sea_map_take(&g_sea_map.fy, (int32_t)g_edi - g_sea_map.y0, frames));
+        S60_MEM32(g_esp + 0x18u) = (int32_t)g_edi;
+        if ((int32_t)g_ebp != g_sea_map_x || (int32_t)g_edi != g_sea_map_y)
+            g_sea_map_frames++;
+        g_sea_map_x = (int32_t)g_ebp;
+        g_sea_map_y = (int32_t)g_edi;
+        return 1;
+    }
+    return 0;
 }
 
 extern void sub_000FD780_gen(void);
@@ -2119,20 +2225,22 @@ void sub_000FD780(void)
         int setting = sea60_read_rate();
         int rate = setting;
 
-        if (g_sea_menu_map > 0)
-            rate = 60;                     /* the map scrolls a step a frame */
+        if (g_sea_menu_map > 0 && (rate == 30 || rate == 60))
+            rate = 60;                     /* the map: 60, as before */
         if (rate != said) {
             said = rate;
             if (rate == 30 || rate == 60)
                 fprintf(stderr, "[SEA60] pause menu at sea: 60 (sea_fps = %d%s)\n",
                         setting < 0 ? 0 : setting, g_sea_menu_map > 0 ? ", world map" : "");
             else if (rate < 0)
-                fprintf(stderr, "[SEA60] pause menu at sea: unlocked (sea_fps = 0)\n");
+                fprintf(stderr, "[SEA60] pause menu at sea: unlocked (sea_fps = 0%s)\n",
+                        g_sea_menu_map > 0 ? ", world map" : "");
             else
-                fprintf(stderr, "[SEA60] pause menu at sea: %d frames a second\n", rate);
+                fprintf(stderr, "[SEA60] pause menu at sea: %d frames a second%s\n", rate,
+                        g_sea_menu_map > 0 ? " (world map)" : "");
             fflush(stderr);
         }
-        if (g_sea_menu_map > 0)
+        if (g_sea_menu_map > 0 && rate == 60)
             sea60_set_gate(60);            /* 60 by the host clock, over any frame cap */
         else if (rate != 30 && rate != 60)
             sea60_set_gate(rate);
