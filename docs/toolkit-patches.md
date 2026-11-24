@@ -663,3 +663,20 @@ Each one, with the reason it exists:
   and any warning; the footer's pad hints are gone and the buttons are
   Continue and Quit game at the bottom right. Same colours, same fonts,
   same input; Resume is renamed Continue in the text fallback too.
+
+- **0066-offscreen-target-scale** (`src/d3d/d3d8_device.c`,
+  `d3d8_resources.c`, `d3d8_internal.h`, `d3d8_xbox.h`,
+  `src/hle/hle_d3d8.c`, `src/hle/hle_settings_menu.c`). Sorin asked for
+  sharper ship reflections at sea. The game draws them into small render
+  target textures (256x256 and 512x512) that the sea samples through
+  `PSDistortReflections_XB`; only screen-sized targets were drawn at the
+  scene's resolution. `xbox_D3D8SetOffscreenScale(w, h, scale)` names a
+  target size to draw at 2-8 times its size on the host; the texture keeps
+  the title's size everywhere else, and the viewport, scissor and clears
+  already scale by the target's host size. A pass into such a target gets
+  a stand-in depth of the host size (the host refuses a depth of another
+  size), never a title-sized depth texture. `RECOMP_D3D8_RT_SCALE` overrides
+  it for tests (`2`, or `4@256x256,512x512`). The F2 Display tab gets a
+  "Water reflections" row (Console, Sharp, Sharpest: the game's
+  `water_reflection` = 1, 2 or 4, applied at the next start, set in
+  `src/main.c`).

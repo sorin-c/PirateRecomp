@@ -147,6 +147,7 @@ defaults. Every line names the environment variable that overrides it, so a
 | `fps_overlay` | `0` | Frame-rate counter. |
 | `fullscreen` | `0` | Fullscreen window. |
 | `anisotropy` | `0` | Texture sharpness: `0` off (the game's own filtering), `1`, `2`, `4`, `8` or `16`. |
+| `water_reflection` | `1` | Ships' reflections in the sea: `1` the console's size, `2` or `4` times that (sharper). Applies at the next start. |
 | `vrr` | `0` | Variable refresh rate. |
 | `vsync` | `1` | Wait for the monitor's refresh: no tearing, frame rate at most the refresh rate. `0` off. |
 | `pad_follow_input` | `1` | Controller 1 is the pad used last. |
