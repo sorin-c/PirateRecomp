@@ -1,0 +1,93 @@
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index aa31162..876db1d 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -99,8 +99,8 @@ typedef struct {
+     int title;                           /* the title's own line: shown only if known */
+     int experimental;
+     int n;
+-    const char *vals[8];                 /* as written to the file */
+-    const char *names[8];                /* as shown */
++    const char *vals[12];                /* as written to the file */
++    const char *names[12];               /* as shown */
+     const char *help;
+ } Item;
+ 
+@@ -175,11 +175,11 @@ static const Item ITEMS[] = {
+       "sailing smooth while something else is busy." },
+ 
+     /* Controls */
+-    { TAB_CONTROLS, "Pad", "Vibration strength", "vibration", "RECOMP_VIBRATION", LIVE_VIBRATION, 0, 0, 7,
+-      { "0", "25", "50", "75", "100", "125", "150" },
+-      { "Off", "25%", "50%", "75%", "100%", "125%", "150%" },
+-      "How strongly the pad rumbles when the game asks it to. Above 100% makes weak rumbles "
+-      "stronger; the strongest stay at the pad's maximum." },
++    { TAB_CONTROLS, "Pad", "Vibration strength", "vibration", "RECOMP_VIBRATION", LIVE_VIBRATION, 0, 0, 11,
++      { "0", "10", "20", "30", "40", "50", "60", "70", "80", "90", "100" },
++      { "Off", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%" },
++      "How strongly the pad rumbles when the game asks it to, from off to the full strength "
++      "the game asks for." },
+ };
+ #define ITEM_COUNT ((int)(sizeof ITEMS / sizeof ITEMS[0]))
+ 
+diff --git a/src/input/input_bindings.c b/src/input/input_bindings.c
+index ccbeeb4..5e8a045 100644
+--- a/src/input/input_bindings.c
++++ b/src/input/input_bindings.c
+@@ -1264,20 +1264,26 @@ unsigned recomp_bindings_present_mask(void)
+     return mask;
+ }
+ 
+-/* Vibration strength, 0 to 150 percent of what the title asks for
+- * (`vibration` in the settings file, RECOMP_VIBRATION; 100 by default). Above
+- * 100 makes a weak rumble stronger; a motor never goes past its maximum.
++/* Vibration strength, 0 to 100 percent of what the title asks for, in steps
++ * of 10 (`vibration` in the settings file, RECOMP_VIBRATION; 100 by default).
+  * -1: not read yet. */
+ static volatile int g_vibration = -1;
+ 
++/* Into 0..100, to the nearest 10: a file from when the steps were 25 and the
++ * top was 150 still loads (25 is 30, 150 is 100). */
++static int vibration_step(int percent)
++{
++    if (percent < 0) percent = 0;
++    if (percent > 100) percent = 100;
++    return (percent + 5) / 10 * 10;
++}
++
+ static int vibration_percent(void)
+ {
+     int v = g_vibration;
+ 
+     if (v < 0) {
+-        v = recomp_config_int("RECOMP_VIBRATION", "vibration", 100);
+-        if (v < 0) v = 0;
+-        if (v > 150) v = 150;
++        v = vibration_step(recomp_config_int("RECOMP_VIBRATION", "vibration", 100));
+         g_vibration = v;
+     }
+     return v;
+@@ -1290,9 +1296,7 @@ int recomp_bindings_vibration(void)
+ 
+ void recomp_bindings_set_vibration(int percent)
+ {
+-    if (percent < 0) percent = 0;
+-    if (percent > 150) percent = 150;
+-    g_vibration = percent;
++    g_vibration = vibration_step(percent);
+ }
+ 
+ static unsigned short scale_motor(unsigned short speed, int percent)
+diff --git a/src/input/input_bindings.h b/src/input/input_bindings.h
+index 7f6bb91..b465994 100644
+--- a/src/input/input_bindings.h
++++ b/src/input/input_bindings.h
+@@ -55,7 +55,7 @@ void recomp_bindings_set_bumper_test(RecompBumperTest test);
+ /* Rumble on the pad this port reads, 0..65535 per motor as XInputSetState
+  * takes it. Nothing happens for a keyboard port or a pad without motors. */
+ void recomp_bindings_rumble(unsigned port, unsigned short low, unsigned short high);
+-/* Vibration strength, 0 to 150 percent of what the title asks for: the
++/* Vibration strength, 0 to 100 percent of what the title asks for, in steps of 10: the
+  * `vibration` setting, changed live by the in-game settings menu. */
+ int  recomp_bindings_vibration(void);
+ void recomp_bindings_set_vibration(int percent);
