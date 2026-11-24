@@ -1,0 +1,308 @@
+diff --git a/src/d3d/d3d8_combiners.c b/src/d3d/d3d8_combiners.c
+index 884e589..6a20245 100644
+--- a/src/d3d/d3d8_combiners.c
++++ b/src/d3d/d3d8_combiners.c
+@@ -764,6 +764,34 @@ static int emit_xbox_textures(const NV2ACombinerState *state, char *buf,
+             EMIT("    {\n");
+             EMIT("        float2 duv = bump_signed[%d] != 0 ? r_t%d.rg : bump_s8(r_t%d.bg);\n",
+                  i, in, in);
++            /* An unsigned source holds signed bytes, and the NV2A converts
++             * each texel to signed before it filters (the stage's
++             * COLORSIGN). Filtered as unsigned colour, two neighbours either
++             * side of 0x7F/0x80 blend into a wrong offset of nearly the
++             * whole range. Where one output pixel meets one texel that
++             * barely shows; a reflection drawn larger than the console's
++             * (xbox_D3D8SetOffscreenScale) lands between texels and broke
++             * into blocks and streaks. So the four texels are read at
++             * their centres, made signed, and blended here. */
++            if (in < i && state->xmode[in] == XTM_PROJECT2D && !state->shadow[in] &&
++                state->tex_mode[in] != NV2A_TEXMODE_NONE &&
++                state->tex_mode[in] != NV2A_TEXMODE_CUBEMAP &&
++                state->tex_mode[in] != NV2A_TEXMODE_3D) {
++                EMIT("        if (bump_signed[%d] == 0) {\n", i);
++                EMIT("            uint bw, bh;\n");
++                EMIT("            tex%d.GetDimensions(bw, bh);\n", in);
++                EMIT("            float2 bsz = float2(max(bw, 1u), max(bh, 1u));\n");
++                EMIT("            float2 bp = input.tc%d.xy / qdiv(input.tc%d.w) * tex_scale[%d].xy"
++                     " * bsz - 0.5;\n", in, in, in);
++                EMIT("            float2 bf = frac(bp);\n");
++                EMIT("            float2 b0 = (floor(bp) + 0.5) / bsz, bd = 1.0 / bsz;\n");
++                EMIT("            float2 s00 = bump_s8(tex%d.SampleLevel(samp%d, b0, 0).bg);\n", in, in);
++                EMIT("            float2 s10 = bump_s8(tex%d.SampleLevel(samp%d, b0 + float2(bd.x, 0), 0).bg);\n", in, in);
++                EMIT("            float2 s01 = bump_s8(tex%d.SampleLevel(samp%d, b0 + float2(0, bd.y), 0).bg);\n", in, in);
++                EMIT("            float2 s11 = bump_s8(tex%d.SampleLevel(samp%d, b0 + bd, 0).bg);\n", in, in);
++                EMIT("            duv = lerp(lerp(s00, s10, bf.x), lerp(s01, s11, bf.x), bf.y);\n");
++                EMIT("        }\n");
++            }
+             EMIT("        float2 off = float2(dot(bump_mat[%d].xz, duv),"
+                  " dot(bump_mat[%d].yw, duv));\n", i, i);
+             EMIT("        r_t%d = tex%d.Sample(samp%d, (input.tc%d.xy / qdiv(input.tc%d.w)"
+diff --git a/src/d3d/d3d8_device.c b/src/d3d/d3d8_device.c
+index 71b9b66..6aadd32 100644
+--- a/src/d3d/d3d8_device.c
++++ b/src/d3d/d3d8_device.c
+@@ -376,6 +376,143 @@ BOOL d3d8_scene_target_size(UINT w, UINT h, UINT *host_w, UINT *host_h)
+     return TRUE;
+ }
+ 
++/* Offscreen colour targets drawn at a multiple of the title's size
++ * (xbox_D3D8SetOffscreenScale): a reflection or a glow the console drew
++ * small, and the host can afford to draw sharper. Only the sizes a title
++ * names, so a target the title reads back, copies by the pixel or blurs
++ * with texel-sized steps keeps its own size unless the title asks.
++ * RECOMP_D3D8_RT_SCALE overrides what the title said, for tests:
++ * "<scale>" for the title's sizes, "<scale>@WxH,WxH" for these, "1" none. */
++#define OFFSCREEN_SIZES 8
++static UINT g_off_scale[OFFSCREEN_SIZES], g_off_w[OFFSCREEN_SIZES], g_off_h[OFFSCREEN_SIZES];
++static int  g_off_n;
++static int  g_off_env = -1;                 /* -1 not read, 0 none, 1 env decides the scale,
++                                             * 2 also the sizes, 3 malformed: nothing scaled */
++static UINT g_off_env_scale = 1;
++
++/* A decimal number of 1 to 8192 at *p, moving *p past it; 0 if there is none. */
++static UINT offscreen_number(const char **p)
++{
++    char *end;
++    unsigned long v;
++
++    if (**p < '0' || **p > '9')
++        return 0;
++    v = strtoul(*p, &end, 10);
++    *p = end;
++    return v >= 1 && v <= 8192 ? (UINT)v : 0;
++}
++
++static void offscreen_env(void)
++{
++    const char *e, *p;
++    UINT scale, w[OFFSCREEN_SIZES], h[OFFSCREEN_SIZES];
++    int n = 0, i;
++
++    if (g_off_env >= 0)
++        return;
++    g_off_env = 0;
++    e = getenv("RECOMP_D3D8_RT_SCALE");
++    if (!e || !e[0])
++        return;
++    /* "<scale>" or "<scale>@WxH,WxH": anything else is refused whole, so a
++     * typo never scales targets it did not mean to. */
++    p = e;
++    scale = offscreen_number(&p);
++    if (!scale || scale > 8)
++        goto bad;
++    if (*p == '@') {
++        do {
++            if (n == OFFSCREEN_SIZES)
++                goto bad;
++            p++;
++            w[n] = offscreen_number(&p);
++            if (!w[n] || *p != 'x')
++                goto bad;
++            p++;
++            h[n] = offscreen_number(&p);
++            if (!h[n])
++                goto bad;
++            n++;
++        } while (*p == ',');
++    }
++    if (*p)
++        goto bad;
++    g_off_env_scale = scale;
++    if (!n) {
++        g_off_env = 1;                      /* the title's sizes, this scale */
++        return;
++    }
++    for (i = 0; i < n; i++) {
++        g_off_w[i] = w[i];
++        g_off_h[i] = h[i];
++        g_off_scale[i] = scale;
++    }
++    g_off_n = n;
++    g_off_env = 2;                          /* the sizes are the variable's */
++    return;
++bad:
++    g_off_env = 3;                          /* malformed: nothing is drawn larger */
++    g_off_n = 0;
++    fprintf(stderr, "D3D8: RECOMP_D3D8_RT_SCALE=%s is malformed, so no render target is drawn "
++            "larger: give \"<1-8>\" or \"<1-8>@WxH,WxH\" (at most %d sizes)\n", e, OFFSCREEN_SIZES);
++}
++
++void xbox_D3D8SetOffscreenScale(UINT width, UINT height, UINT scale)
++{
++    int i;
++
++    offscreen_env();
++    if (g_off_env >= 2 || !width || !height)
++        return;
++    if (scale < 1) scale = 1;
++    if (scale > 8) scale = 8;
++    for (i = 0; i < g_off_n; i++)
++        if (g_off_w[i] == width && g_off_h[i] == height)
++            break;
++    if (i == g_off_n) {
++        if (g_off_n == OFFSCREEN_SIZES)
++            return;
++        g_off_n++;
++    }
++    g_off_w[i] = width;
++    g_off_h[i] = height;
++    g_off_scale[i] = scale;
++    fprintf(stderr, "D3D8: %ux%u render target textures drawn at %ux (title)%s\n",
++            width, height, scale, g_off_env == 1 ? "; RECOMP_D3D8_RT_SCALE overrides the scale" : "");
++}
++
++BOOL d3d8_offscreen_target_size(UINT w, UINT h, UINT *host_w, UINT *host_h)
++{
++    UINT scale = 0;
++    int i;
++
++    offscreen_env();
++    if (g_off_env == 3)
++        return FALSE;
++    for (i = 0; i < g_off_n; i++)
++        if (g_off_w[i] == w && g_off_h[i] == h) {
++            scale = g_off_env == 1 ? g_off_env_scale : g_off_scale[i];
++            break;
++        }
++    if (scale <= 1)
++        return FALSE;
++    /* Within what every D3D11 device holds. */
++    while (scale > 1 && (w * scale > 8192 || h * scale > 8192))
++        scale--;
++    if (scale <= 1)
++        return FALSE;
++    *host_w = w * scale;
++    *host_h = h * scale;
++    {
++        static int said;
++        if (said++ < 4)
++            fprintf(stderr, "D3D8: a %ux%u render target texture is drawn at %ux%u\n",
++                    w, h, *host_w, *host_h);
++    }
++    return TRUE;
++}
++
+ /* xbox_D3D8KeepPresented: the frame as it reaches the swap chain. */
+ static BOOL     g_keep_presented;
+ static uint8_t *g_presented;
+diff --git a/src/d3d/d3d8_internal.h b/src/d3d/d3d8_internal.h
+index ad60a5f..e4c5e6c 100644
+--- a/src/d3d/d3d8_internal.h
++++ b/src/d3d/d3d8_internal.h
+@@ -125,6 +125,8 @@ BOOL d3d8_texture_info(IDirect3DBaseTexture8 *texture, D3D8TextureInfo *info);
+ /* d3d8_device.c: the host size of a screen-sized colour render target, drawn
+  * at the scene's supersampling; FALSE for any other size. */
+ BOOL d3d8_scene_target_size(UINT w, UINT h, UINT *host_w, UINT *host_h);
++/* A smaller target the title asked to have drawn larger (xbox_D3D8SetOffscreenScale). */
++BOOL d3d8_offscreen_target_size(UINT w, UINT h, UINT *host_w, UINT *host_h);
+ 
+ /* A cube texture's shape, for frame capture. TRUE only for a cube, so this
+  * doubles as the type test against d3d8_texture_info. */
+diff --git a/src/d3d/d3d8_resources.c b/src/d3d/d3d8_resources.c
+index cb60630..c2439ec 100644
+--- a/src/d3d/d3d8_resources.c
++++ b/src/d3d/d3d8_resources.c
+@@ -1637,11 +1637,15 @@ HRESULT d3d8_CreateTextureImpl(UINT Width, UINT Height, UINT Levels, DWORD Usage
+     /* A colour target the size of the title's screen is drawn at the
+      * scene's supersampling (d3d8_scene_target_size): the title renders a
+      * whole frame into it and puts that on the screen. The texture keeps the
+-     * title's size everywhere else; only its host image is larger. */
++     * title's size everywhere else; only its host image is larger. So is a
++     * smaller target of a size the title named (d3d8_offscreen_target_size):
++     * its reflection, drawn sharper. */
+     if (want_srv && (Usage & D3DUSAGE_RENDERTARGET) && tex->levels == 1) {
+         UINT hw, hh;
+ 
+-        if (d3d8_scene_target_size(Width, Height, &hw, &hh)) {
++        if (d3d8_scene_target_size(Width, Height, &hw, &hh) ||
++            (!d3d8_format_is_depth(Format) &&
++             d3d8_offscreen_target_size(Width, Height, &hw, &hh))) {
+             td.width = hw;
+             td.height = hh;
+         }
+diff --git a/src/d3d/d3d8_xbox.h b/src/d3d/d3d8_xbox.h
+index 8b13224..b5716e6 100644
+--- a/src/d3d/d3d8_xbox.h
++++ b/src/d3d/d3d8_xbox.h
+@@ -1216,6 +1216,12 @@ const uint8_t *xbox_D3D8Presented(UINT *width, UINT *height);
+ /* The size the guest presents at, for its screen-space geometry; the HLE
+  * sets it from the title's present parameters (d3d8_GetGuestWidth). */
+ void xbox_D3D8SetGuestSize(UINT width, UINT height);
++/* Draw the title's render target textures of width x height at `scale`
++ * times that size on the host (1 to 8; 1 takes the size off the list):
++ * a reflection or a glow the console drew small, drawn sharper. Call before
++ * the targets are made, so at start-up; one already made keeps its size.
++ * RECOMP_D3D8_RT_SCALE overrides it ("<scale>" or "<scale>@WxH,WxH"). */
++void xbox_D3D8SetOffscreenScale(UINT width, UINT height, UINT scale);
+ 
+ /* The Xbox's D3DDevice_SetScissors: clip drawing to the rectangles (or, with
+  * exclusive set, outside them); count 0 turns it off. The host applies one
+diff --git a/src/hle/hle_d3d8.c b/src/hle/hle_d3d8.c
+index 957de86..4eed2f5 100644
+--- a/src/hle/hle_d3d8.c
++++ b/src/hle/hle_d3d8.c
+@@ -5858,6 +5858,7 @@ static void shadow_set_render_target(uint32_t rt, uint32_t zs)
+     uint32_t fmt, zfmt = 0, parent;
+     int kind, i;                         /* 0 back buffer, 1 texture, 2 scratch, 3 cube */
+     int stand_in = 0;                    /* a scratch depth in the device depth's place */
++    int scaled = 0;                      /* the colour target's host size is not the title's */
+ 
+     /* A NULL target keeps the current one; only the depth surface changes. */
+     if (!rt)
+@@ -6069,7 +6070,17 @@ static void shadow_set_render_target(uint32_t rt, uint32_t zs)
+         depth = (kind == 0 && own && g_device_depth) ? g_device_depth : NULL;
+         /* A depth texture the title will sample: render into its host copy
+          * (RECOMP_HLE_D3D8_SHADOW_MAPS=0 for the old scratch depth). */
+-        if (!depth && zw == w && zh == h && depth_texture_of(zs) && shadow_maps_on()) {
++        /* A depth texture is the title's size, so it cannot go beside a
++         * colour target drawn larger than that (xbox_D3D8SetOffscreenScale):
++         * such a pass gets a depth of its own size below instead. */
++        if (texture && kind == 1) {
++            UINT tw = w, th = h;
++
++            if (xbox_D3D8TextureHostSize(texture, level, &tw, &th) && (tw != w || th != h))
++                scaled = 1;
++        }
++        if (!depth && !scaled && zw == w && zh == h && depth_texture_of(zs) &&
++            shadow_maps_on()) {
+             depth = depth_texture_surface(depth_texture_of(zs));
+             if (depth) {
+                 g_shadow_map_sets++;
+@@ -6088,10 +6099,20 @@ static void shadow_set_render_target(uint32_t rt, uint32_t zs)
+             share_device_depth_on() && device_depth_fits(texture, level))
+             depth = g_device_depth;
+         if (!depth) {
+-            depth = depth_surface(w, h);
++            /* The target's host size, which the host needs the depth to
++             * match: larger than the title's for a target drawn sharper
++             * (xbox_D3D8SetOffscreenScale) or with the scene. */
++            UINT dw = w, dh = h;
++
++            if (texture && kind == 1 &&
++                !xbox_D3D8TextureHostSize(texture, level, &dw, &dh)) {
++                dw = w;
++                dh = h;
++            }
++            depth = depth_surface(dw, dh);
+             stand_in = own && kind != 0 && depth != NULL;
+         }
+-        g_target_shadow_map = depth && depth_texture_of(zs) && zw == w && zh == h &&
++        g_target_shadow_map = depth && !scaled && depth_texture_of(zs) && zw == w && zh == h &&
+                               shadow_maps_on() && kind != 0;
+     } else {
+         /* No depth surface: Z decides nothing but clipping, and the scale
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index 686efed..21e9b83 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -144,6 +144,10 @@ static const Item ITEMS[] = {
+       { "0", "1", "2", "4", "8", "16" }, { "Off", "1x", "2x", "4x", "8x", "16x" },
+       "Anisotropic filtering: keeps the ground, decks and water sharp at a slant. "
+       "Off uses the game's own filtering." },
++    { TAB_DISPLAY, "Picture", "Water reflections", "water_reflection", "RECOMP_PIRATES_WATER_REFLECTION", LIVE_NONE, 1, 0, 3,
++      { "1", "2", "4" }, { "Console", "Sharp", "Sharpest" },
++      "How detailed the ships' reflections in the sea are. The console draws them small and "
++      "blurry; Sharp and Sharpest draw them at two and four times the size." },
+     { TAB_DISPLAY, "Frame rate", "Frame rate cap", "frame_cap", "RECOMP_FPS_CAP", LIVE_CAP, 0, 0, 4,
+       { "adaptive", "60", "30", "0" }, { "Adaptive", "60", "30", "Off" },
+       "The most frames drawn a second. Adaptive follows the display. The game itself keeps "

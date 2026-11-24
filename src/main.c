@@ -57,6 +57,10 @@
  * or the environment variable named, which wins. */
 const char *recomp_config_lookup(const char *env_name, const char *key);
 int recomp_config_bool(const char *env_name, const char *key, int fallback);
+int recomp_config_int(const char *env_name, const char *key, int fallback);
+void xbox_D3D8SetOffscreenScale(unsigned width, unsigned height, unsigned scale);
+/* The render target textures the sea's reflection is drawn into. */
+static const unsigned k_reflection_targets[][2] = { { 256, 256 }, { 512, 512 } };
 
 /*
  * If xboxrecomp.h is not an umbrella header in your setup, include
@@ -478,6 +482,20 @@ static int title_main(int argc, char **argv)
             setenv(from_file[i].env, v, 0);
 #endif
         }
+    }
+
+    /* water_reflection (src/settings_title.h): the sea's reflection
+     * targets drawn at 2 or 4 times the console's size (toolkit patch 0068).
+     * Set before the device makes them; a change applies at the next start. */
+    {
+        int scale = recomp_config_int("RECOMP_PIRATES_WATER_REFLECTION", "water_reflection", 1);
+        size_t i;
+
+        if (scale != 2 && scale != 4)
+            scale = 1;
+        for (i = 0; i < sizeof k_reflection_targets / sizeof k_reflection_targets[0]; i++)
+            xbox_D3D8SetOffscreenScale(k_reflection_targets[i][0], k_reflection_targets[i][1],
+                                       (unsigned)scale);
     }
 
     /* stdout unbuffered for immediate visibility. stderr, the log, is

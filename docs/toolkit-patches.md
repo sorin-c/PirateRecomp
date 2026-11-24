@@ -683,3 +683,27 @@ Each one, with the reason it exists:
   town_fps) now show the environment-variable tag and warning like every
   other row: the variable wins over the menu for them too, and the menu
   used to hide that. Applies on top of 0066.
+
+- **0068-offscreen-target-scale** (`src/d3d/d3d8_device.c`,
+  `d3d8_resources.c`, `d3d8_internal.h`, `d3d8_xbox.h`,
+  `src/hle/hle_d3d8.c`, `src/hle/hle_settings_menu.c`). Sorin asked for
+  sharper ship reflections at sea. The game draws them into small render
+  target textures (256x256 and 512x512) that the sea samples through
+  `PSDistortReflections_XB`; only screen-sized targets were drawn at the
+  scene's resolution. `xbox_D3D8SetOffscreenScale(w, h, scale)` names a
+  target size to draw at 2-8 times its size on the host; the texture keeps
+  the title's size everywhere else, and the viewport, scissor and clears
+  already scale by the target's host size. A pass into such a target gets
+  a stand-in depth of the host size (the host refuses a depth of another
+  size), never a title-sized depth texture. `RECOMP_D3D8_RT_SCALE` overrides
+  it for tests (`2`, or `4@256x256,512x512`). The F2 Display tab gets a
+  "Water reflections" row (Console, Sharp, Sharpest: the game's
+  `water_reflection` = 1, 2 or 4, applied at the next start, set in
+  `src/main.c`).
+  The same patch fixes how a bump source in an unsigned format is
+  filtered (`d3d8_combiners.c`): the NV2A makes each texel signed before
+  it filters, and the translator filtered first, so neighbours either side
+  of 0x7F/0x80 blended into an offset of nearly the whole range. At the
+  console's size that hardly showed; drawn larger, the reflection's
+  distortion pass broke into blocks (2x) and streaks (4x). The four texels
+  are now read at their centres, made signed and blended in the shader.

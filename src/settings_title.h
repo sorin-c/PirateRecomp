@@ -57,6 +57,11 @@ static const struct {
       "# default) as the console; 60, 90, 120, 144 or 240, or 0 unlocked,\n"
       "# draw them that often, at the speed they have on the console. Applies\n"
       "# at once from the F2 menu.                  [RECOMP_PIRATES_TOWN_FPS]\n" },
+    { "water_reflection", "1",
+      "# The ships' reflections in the sea: 1 (the default) draws them at the\n"
+      "# console's size, small and blurry; 2 and 4 draw them at two and four\n"
+      "# times that, sharper. Applies at the next start.\n"
+      "#                                    [RECOMP_PIRATES_WATER_REFLECTION]\n" },
     { "sea_60", "0",
       "# The setting before sea_fps: 1 sails at 60 while sea_fps is 30.\n"
       "#                                              [RECOMP_PIRATES_SEA_60]\n" },
