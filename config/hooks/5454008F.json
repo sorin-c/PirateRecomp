@@ -416,6 +416,14 @@
   {
    "address": "0x00088D3A",
    "note": "sea_fps: the dock word's first step on arriving in port: 33 ms on the tick, 0 between"
+  },
+  {
+   "address": "0x0005E3D0",
+   "note": "sea_fps: the world map's view before the stick's step (sub_0005D8C0)"
+  },
+  {
+   "address": "0x0005E451",
+   "note": "sea_fps: the world map's stick step scaled by the frame's time over a 60th (above 60)"
   }
  ]
 }
