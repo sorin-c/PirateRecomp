@@ -558,7 +558,8 @@ Each one, with the reason it exists:
   (Delete) puts the default back, Resume and Quit game sit at the bottom,
   and the mouse works while it is open (it is given back from mouse look and
   shown). The game keeps running behind it. New setting `vibration`
-  (`RECOMP_VIBRATION`, 0-150 %, default 100) scales the pad's rumble, live.
+  (`RECOMP_VIBRATION`, 0-150 %, default 100; 0-100 % in steps of 10 since
+  0066) scales the pad's rumble, live.
   `recomp_config_default(key)` says what a key is when the file does not
   set it. If the panel's renderer cannot start, the old text panel is drawn.
 
@@ -664,6 +665,14 @@ Each one, with the reason it exists:
   Continue and Quit game at the bottom right. Same colours, same fonts,
   same input; Resume is renamed Continue in the text fallback too.
 
+- **0066-vibration-ten-percent-steps** (`src/hle/hle_settings_menu.c`,
+  `src/input/input_bindings.c`, `input_bindings.h`). Sorin asked for the
+  vibration strength to go from 0 to 100 % in steps of 10 (Off, 10%, ...,
+  100%) instead of 0-150 % in steps of 25. The value is clamped to 0-100
+  and rounded to the nearest 10 wherever it is read or set, so an older
+  `pirates.ini` still loads (25 is 30 %, 75 is 80 %, 125 and 150 are
+  100 %). A menu item can now hold up to 12 values.
+
 - **0067-settings-menu-hud-layout** (`src/hle/hle_settings_menu.c`). A
   "HUD layout" row in the F2 Display tab, under Widescreen: Anchored to
   edges (`hud_layout = edges`, the default) or Centered 4:3 (`centered`).
@@ -673,6 +682,4 @@ Each one, with the reason it exists:
   the HUD where the game draws it. Title rows (also sea_fps, battle_fps,
   town_fps) now show the environment-variable tag and warning like every
   other row: the variable wins over the menu for them too, and the menu
-  used to hide that. Numbered 0067 because two unmerged
-  branches (vibration steps, offscreen target scale) both use 0066; it
-  applies with or without either.
+  used to hide that. Applies on top of 0066.
