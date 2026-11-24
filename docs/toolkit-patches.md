@@ -663,3 +663,13 @@ Each one, with the reason it exists:
   and any warning; the footer's pad hints are gone and the buttons are
   Continue and Quit game at the bottom right. Same colours, same fonts,
   same input; Resume is renamed Continue in the text fallback too.
+
+- **0067-settings-menu-hud-layout** (`src/hle/hle_settings_menu.c`). A
+  "HUD layout" row in the F2 Display tab, under Widescreen: Anchored to
+  edges (`hud_layout = edges`, the default) or Centered 4:3 (`centered`).
+  A title row (shown only when the title's settings know the key) that
+  applies at once: the game's widescreen HUD test (`pirates_hud_edge` in
+  `src/recomp_manual.c`) reads the key itself and, when centered, leaves
+  the HUD where the game draws it. Numbered 0067 because two unmerged
+  branches (vibration steps, offscreen target scale) both use 0066; it
+  applies with or without either.

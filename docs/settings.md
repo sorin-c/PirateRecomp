@@ -28,6 +28,7 @@ Back pressed alone still reaches the game as usual.
 | Fullscreen | at once |
 | Resolution (native, console, 720p to 8K) | next start |
 | Widescreen (16:9) | next start |
+| HUD layout (anchored to edges, centered 4:3) | at once |
 | Texture sharpness (off, 1x, 2x, 4x, 8x, 16x) | next start |
 | Variable refresh | next start |
 | VSync | at once |
@@ -102,6 +103,14 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
 - **Widescreen.** `widescreen = 1`, the default, turns on the game's own
   16:9 mode (`0` plays at 4:3). The front end (legal text, title, menus and the new-career pages) stays at 4:3
   between bars, as it was drawn, and the game world fills the screen.
+- **HUD layout.** `hud_layout` (F2 Display tab "HUD layout", applies at
+  once): `edges`, the default, moves the HUD out to the corners in
+  widescreen (at sea the crew and food rings and the compass; in a ship
+  battle the two bars with their flags, the ammo ring and the compass).
+  `centered` keeps every piece where the console draws it, inside the
+  middle 4:3 of the picture, as the console looks in widescreen. Menus,
+  dialogs, the date banner and town names are the same either way, and
+  at 4:3 the setting does nothing.
 - **Resolution.** `resolution` is how tall the picture is rendered:
   `native`, the default, is your display's own (the tallest 16:9 picture
   it holds, so 1440 on a 2560x1440 screen), or `480` (the console's),
@@ -139,6 +148,7 @@ defaults. Every line names the environment variable that overrides it, so a
 | --- | --- | --- |
 | `widescreen` | `1` | The game's own 16:9 mode. |
 | `resolution` | `native` | Picture height: `native` (the display's), `480`, `720`, `1080`, `1440`, `2160`, `2880` or `4320`. |
+| `hud_layout` | `edges` | Widescreen HUD: `edges` (corners) or `centered` (the console's middle 4:3). |
 | `frame_cap` | `adaptive` | `adaptive` (as the console), `60`, `30` or `0` (off). |
 | `frame_interp` | `1` | `1` off, `2` shows 60 where the game runs at 30. |
 | `sea_fps` | `30` | Experimental: frames a second while sailing (`0` unlocked). |

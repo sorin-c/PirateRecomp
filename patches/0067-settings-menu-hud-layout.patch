@@ -1,0 +1,16 @@
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index 73c9c43..4809c7d 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -128,6 +128,11 @@ static const Item ITEMS[] = {
+       { "0", "1" }, { "Off", "On" },
+       "Shows more of the world to the sides instead of the original 4:3 picture. "
+       "Menus keep their 4:3 frame." },
++    { TAB_DISPLAY, "Picture", "HUD layout", "hud_layout", "RECOMP_PIRATES_HUD_LAYOUT", LIVE_TITLE, 1, 0, 2,
++      { "edges", "centered" }, { "Anchored to edges", "Centered 4:3" },
++      "Where the HUD sits in widescreen. Anchored to edges moves the crew, food, compass and "
++      "the battle bars out to the corners of the screen. Centered 4:3 keeps them where the "
++      "console draws them, inside the middle 4:3 of the picture. Has no effect at 4:3." },
+     /* Names written by item_name: they follow the widescreen setting. */
+     { TAB_DISPLAY, "Picture", "Resolution", "resolution", "RECOMP_RESOLUTION", LIVE_NONE, 0, 0, 8,
+       { "native", "480", "720", "1080", "1440", "2160", "2880", "4320" },

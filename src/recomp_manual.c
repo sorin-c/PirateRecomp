@@ -413,6 +413,33 @@ static void pirates_cam_log(const float *view)
     }
 }
 
+/* hud_layout (RECOMP_PIRATES_HUD_LAYOUT, F2 Display "HUD layout", live):
+ * "edges", the default, moves the HUD out to the picture's edges as above;
+ * "centered" leaves every piece where the game draws it, in the middle 4:3,
+ * as the console shows it in widescreen. Read from the settings at most
+ * four times a second (the test runs for every HUD draw), so a change in
+ * the F2 menu shows within a quarter of a second. */
+static int pirates_hud_centered(void)
+{
+    static volatile int centered = -1;
+    static volatile uint32_t read_ms;
+    uint32_t now = pirates_host_ms();
+
+    if (centered < 0 || now - read_ms >= 250u) {
+        const char *v = recomp_config_lookup("RECOMP_PIRATES_HUD_LAYOUT", "hud_layout");
+        int c = v && (strcmp(v, "centered") == 0 || strcmp(v, "centred") == 0 ||
+                      strcmp(v, "center") == 0 || strcmp(v, "4:3") == 0);
+        read_ms = now;
+        if (c != centered) {
+            if (centered >= 0 || c)
+                fprintf(stderr, "[PIRATES] HUD layout: %s\n",
+                        c ? "centered 4:3, as the console" : "anchored to the edges");
+            centered = c;
+        }
+    }
+    return centered;
+}
+
 static int pirates_hud_edge(uint32_t handle, unsigned w, unsigned h, unsigned fmt,
                             const void *vertices, unsigned stride, unsigned count,
                             const float *world, const float *view, const float *proj)
@@ -426,6 +453,8 @@ static int pirates_hud_edge(uint32_t handle, unsigned w, unsigned h, unsigned fm
         g_cam_new_frame = 0;
         pirates_cam_log(view);
     }
+    if (pirates_hud_centered())
+        return 0;                            /* hud_layout = centered: as drawn */
     if (!battle && (handle != 0x142u || !(fmt == 0x0Fu && w == 128u && h == 32u) &&
                     !(fmt == 0x0Eu && w == 256u && h == 256u)))
         return 0;
