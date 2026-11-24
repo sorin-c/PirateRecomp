@@ -230,3 +230,42 @@ index 73c9c43..33f47bf 100644
      { TAB_DISPLAY, "Frame rate", "Frame rate cap", "frame_cap", "RECOMP_FPS_CAP", LIVE_CAP, 0, 0, 4,
        { "adaptive", "60", "30", "0" }, { "Adaptive", "60", "30", "Off" },
        "The most frames drawn a second. Adaptive follows the display. The game itself keeps "
+diff --git a/src/d3d/d3d8_combiners.c b/src/d3d/d3d8_combiners.c
+index 884e589..6a20245 100644
+--- a/src/d3d/d3d8_combiners.c
++++ b/src/d3d/d3d8_combiners.c
+@@ -764,6 +764,34 @@ static int emit_xbox_textures(const NV2ACombinerState *state, char *buf,
+             EMIT("    {\n");
+             EMIT("        float2 duv = bump_signed[%d] != 0 ? r_t%d.rg : bump_s8(r_t%d.bg);\n",
+                  i, in, in);
++            /* An unsigned source holds signed bytes, and the NV2A converts
++             * each texel to signed before it filters (the stage's
++             * COLORSIGN). Filtered as unsigned colour, two neighbours either
++             * side of 0x7F/0x80 blend into a wrong offset of nearly the
++             * whole range. Where one output pixel meets one texel that
++             * barely shows; a reflection drawn larger than the console's
++             * (xbox_D3D8SetOffscreenScale) lands between texels and broke
++             * into blocks and streaks. So the four texels are read at
++             * their centres, made signed, and blended here. */
++            if (in < i && state->xmode[in] == XTM_PROJECT2D && !state->shadow[in] &&
++                state->tex_mode[in] != NV2A_TEXMODE_NONE &&
++                state->tex_mode[in] != NV2A_TEXMODE_CUBEMAP &&
++                state->tex_mode[in] != NV2A_TEXMODE_3D) {
++                EMIT("        if (bump_signed[%d] == 0) {\n", i);
++                EMIT("            uint bw, bh;\n");
++                EMIT("            tex%d.GetDimensions(bw, bh);\n", in);
++                EMIT("            float2 bsz = float2(max(bw, 1u), max(bh, 1u));\n");
++                EMIT("            float2 bp = input.tc%d.xy / qdiv(input.tc%d.w) * tex_scale[%d].xy"
++                     " * bsz - 0.5;\n", in, in, in);
++                EMIT("            float2 bf = frac(bp);\n");
++                EMIT("            float2 b0 = (floor(bp) + 0.5) / bsz, bd = 1.0 / bsz;\n");
++                EMIT("            float2 s00 = bump_s8(tex%d.SampleLevel(samp%d, b0, 0).bg);\n", in, in);
++                EMIT("            float2 s10 = bump_s8(tex%d.SampleLevel(samp%d, b0 + float2(bd.x, 0), 0).bg);\n", in, in);
++                EMIT("            float2 s01 = bump_s8(tex%d.SampleLevel(samp%d, b0 + float2(0, bd.y), 0).bg);\n", in, in);
++                EMIT("            float2 s11 = bump_s8(tex%d.SampleLevel(samp%d, b0 + bd, 0).bg);\n", in, in);
++                EMIT("            duv = lerp(lerp(s00, s10, bf.x), lerp(s01, s11, bf.x), bf.y);\n");
++                EMIT("        }\n");
++            }
+             EMIT("        float2 off = float2(dot(bump_mat[%d].xz, duv),"
+                  " dot(bump_mat[%d].yw, duv));\n", i, i);
+             EMIT("        r_t%d = tex%d.Sample(samp%d, (input.tc%d.xy / qdiv(input.tc%d.w)"

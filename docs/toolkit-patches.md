@@ -680,3 +680,10 @@ Each one, with the reason it exists:
   "Water reflections" row (Console, Sharp, Sharpest: the game's
   `water_reflection` = 1, 2 or 4, applied at the next start, set in
   `src/main.c`).
+  The same patch fixes how a bump source in an unsigned format is
+  filtered (`d3d8_combiners.c`): the NV2A makes each texel signed before
+  it filters, and the translator filtered first, so neighbours either side
+  of 0x7F/0x80 blended into an offset of nearly the whole range. At the
+  console's size that hardly showed; drawn larger, the reflection's
+  distortion pass broke into blocks (2x) and streaks (4x). The four texels
+  are now read at their centres, made signed and blended in the shader.
