@@ -670,6 +670,9 @@ Each one, with the reason it exists:
   A title row (shown only when the title's settings know the key) that
   applies at once: the game's widescreen HUD test (`pirates_hud_edge` in
   `src/recomp_manual.c`) reads the key itself and, when centered, leaves
-  the HUD where the game draws it. Numbered 0067 because two unmerged
+  the HUD where the game draws it. Title rows (also sea_fps, battle_fps,
+  town_fps) now show the environment-variable tag and warning like every
+  other row: the variable wins over the menu for them too, and the menu
+  used to hide that. Numbered 0067 because two unmerged
   branches (vibration steps, offscreen target scale) both use 0066; it
   applies with or without either.

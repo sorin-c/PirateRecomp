@@ -418,11 +418,14 @@ static void pirates_cam_log(const float *view)
  * "centered" leaves every piece where the game draws it, in the middle 4:3,
  * as the console shows it in widescreen. Read from the settings at most
  * four times a second (the test runs for every HUD draw), so a change in
- * the F2 menu shows within a quarter of a second. */
+ * the F2 menu shows within a quarter of a second. Called only from
+ * pirates_hud_edge, which the D3D8 draw path runs on its one thread (it
+ * works on the unlocked g_device_state there too), so the cache needs no
+ * lock. */
 static int pirates_hud_centered(void)
 {
-    static volatile int centered = -1;
-    static volatile uint32_t read_ms;
+    static int centered = -1;
+    static uint32_t read_ms;
     uint32_t now = pirates_host_ms();
 
     if (centered < 0 || now - read_ms >= 250u) {

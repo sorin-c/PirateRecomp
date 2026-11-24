@@ -1,8 +1,18 @@
 diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
-index 73c9c43..4809c7d 100644
+index 73c9c43..2831a40 100644
 --- a/src/hle/hle_settings_menu.c
 +++ b/src/hle/hle_settings_menu.c
-@@ -128,6 +128,11 @@ static const Item ITEMS[] = {
+@@ -83,7 +83,8 @@ enum {
+ };
+ 
+ /* LIVE_TITLE: the title reads the key itself while it runs
+- * (recomp_config_lookup returns what the menu set), so it applies at once. */
++ * (recomp_config_lookup returns what the menu set), so it applies at once --
++ * unless its environment variable is set, which wins: the row says so. */
+ enum { LIVE_NONE, LIVE_CAP, LIVE_INTERP, LIVE_FPS, LIVE_FULLSCREEN, LIVE_TITLE, LIVE_VIBRATION, LIVE_VSYNC };
+ 
+ enum { TAB_DISPLAY, TAB_GAME, TAB_CONTROLS, TAB_ABOUT, TAB_COUNT };
+@@ -128,6 +129,11 @@ static const Item ITEMS[] = {
        { "0", "1" }, { "Off", "On" },
        "Shows more of the world to the sides instead of the original 4:3 picture. "
        "Menus keep their 4:3 frame." },
@@ -14,3 +24,21 @@ index 73c9c43..4809c7d 100644
      /* Names written by item_name: they follow the widescreen setting. */
      { TAB_DISPLAY, "Picture", "Resolution", "resolution", "RECOMP_RESOLUTION", LIVE_NONE, 0, 0, 8,
        { "native", "480", "720", "1080", "1440", "2160", "2880", "4320" },
+@@ -620,7 +626,7 @@ static void publish(void)
+             mr->tags = it->live == LIVE_NONE ? D3D8_MENU_TAG_RESTART : D3D8_MENU_TAG_NOW;
+             if (it->experimental) mr->tags |= D3D8_MENU_TAG_EXPERIMENTAL;
+             /* No "Changed" tag (Sorin): the ringed pip shows the default. */
+-            if (env_set(it) && it->live != LIVE_TITLE) mr->tags |= D3D8_MENU_TAG_ENV;
++            if (env_set(it)) mr->tags |= D3D8_MENU_TAG_ENV;
+         }
+     }
+     m.sel = g_button >= 0 ? -1 : g_sel;
+@@ -647,7 +653,7 @@ static void publish(void)
+         for (k = 0; k < it->n && o < (int)sizeof m.info_options; k++)
+             o += snprintf(m.info_options + o, sizeof m.info_options - (size_t)o, "%s%s",
+                           k ? ", " : "", item_name(it, k));
+-        if (env_set(it) && it->live != LIVE_TITLE)
++        if (env_set(it))
+             snprintf(m.warning, sizeof m.warning,
+                      "%s is set, and wins over this setting until it is removed.", it->env);
+     } else if (g_tab == TAB_ABOUT) {
