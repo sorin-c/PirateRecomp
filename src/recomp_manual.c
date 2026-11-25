@@ -770,6 +770,11 @@ extern void sub_000AA3C0(void);
 #define PIRATES_TOWNS      0x004A1968u
 #define PIRATES_HUNT0      0x0049C3A8u
 
+/* Town menu calls running (sub_00021D70): the town visit, every screen of
+ * it (the menu, the merchant, the shipwright, the plunder, the status, the
+ * rooms) runs inside it. town_fps paces them all (sub_002C0F70 below). */
+static int g_town_menu_depth;
+
 void sub_00021D70(void)
 {
     pirates_front_end(0);                /* a town: the game world */
@@ -809,7 +814,9 @@ void sub_00021D70(void)
                 break;   /* the map is whole */
         }
     }
+    g_town_menu_depth++;
     sub_00021D70_gen();
+    g_town_menu_depth--;
 }
 
 /* ── Sid Meier's Pirates!: a test probe for scripted play (debug) ──
@@ -1331,6 +1338,7 @@ static struct {
     int64_t last_us;      /* host time of the last frame wait */
     uint32_t frame_start; /* [0x5061F8] at it: the wait loops, one frame each */
     int gate_rate;
+    int64_t seen_us;      /* host time of the last call of the frame wait */
 } g_town;
 
 /* town_fps (RECOMP_PIRATES_TOWN_FPS): 30 (the default) as the console (33
@@ -1346,11 +1354,17 @@ static int town_read_rate(void)
     return r < 60 ? 60 : r > 1000 ? 1000 : r;
 }
 
-/* A town frame's wait has run within the last 100 ms. */
+/* A town frame's wait has run within the last 100 ms -- by its last call,
+ * not last_us: the governor's dialog loop
+ * passes through the wait again and again within one frame of the room
+ * (the same frame start), which leaves last_us where it was, and the test
+ * went stale 100 ms into it -- so the dialog's Sleep(10) came back on
+ * every other stretch of passes and the room ran at ~90 instead of
+ * unlocked. */
 static int town_active(void)
 {
-    return g_town.rate != 30 && g_town.last_us &&
-           pirates_host_us() - g_town.last_us < 100000;
+    return g_town.rate != 30 && g_town.seen_us &&
+           pirates_host_us() - g_town.seen_us < 100000;
 }
 
 void xbox_Nv2aFlipGateSetTitleRate(int hz);
@@ -1364,6 +1378,7 @@ static void town_frame_wait(void)
     extern void tav_test_frame(void);
 
     tav_test_frame();
+    g_town.seen_us = now;
     if (rate != g_town.setting) {
         g_town.setting = rate;
         if (rate < 0)
@@ -2013,8 +2028,11 @@ void recomp_guest_hook(uint32_t va)
      * to 55-60 frames a second where the tavern (another loop) ran
      * unlocked. Its speech and its people run on the engine's clock, so
      * the pass only yields (Sleep(0)). */
+    /* The same loop runs the town's dialogs that have no room behind them
+     * (dividing the plunder: ~75 a second on its Sleep(10)), so inside a
+     * town visit town_fps alone decides. */
     if (va == 0x000420A0u) {
-        if (town_active())
+        if (town_active() || (g_town_menu_depth > 0 && town_read_rate() != 30))
             S60_MEM32(g_esp) = 0;
         return;
     }
@@ -2497,6 +2515,43 @@ void sub_000FD780(void)
             sea60_set_gate(0);
     }
     sub_000FD780_gen();
+}
+
+/* The town menu and its screens faster than 60 (town_fps above 60 or
+ * unlocked). The rooms wait for their 30 ms frame and town_frame_wait sets
+ * the flip gate's rate from it, but the town menu (sub_00021D70) and the
+ * screens it opens without a room -- the merchant, the shipwright, the
+ * plunder, the status pages -- have no frame wait of their own: on the
+ * console the vblank paces them, and here the gate's one Swap a vblank
+ * (frame cap adaptive, the default) held them to 60 whatever town_fps
+ * said. Their pictures move on the engine's clock, not by the frame.
+ *
+ * So at every Swap (sub_002C0F70, the render target's present) made while
+ * a town menu call runs, the gate's title rate is renewed with town_fps,
+ * as the rooms do: 90..240 by the host clock, unlocked with no wait. Not
+ * while a scene with its own frame wait runs inside the town (a duel or
+ * a battle: the world frame waits, sub_001A958A), which sets its own rate
+ * or the vblank's; the dance paces itself. The world map tab of the
+ * status pages is held at 60 by the host clock whatever town_fps and the
+ * frame cap say, as at sea: its stick moves the view a fixed step a
+ * frame. Elsewhere at 30 and 60 nothing changes. Once the town is left nobody renews it and the gate drops it
+ * after 100 ms. */
+extern void sub_002C0F70_gen(void);
+void sub_002C0F70(void)
+{
+    if (g_town_menu_depth > 0 && !g_btl.in_frame &&
+        !(g_pirates_world_seen &&
+          pirates_host_ms() - g_pirates_world_ms <= PIRATES_WORLD_RECENT_MS)) {
+        int rate = town_read_rate();
+        if (g_sea_menu_map > 0) {          /* the world map tab: its stick */
+            g_town.gate_rate = 60;         /* steps by the frame; 60 at any */
+            xbox_Nv2aFlipGateSetTitleRate(60);   /* town_fps and frame cap */
+        } else if (rate != 30 && rate != 60) {
+            g_town.gate_rate = rate;
+            xbox_Nv2aFlipGateSetTitleRate(rate);
+        }
+    }
+    sub_002C0F70_gen();
 }
 
 extern void sub_001A958A_gen(void);
