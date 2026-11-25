@@ -452,6 +452,14 @@
   {
    "address": "0x0005E451",
    "note": "sea_fps: the world map's stick step scaled by the frame's time over a 60th (above 60)"
+  },
+  {
+   "address": "0x0008EEFC",
+   "note": "menu_fps: a new career page loop's Sleep(5) a frame (sub_0008EB80), Sleep(0) above 60"
+  },
+  {
+   "address": "0x0008FD32",
+   "note": "menu_fps: the new career flow's Sleep(5) a frame (sub_0008F7D0), Sleep(0) above 60"
   }
  ]
 }

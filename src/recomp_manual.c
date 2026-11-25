@@ -2002,6 +2002,139 @@ static int parch_guest_hook(uint32_t va)
     }
     return 1;
 }
+/* ---- The front end and the sea's dialogs faster than 60 ----
+ *
+ * menu_fps (RECOMP_PIRATES_MENU_FPS): 60 (the default) as the console; 90,
+ * 120, 144 or 240, or 0 unlocked (-1 here), for the front end -- the title,
+ * the main menu, the new career pages, loading and saving -- which the game
+ * runs in one loop, sub_00126190: the page of the moment (the function at
+ * 0x4D5D20), a sleep that keeps the loop to 16 ms a pass (0x5061C4 holds
+ * the time owed: += 16 - the last frame's ms, Sleep(that) if above 0), and
+ * the frame (sub_000FD780) whose Swap waits for the vblank. Its pages and
+ * animations run on the engine's clock (0x4D3A10, the time since a page
+ * began at 0x4D5990), so they keep their speed at any rate. */
+static int menu_read_rate(void)
+{
+    const char *v = recomp_config_lookup("RECOMP_PIRATES_MENU_FPS", "menu_fps");
+    int r;
+
+    if (!v || !*v)
+        return 60;
+    r = pirates_parse_fps(v);
+    if (r < 0)
+        return -1;
+    if (r <= 60)
+        return 60;
+    return r > 1000 ? 1000 : r;
+}
+
+static int g_sea_menu_depth;     /* (defined below, with the sea's menu) */
+static int g_front_loop_depth;   /* sub_00126190 running */
+static int g_front_gate;         /* the rate the front end gave the gate, 0 none */
+
+static int g_signup_depth;       /* sub_00090CC0 running */
+
+static void front_gate_off(void)
+{
+    if (g_front_gate) {                  /* the game world sets its own */
+        g_front_gate = 0;
+        xbox_Nv2aFlipGateSetTitleRate(0);
+    }
+}
+
+extern void sub_00126190_gen(void);
+void sub_00126190(void)
+{
+    g_front_loop_depth++;
+    sub_00126190_gen();
+    g_front_loop_depth--;
+    front_gate_off();
+}
+
+/* A new career (game.cpp, 0x3EDCB): the tavern where you sign up, the
+ * difficulty, nation and skill pages and the name, which run outside
+ * sub_00126190 in loops of their own -- a frame (sub_000FD780), then
+ * Sleep(5) (0x8EEFC in sub_0008EB80, 0x8FD32 in sub_0008F7D0), the vblank
+ * pacing them at 60. They move by the engine's clock (0x4D3A10, the last
+ * frame's ms at 0x4D39F0) too, so menu_fps paces them as the front end. */
+extern void sub_00090CC0_gen(void);
+void sub_00090CC0(void)
+{
+    g_signup_depth++;
+    sub_00090CC0_gen();
+    g_signup_depth--;
+    front_gate_off();
+}
+
+/* The front end or a new career's pages, with no town or sea menu open
+ * inside them. */
+static int front_running(void)
+{
+    return (g_front_loop_depth > 0 || g_signup_depth > 0) &&
+           g_sea_menu_depth == 0 && g_town_menu_depth == 0;
+}
+
+/* Once a front-end frame (from sub_000FD780, below). Faster than 60 the
+ * sleep never holds the loop: the time owed is left at -16, so the next
+ * pass's += 16 - ms is at most 0 (and back at 60 it starts from there, not
+ * from the seconds a fast loop would have run up), and the gate paces it
+ * by the host clock at the rate, renewed every frame. */
+static void front_frame(void)
+{
+    static int said;
+    int rate = menu_read_rate();
+
+    if (rate != said) {
+        said = rate;
+        if (rate < 0)
+            fprintf(stderr, "[MENU] front end unlocked (menu_fps = 0)\n");
+        else
+            fprintf(stderr, "[MENU] front end at %d frames a second\n", rate);
+        fflush(stderr);
+    }
+    if (rate == 60) {
+        if (g_front_gate) {
+            g_front_gate = 0;
+            xbox_Nv2aFlipGateSetTitleRate(0);
+        }
+        return;
+    }
+    S60_MEM32(0x005061C4u) = -16;
+    g_front_gate = rate;
+    xbox_Nv2aFlipGateSetTitleRate(rate);
+}
+
+/* The dialogs at sea (sub_00040D50 called inside the sea loop's frame: the
+ * crew's reports, a town's approach, the landing party) sleep 10 ms a pass
+ * (0x420A0) and present at the vblank, 60 at most whatever sea_fps says.
+ * With sea_fps above 60 or unlocked the pass only yields and the gate is
+ * renewed with sea_fps, as in the sea's pause menu; their timeouts and
+ * animations run on the clock. At 30 and 60 nothing changes. */
+static int g_sea_dialog_depth;
+
+extern void sub_00040D50_gen(void);
+void sub_00040D50(void)
+{
+    int at_sea = g_sea60.in_loop && g_town_menu_depth == 0 && g_sea_menu_depth == 0 &&
+                 !g_btl.in_frame;
+
+    if (at_sea)
+        g_sea_dialog_depth++;
+    sub_00040D50_gen();
+    if (at_sea)
+        g_sea_dialog_depth--;
+}
+
+static int sea_dialog_fast(void)
+{
+    int rate;
+
+    if (g_sea_dialog_depth <= 0 || g_town_menu_depth > 0)
+        return 0;
+    rate = sea60_read_rate();
+    return rate != 30 && rate != 60 ? rate : 0;
+}
+
 static int sea_map_guest_hook(uint32_t va);
 
 void recomp_guest_hook(uint32_t va)
@@ -2031,9 +2164,23 @@ void recomp_guest_hook(uint32_t va)
     /* The same loop runs the town's dialogs that have no room behind them
      * (dividing the plunder: ~75 a second on its Sleep(10)), so inside a
      * town visit town_fps alone decides. */
-    if (va == 0x000420A0u) {
-        if (town_active() || (g_town_menu_depth > 0 && town_read_rate() != 30))
+    /* A new career's page loops sleep 5 ms a frame: only a yield faster
+     * than 60 (front_frame paces them). */
+    if (va == 0x0008EEFCu || va == 0x0008FD32u) {
+        if (front_running() && menu_read_rate() != 60)
             S60_MEM32(g_esp) = 0;
+        return;
+    }
+    if (va == 0x000420A0u) {
+        int sea_rate;
+
+        if (town_active() || (g_town_menu_depth > 0 && town_read_rate() != 30) ||
+            (front_running() && menu_read_rate() != 60)) {   /* or a new career's */
+            S60_MEM32(g_esp) = 0;
+        } else if ((sea_rate = sea_dialog_fast()) != 0) {   /* a dialog at sea */
+            S60_MEM32(g_esp) = 0;
+            sea60_set_gate(sea_rate);
+        }
         return;
     }
     if (btl_guest_hook(va))                 /* the battle's */
@@ -2485,6 +2632,8 @@ static int sea_map_guest_hook(uint32_t va)
 extern void sub_000FD780_gen(void);
 void sub_000FD780(void)
 {
+    if (front_running())
+        front_frame();                     /* the front end (menu_fps) */
     if (g_sea_menu_depth > 0) {
         static int said = -2, said_map = -1;
         int setting = sea60_read_rate();
