@@ -2332,9 +2332,9 @@ void sub_000FD780(void)
  * while a scene with its own frame wait runs inside the town (a duel or
  * a battle: the world frame waits, sub_001A958A), which sets its own rate
  * or the vblank's; the dance paces itself. The world map tab of the
- * status pages stays at 60 by the host clock, as at sea with sea_fps 60:
- * its stick moves the view a fixed step a frame. At 30 and 60 nothing
- * changes. Once the town is left nobody renews it and the gate drops it
+ * status pages is held at 60 by the host clock whatever town_fps and the
+ * frame cap say, as at sea: its stick moves the view a fixed step a
+ * frame. Elsewhere at 30 and 60 nothing changes. Once the town is left nobody renews it and the gate drops it
  * after 100 ms. */
 extern void sub_002C0F70_gen(void);
 void sub_002C0F70(void)
@@ -2343,9 +2343,9 @@ void sub_002C0F70(void)
         !(g_pirates_world_seen &&
           pirates_host_ms() - g_pirates_world_ms <= PIRATES_WORLD_RECENT_MS)) {
         int rate = town_read_rate();
-        if (rate != 30 && rate != 60 && g_sea_menu_map > 0) {
-            g_town.gate_rate = 60;         /* the world map tab: its stick */
-            xbox_Nv2aFlipGateSetTitleRate(60);   /* steps by the frame */
+        if (g_sea_menu_map > 0) {          /* the world map tab: its stick */
+            g_town.gate_rate = 60;         /* steps by the frame; 60 at any */
+            xbox_Nv2aFlipGateSetTitleRate(60);   /* town_fps and frame cap */
         } else if (rate != 30 && rate != 60) {
             g_town.gate_rate = rate;
             xbox_Nv2aFlipGateSetTitleRate(rate);
