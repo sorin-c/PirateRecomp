@@ -433,6 +433,23 @@ static void log_hint(char *buf, size_t bytes)
 /* The title, start to finish: the same on every host. On POSIX it runs on a
  * thread of its own (host_main_posix), so the process's main thread is free
  * for the window. */
+/* A test override of a reflection amount (RECOMP_PIRATES_MIRROR_*): a whole
+ * finite number from 0 to 1, or the default is kept and the line says so. */
+static void env_amount(const char *name, float *value)
+{
+    const char *e = getenv(name);
+    char *end;
+    float v;
+
+    if (!e || !*e)
+        return;
+    v = strtof(e, &end);
+    if (end == e || *end || !isfinite(v) || v < 0.0f || v > 1.0f) {
+        fprintf(stderr, "[PIRATES] %s=%s ignored: give a number from 0 to 1\n", name, e);
+        return;
+    }
+    *value = v;
+}
 static int title_main(int argc, char **argv)
 {
     void *xbe_data = NULL;
@@ -502,13 +519,11 @@ static int title_main(int argc, char **argv)
         else if (v && strcmp(v, "mirror") == 0)
             mode = 2;
         if (mode) {
-            const char *e;
             float bump = 0.35f, mirror = mode == 2 ? 0.6f : 0.0f;
 
-            if ((e = getenv("RECOMP_PIRATES_MIRROR_BUMP")) != NULL && *e)
-                bump = (float)atof(e);
-            if (mode == 2 && (e = getenv("RECOMP_PIRATES_MIRROR_WEIGHT")) != NULL && *e)
-                mirror = (float)atof(e);
+            env_amount("RECOMP_PIRATES_MIRROR_BUMP", &bump);
+            if (mode == 2)
+                env_amount("RECOMP_PIRATES_MIRROR_WEIGHT", &mirror);
             xbox_D3D8SetOffscreenScale(256, 256, 4);
             xbox_D3D8SetOffscreenEffect(256, 256, bump, mirror);
         }

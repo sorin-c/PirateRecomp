@@ -1,5 +1,5 @@
 diff --git a/src/d3d/d3d8_combiners.c b/src/d3d/d3d8_combiners.c
-index 6a20245..abbf685 100644
+index 6a20245..f170846 100644
 --- a/src/d3d/d3d8_combiners.c
 +++ b/src/d3d/d3d8_combiners.c
 @@ -926,6 +926,10 @@ int d3d8_combiners_generate_hlsl(const NV2ACombinerState *state,
@@ -92,7 +92,7 @@ index 6a20245..abbf685 100644
              /* Linear textures are addressed in texels on the NV2A; see
               * NV2APSConstants.tex_scale. */
              cb->tex_scale[i][0] = cb->tex_scale[i][1] = 1.0f;
-@@ -1788,6 +1843,23 @@ BOOL d3d8_combiners_prepare_draw(void)
+@@ -1788,6 +1843,32 @@ BOOL d3d8_combiners_prepare_draw(void)
                  cb->shadow_max[i] = 1.0f; break;
              }
          }
@@ -102,11 +102,20 @@ index 6a20245..abbf685 100644
 +            static float gain = -1.0f;
 +
 +            if (gain < 0.0f) {
++                /* A test override, a whole number above 0 and up to 64;
++                 * anything else (NaN included) keeps the 2. */
 +                const char *e = getenv("RECOMP_D3D8_MIRROR_GAIN");
++                char *end = NULL;
++                double v = e && *e ? strtod(e, &end) : 0.0;
 +
-+                gain = e && *e ? (float)atof(e) : 2.0f;
-+                if (gain <= 0.0f)
-+                    gain = 2.0f;
++                gain = 2.0f;
++                if (e && *e) {
++                    if (end != e && !*end && v > 0.0 && v <= 64.0)
++                        gain = (float)v;
++                    else
++                        fprintf(stderr, "D3D8: RECOMP_D3D8_MIRROR_GAIN=%s ignored: give a number "
++                                "above 0 and up to 64\n", e);
++                }
 +            }
 +            cb->mirror_gain = gain;
 +        }
@@ -137,7 +146,7 @@ index b796518..34d960c 100644
  
  /* NV2APSConstants.fog_src. The fog unit sits before the combiners, so their
 diff --git a/src/d3d/d3d8_device.c b/src/d3d/d3d8_device.c
-index 6aadd32..0d1c145 100644
+index 6aadd32..12fe891 100644
 --- a/src/d3d/d3d8_device.c
 +++ b/src/d3d/d3d8_device.c
 @@ -385,6 +385,10 @@ BOOL d3d8_scene_target_size(UINT w, UINT h, UINT *host_w, UINT *host_h)
@@ -151,7 +160,7 @@ index 6aadd32..0d1c145 100644
  static int  g_off_n;
  static int  g_off_env = -1;                 /* -1 not read, 0 none, 1 env decides the scale,
                                               * 2 also the sizes, 3 malformed: nothing scaled */
-@@ -482,6 +486,69 @@ void xbox_D3D8SetOffscreenScale(UINT width, UINT height, UINT scale)
+@@ -482,6 +486,72 @@ void xbox_D3D8SetOffscreenScale(UINT width, UINT height, UINT scale)
              width, height, scale, g_off_env == 1 ? "; RECOMP_D3D8_RT_SCALE overrides the scale" : "");
  }
  
@@ -162,6 +171,9 @@ index 6aadd32..0d1c145 100644
 +    offscreen_env();
 +    if (!width || !height)
 +        return;
++    /* NaN fails every comparison: take it as the title's own amount. */
++    if (!(bump_scale == bump_scale)) bump_scale = 1.0f;
++    if (!(mirror == mirror)) mirror = 0.0f;
 +    if (bump_scale < 0.01f) bump_scale = 0.01f;
 +    if (bump_scale > 1.0f) bump_scale = 1.0f;
 +    if (mirror < 0.0f) mirror = 0.0f;
