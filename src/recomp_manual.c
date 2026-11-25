@@ -1809,7 +1809,9 @@ static struct {
     int32_t sx, sy;       /* the scroll as the game made it */
     double sxe, sye;      /* the same unrounded */
     int okx, oky;         /* the two are near (no clamp at the map's edge) */
-    int32_t px;           /* sub_00059D40's x, saved at its entry */
+    int32_t px;           /* sub_00059D40's x (eax), saved at its entry,
+                             before its own calls can change eax */
+    int has_px;           /* ... and not yet used by its end */
 } g_seamap;
 
 static int sea_map_snap(void)
@@ -1907,8 +1909,9 @@ static void sea_map_place(void)
     double sxe = sx, sye = sy, xe, ye;
 
     g_seamap.fx = g_seamap.fy = 0.0f;
-    if (z <= 0 || w <= 0 || h <= 40)
+    if (!g_seamap.has_px || z <= 0 || w <= 0 || h <= 40)
         return;
+    g_seamap.has_px = 0;
     if (sx == g_seamap.sx && g_seamap.okx)
         sxe = g_seamap.sxe;
     if (sy == g_seamap.sy && g_seamap.oky)
@@ -1949,14 +1952,17 @@ static int sea_map_guest_hook(uint32_t va)
         if (sea_map_snap())
             break;
         sea_map_frac();
+        g_seamap.has_px = 0;
         g_seamap.in_draw = 1;
         break;
     case 0x00091B37u:
         g_seamap.in_draw = 0;
         break;
     case 0x00059D40u:                       /* a place on the map: its x */
-        if (g_seamap.in_draw)
+        if (g_seamap.in_draw) {
             g_seamap.px = (int32_t)g_eax;
+            g_seamap.has_px = 1;
+        }
         break;
     case 0x00059DCBu:                       /* ... and what it rounded away */
         if (g_seamap.in_draw)
