@@ -1949,16 +1949,18 @@ static int sea_map_guest_hook(uint32_t va)
         break;
     }
     case 0x00091B32u:
+        g_seamap.has_px = 0;
+        g_seamap.in_draw = 0;
         if (sea_map_snap())
             break;
         sea_map_frac();
-        g_seamap.has_px = 0;
         g_seamap.in_draw = 1;
         break;
     case 0x00091B37u:
         g_seamap.in_draw = 0;
         break;
-    case 0x00059D40u:                       /* a place on the map: its x */
+    case 0x00059D40u:   /* a place on the map: its x. sub_00059D40 runs
+                         * straight from here to 0x59DCB, no early way out */
         if (g_seamap.in_draw) {
             g_seamap.px = (int32_t)g_eax;
             g_seamap.has_px = 1;
