@@ -444,6 +444,14 @@
   {
    "address": "0x000E5579",
    "note": "sea map: an icon's place (sub_000E5470: towns, dots, the X), moved the same way during the map's call"
+  },
+  {
+   "address": "0x0005E3D0",
+   "note": "sea_fps: the world map's view before the stick's step (sub_0005D8C0)"
+  },
+  {
+   "address": "0x0005E451",
+   "note": "sea_fps: the world map's stick step scaled by the frame's time over a 60th (above 60)"
   }
  ]
 }
