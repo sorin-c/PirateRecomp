@@ -428,6 +428,22 @@
   {
    "address": "0x000E0439",
    "note": "sea map: a sprite's place (sub_000DFDF0), moved by the dropped part of a pixel during the map's call"
+  },
+  {
+   "address": "0x00059D40",
+   "note": "sea map: a place on the map (sub_00059D40) during the map's call, its x"
+  },
+  {
+   "address": "0x00059DCB",
+   "note": "sea map: the same place's dropped part of a pixel, for the draws placed from it"
+  },
+  {
+   "address": "0x000E130B",
+   "note": "sea map: a text's place (sub_000E11B0, the towns' names), moved the same way during the map's call"
+  },
+  {
+   "address": "0x000E5579",
+   "note": "sea map: an icon's place (sub_000E5470: towns, dots, the X), moved the same way during the map's call"
   }
  ]
 }

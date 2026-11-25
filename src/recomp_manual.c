@@ -1788,14 +1788,28 @@ static int btl_guest_hook(uint32_t va)
  *    Every sprite sub_000DFDF0 sets up during that call (the tiles) is
  *    moved by it where it stores its place, 0xE0439 ([esp+0x3C] x - W/2,
  *    [esp+0x44] -(y - H/2), floats), so the map moves every frame, by as
- *    little as the frame needs. The towns' icons go through other calls and
- *    keep their whole pixels.
+ *    little as the frame needs.
+ *
+ * 3. Everything else sub_0005BCC0 draws (the towns' names and icons, the
+ *    dots, the treasure X) is placed through sub_00059D40 from the same
+ *    whole scroll, and that call rounds again: f1/f2 (sub_00061660) and the
+ *    scaling to the screen. Left whole, they stepped against the smooth
+ *    tiles (up to 3 px in y at 480). So inside the map's call each
+ *    sub_00059D40 is redone in double at its end (0x59DCB: x saved at its
+ *    entry, y, the scroll on the stack, cx stored at [edi], cy in ecx), and
+ *    what it dropped moves the draws placed from it until the next one:
+ *    sub_000E11B0 (text; 0xE130B, [esp+0x24]/[esp+0x2C]) and sub_000E5470
+ *    (icons; 0xE5579, its object's +0x70/+0x78), as well as the tiles.
  *
  * sea_map_snap = 1 (RECOMP_PIRATES_SEA_MAP_SNAP) keeps the console's whole
  * cells and pixels. */
 static struct {
     int in_draw;          /* inside sub_0005BCC0's call at 0x91B32 */
-    float fx, fy;         /* the tiles' dropped part of a pixel, this frame */
+    float fx, fy;         /* the part of a pixel the current draws get */
+    int32_t sx, sy;       /* the scroll as the game made it */
+    double sxe, sye;      /* the same unrounded */
+    int okx, oky;         /* the two are near (no clamp at the map's edge) */
+    int32_t px;           /* sub_00059D40's x, saved at its entry */
 } g_seamap;
 
 static int sea_map_snap(void)
@@ -1806,6 +1820,14 @@ static int sea_map_snap(void)
     return snap;
 }
 
+static int sea_map_log(void)
+{
+    static int log = -1;    /* RECOMP_PIRATES_SEA_MAP_LOG=1 (test) */
+    if (log < 0)
+        log = recomp_config_bool("RECOMP_PIRATES_SEA_MAP_LOG", "sea_map_log", 0);
+    return log;
+}
+
 /* The source of the map's centre, as 0x85A38 takes the cell from. */
 static void sea_map_pos(int32_t *x, int32_t *y)
 {
@@ -1814,55 +1836,101 @@ static void sea_map_pos(int32_t *x, int32_t *y)
     *y = S60_MEM32(follow ? 0x0049D060u : 0x004564C0u);
 }
 
-/* One axis of sub_0005AEA0's first tile: the scroll s (0x91B32's ecx or
- * edi), b the tile's size factor (Bx or By): the game's place,
- * -(floor(r * b / 100)) less whole tiles, r = 2s mod 256; and the exact
- * one, r taken from the unrounded scroll se. Their difference, or 0 when
- * the two are not near (a clamp at the map's edge, a jump). */
-static float sea_map_axis(int32_t s, double se, int32_t b)
-{
-    int32_t s2 = s * 2, r = s2 & 255, col = (s2 - r) / 256;
-    double re = se * 2.0 - (double)col * 256.0, d;
+/* sub_00061660 without its rounding: f1 for x, f2 for y. */
+static double sea_map_f1(double x) { return x / 462000.0 * 800.0 + 100.0; }
+static double sea_map_f2(double y) { return (292000.0 - y) / 292000.0 * 640.0 + 5.0; }
 
-    if (b <= 0 || fabs(se - (double)s) > 2.0)
-        return 0.0f;
-    d = -(re * (double)b / 100.0) + (double)((int64_t)r * b / 100);
+/* A dropped part of a pixel, or 0 when it is not small (a jump). */
+static float sea_map_small(double d)
+{
     return fabs(d) < 64.0 ? (float)d : 0.0f;
 }
 
+/* One axis of sub_0005AEA0's first tile: the scroll s (0x91B32's ecx or
+ * edi), b the tile's size factor (Bx or By): the game's place,
+ * -(floor(r * b / 100)) less whole tiles, r = 2s mod 256; and the exact
+ * one, r taken from the unrounded scroll se. Their difference. */
+static float sea_map_axis(int32_t s, double se, int32_t b)
+{
+    int32_t s2 = s * 2, r = s2 & 255, col = (s2 - r) / 256;
+    double re = se * 2.0 - (double)col * 256.0;
+
+    if (b <= 0)
+        return 0.0f;
+    return sea_map_small(-(re * (double)b / 100.0) + (double)((int64_t)r * b / 100));
+}
+
 /* At 0x91B32: esi the zoom, ecx and edi the scroll as the game made it.
- * The same from the unrounded centre: sub_00059D40's f1 and f2 (sub_00061660
- * without its rounding), 0x91A84's sums without their divisions. */
+ * The same from the unrounded centre: sub_00059D40's f1 and f2 without
+ * their rounding, 0x91A84's sums without their divisions. */
 static void sea_map_frac(void)
 {
     int32_t px, py, z = (int32_t)g_esi;
     int32_t w = S60_MEM32(0x0049C3A4u), h = S60_MEM32(0x0049C3A0u), k, a, ay;
-    double x, y, sx, sy;
 
     g_seamap.fx = g_seamap.fy = 0.0f;
+    g_seamap.okx = g_seamap.oky = 0;
+    g_seamap.sx = (int32_t)g_ecx;
+    g_seamap.sy = (int32_t)g_edi;
     if (z <= 0 || w <= 0 || h <= 40)
         return;
     sea_map_pos(&px, &py);
-    x = (double)px / 2000.0;
-    y = (double)py / 2000.0;
     k = (z - 1) / 2 - 3;
-    sx = x / 462000.0 * 800.0 + 100.0 + 87.0 * k;
-    sy = (292000.0 - y) / 292000.0 * 640.0 + 5.0;
-    sy = sy * (double)(h - 40) / (double)h + 50.0 * k;
+    g_seamap.sxe = sea_map_f1((double)px / 2000.0) + 87.0 * k;
+    g_seamap.sye = sea_map_f2((double)py / 2000.0) * (double)(h - 40) / (double)h + 50.0 * k;
+    g_seamap.okx = fabs(g_seamap.sxe - (double)g_seamap.sx) <= 2.0;
+    g_seamap.oky = fabs(g_seamap.sye - (double)g_seamap.sy) <= 2.0;
     a = 0x800 / z;
     ay = 0x50C / z;
     if (a <= 0 || ay <= 0)
         return;
-    g_seamap.fx = sea_map_axis((int32_t)g_ecx, sx, w * 100 / a);
-    g_seamap.fy = sea_map_axis((int32_t)g_edi, sy, (h - 40) * 100 / ay);
-    {   /* RECOMP_PIRATES_SEA_MAP_LOG=1 (test): a line a map frame */
-        static int log = -1;
-        if (log < 0)
-            log = recomp_config_bool("RECOMP_PIRATES_SEA_MAP_LOG", "sea_map_log", 0);
-        if (log)
-            fprintf(stderr, "[SEAMAP] z %d scroll %d %d exact %.3f %.3f shift %.3f %.3f\n",
-                    z, (int32_t)g_ecx, (int32_t)g_edi, sx, sy, g_seamap.fx, g_seamap.fy);
-    }
+    if (g_seamap.okx)
+        g_seamap.fx = sea_map_axis(g_seamap.sx, g_seamap.sxe, w * 100 / a);
+    if (g_seamap.oky)
+        g_seamap.fy = sea_map_axis(g_seamap.sy, g_seamap.sye, (h - 40) * 100 / ay);
+    if (sea_map_log())
+        fprintf(stderr, "[SEAMAP] z %d scroll %d %d exact %.3f %.3f shift %.3f %.3f\n",
+                z, g_seamap.sx, g_seamap.sy, g_seamap.sxe, g_seamap.sye,
+                g_seamap.fx, g_seamap.fy);
+}
+
+/* At 0x59DCB, the end of a sub_00059D40 inside the map's call: ebx the
+ * zoom, the y and the scroll it was given at [esp+0x1C..0x24], cx stored
+ * at [edi], cy in ecx. Its unrounded place, from the unrounded scroll when
+ * it was given the map's own: cx = (f1 - sx) * W * z / 1024 and
+ * cy = (f2 - sy) * (H - 40) * z / 646, as the game does them. */
+static void sea_map_place(void)
+{
+    int32_t z = (int32_t)g_ebx, w = S60_MEM32(0x0049C3A4u), h = S60_MEM32(0x0049C3A0u);
+    int32_t y = S60_MEM32(g_esp + 0x1Cu), sx = S60_MEM32(g_esp + 0x20u), sy = S60_MEM32(g_esp + 0x24u);
+    int32_t cx = S60_MEM32(g_edi), cy = (int32_t)g_ecx;
+    double sxe = sx, sye = sy, xe, ye;
+
+    g_seamap.fx = g_seamap.fy = 0.0f;
+    if (z <= 0 || w <= 0 || h <= 40)
+        return;
+    if (sx == g_seamap.sx && g_seamap.okx)
+        sxe = g_seamap.sxe;
+    if (sy == g_seamap.sy && g_seamap.oky)
+        sye = g_seamap.sye;
+    xe = (sea_map_f1((double)g_seamap.px) - sxe) * (double)w * (double)z / 1024.0;
+    ye = (sea_map_f2((double)y) - sye) * (double)(h - 40) * (double)z / 646.0;
+    g_seamap.fx = sea_map_small(xe - (double)cx);
+    g_seamap.fy = sea_map_small(ye - (double)cy);
+}
+
+/* A sprite's place as the draws store it: floats x - W/2 at va, then z,
+ * then -(y - H/2) at va + 8. Moved by the current part of a pixel. */
+static void sea_map_move(uint32_t va)
+{
+    float f;
+    uint8_t *p = (uint8_t *)((uintptr_t)va + g_xbox_mem_offset);
+    memcpy(&f, p, 4);
+    f += g_seamap.fx;
+    memcpy(p, &f, 4);
+    memcpy(&f, p + 8, 4);
+    f -= g_seamap.fy;
+    memcpy(p + 8, &f, 4);
 }
 
 static int sea_map_guest_hook(uint32_t va)
@@ -1886,16 +1954,25 @@ static int sea_map_guest_hook(uint32_t va)
     case 0x00091B37u:
         g_seamap.in_draw = 0;
         break;
-    case 0x000E0439u:
-        if (g_seamap.in_draw) {
-            float f;
-            memcpy(&f, (const void *)((uintptr_t)(g_esp + 0x3Cu) + g_xbox_mem_offset), 4);
-            f += g_seamap.fx;
-            memcpy((void *)((uintptr_t)(g_esp + 0x3Cu) + g_xbox_mem_offset), &f, 4);
-            memcpy(&f, (const void *)((uintptr_t)(g_esp + 0x44u) + g_xbox_mem_offset), 4);
-            f -= g_seamap.fy;
-            memcpy((void *)((uintptr_t)(g_esp + 0x44u) + g_xbox_mem_offset), &f, 4);
-        }
+    case 0x00059D40u:                       /* a place on the map: its x */
+        if (g_seamap.in_draw)
+            g_seamap.px = (int32_t)g_eax;
+        break;
+    case 0x00059DCBu:                       /* ... and what it rounded away */
+        if (g_seamap.in_draw)
+            sea_map_place();
+        break;
+    case 0x000E0439u:                       /* the tiles (sub_000DFDF0) */
+        if (g_seamap.in_draw)
+            sea_map_move(g_esp + 0x3Cu);
+        break;
+    case 0x000E130Bu:                       /* text: the towns' names (sub_000E11B0) */
+        if (g_seamap.in_draw)
+            sea_map_move(g_esp + 0x24u);
+        break;
+    case 0x000E5579u:                       /* icons, dots, the X (sub_000E5470) */
+        if (g_seamap.in_draw)
+            sea_map_move(S60_MEM32(g_ebx + 0x1Cu) + 0x70u);
         break;
     default:
         return 0;
