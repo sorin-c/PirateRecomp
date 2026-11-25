@@ -725,9 +725,13 @@ Each one, with the reason it exists:
   tiled 4x). `xbox_D3D8SetOffscreenEffect(w, h, bump_scale, mirror)`: a
   bump-environment stage sampling a render target texture of that size has
   its bump matrix scaled, and, while the draw goes anywhere but such a
-  target, the texel is laid over the combiners' result with weight
-  `mirror` times its brightness (x6, so the black clear adds nothing),
-  solved for the draw's SRCALPHA/INVSRCALPHA blend. The F2 row's values
+  target, the texel any stage samples from it (the sea's is a plain
+  projected stage) is laid over the combiners' result with weight
+  `mirror` times its green/blue brightness x2 (the black clear adds
+  nothing, and neither does the red clear of the ripple target's strip
+  that its quad leaves uncovered; x6 drew a dark fringe at the edges;
+  `RECOMP_D3D8_MIRROR_GAIN` overrides the 2 for tests), solved for the
+  draw's SRCALPHA/INVSRCALPHA blend. The F2 row's values
   become Console, Clearer and Mirror (`water_reflection` 1, `clear`,
   `mirror`; 2 and 4 read as `clear`): both draw the 256x256 targets 4x
   and ripple them a third as much, Mirror at weight 0.6. The 512x512 dialog
