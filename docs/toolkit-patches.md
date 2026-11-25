@@ -707,3 +707,10 @@ Each one, with the reason it exists:
   console's size that hardly showed; drawn larger, the reflection's
   distortion pass broke into blocks (2x) and streaks (4x). The four texels
   are now read at their centres, made signed and blended in the shader.
+
+- **0069-settings-menu-title-rows-by-default** (`src/hle/hle_settings_menu.c`).
+  A title's F2 row was shown only when `pirates.ini` already held its key.
+  A file last saved before the key existed (an older launcher's save) lacks
+  it, so new rows such as Water reflections never appeared and could not be
+  set. A row is now shown when the title's settings header gives the key a
+  default as well.

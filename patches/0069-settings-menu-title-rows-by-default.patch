@@ -1,0 +1,20 @@
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index 21e9b83..d2b9f6b 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -217,8 +217,14 @@ static void build_list(void)
+     if (g_built)
+         return;
+     g_built = 1;
++    /* A title's row is shown when the title knows the key: its settings
++     * header gives a default (recomp_config_default), or the file has it.
++     * The file alone is not enough: one written before the title added a
++     * key (an older launcher's save) lacks it, and the row a newer build
++     * offers was then hidden, so it could never be set from here. */
+     for (i = 0; i < ITEM_COUNT; i++)
+-        g_shown[i] = !ITEMS[i].title || recomp_config_lookup(NULL, ITEMS[i].key) != NULL;
++        g_shown[i] = !ITEMS[i].title || recomp_config_lookup(NULL, ITEMS[i].key) != NULL ||
++                     recomp_config_default(ITEMS[i].key) != NULL;
+ }
+ 
+ static int env_set(const Item *it)
