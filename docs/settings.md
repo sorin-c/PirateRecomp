@@ -102,8 +102,8 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   every frame, which otherwise held it to about 60 (90 on and off), as do
   the town's dialogs without a room (dividing the plunder). Above 60 the
   town menu and the screens it opens (merchant, shipwright, plunder,
-  status) follow it too, instead of the 60 of the vblank; the world map
-  tab stays at 60, since its stick moves a fixed step a frame.
+  status) follow it too, instead of the 60 of the vblank, and so does the
+  world map tab, its stick scrolling as fast as it does at 60 (as at sea).
 - **Widescreen.** `widescreen = 1`, the default, turns on the game's own
   16:9 mode (`0` plays at 4:3). The front end (legal text, title, menus and the new-career pages) stays at 4:3
   between bars, as it was drawn, and the game world fills the screen.
