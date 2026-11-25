@@ -99,7 +99,11 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   90, 120, 144, 240 or 0 (unlocked) only lets the frames come faster, paced
   as sailing and battles are; the default, 30, keeps the console's 33.
   The governor's room also skips the 10 ms pause its dialog loop takes
-  every frame, which otherwise held it to about 60.
+  every frame, which otherwise held it to about 60 (90 on and off), as do
+  the town's dialogs without a room (dividing the plunder). Above 60 the
+  town menu and the screens it opens (merchant, shipwright, plunder,
+  status) follow it too, instead of the 60 of the vblank; the world map
+  tab stays at 60, since its stick moves a fixed step a frame.
 - **Widescreen.** `widescreen = 1`, the default, turns on the game's own
   16:9 mode (`0` plays at 4:3). The front end (legal text, title, menus and the new-career pages) stays at 4:3
   between bars, as it was drawn, and the game world fills the screen.
@@ -153,7 +157,7 @@ defaults. Every line names the environment variable that overrides it, so a
 | `frame_interp` | `1` | `1` off, `2` shows 60 where the game runs at 30. |
 | `sea_fps` | `30` | Experimental: frames a second while sailing (`0` unlocked). |
 | `battle_fps` | `30` | Experimental: frames a second in ship battles (`0` unlocked). |
-| `town_fps` | `30` | Experimental: frames a second in a town's rooms, the tavern and the governor's (`0` unlocked). |
+| `town_fps` | `30` | Experimental: frames a second in a town: the menu, its rooms (the tavern, the governor's) and its other screens (`0` unlocked). |
 | `fps_overlay` | `0` | Frame-rate counter. |
 | `fullscreen` | `0` | Fullscreen window. |
 | `anisotropy` | `0` | Texture sharpness: `0` off (the game's own filtering), `1`, `2`, `4`, `8` or `16`. |
