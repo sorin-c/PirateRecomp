@@ -1,0 +1,259 @@
+diff --git a/src/d3d/d3d8_combiners.c b/src/d3d/d3d8_combiners.c
+index 6a20245..b91e03d 100644
+--- a/src/d3d/d3d8_combiners.c
++++ b/src/d3d/d3d8_combiners.c
+@@ -926,6 +926,10 @@ int d3d8_combiners_generate_hlsl(const NV2ACombinerState *state,
+     EMIT("    uint4  fog_src;\n");        /* x: NV2A_FOG_SRC_*, y: range fog */
+     EMIT("    float4 bump_mat[4];\n");     /* per stage: BUMPENVMAT00, 01, 10, 11 */
+     EMIT("    uint4  bump_signed;\n");     /* per stage: the bump source is SNORM */
++    EMIT("    uint   mirror_stage;\n");    /* the reflection's stage + 1, 0 none */
++    EMIT("    uint   mirror_blend;\n");    /* the draw blends SRCALPHA/INVSRCALPHA */
++    EMIT("    float  mirror_weight;\n");
++    EMIT("    float  mirror_gain;\n");
+     EMIT("};\n\n");
+     /* An unsigned texel's bytes read as a bump source: two's complement. */
+     EMIT("float2 bump_s8(float2 u) {\n");
+@@ -1107,6 +1111,10 @@ int d3d8_combiners_generate_hlsl(const NV2ACombinerState *state,
+             EMIT("    if (r_t%d.a == 0.0) discard;\n", i);
+     }
+ 
++    /* The texels as sampled, for the mirror below: the combiners may
++     * write the texture registers. */
++    EMIT("    float4 m_t0 = r_t0, m_t1 = r_t1, m_t2 = r_t2, m_t3 = r_t3;\n");
++
+     /* Temporary registers: r0 starts at zero with texture 0's alpha, or 1
+      * when stage 0 samples nothing (xemu psh.c; upstream nv2a_combiner.c);
+      * r1 at zero. */
+@@ -1273,6 +1281,26 @@ int d3d8_combiners_generate_hlsl(const NV2ACombinerState *state,
+         EMIT("    }\n\n");
+     }
+ 
++    /* ---- Mirror (xbox_D3D8SetOffscreenEffect) ----
++     * The reflection the stage sampled, laid over what the combiners made
++     * where the reflection holds anything (its clear is black), so a dark
++     * hull darkens the water as a mirror's would. Under SRCALPHA/INVSRCALPHA
++     * the output is chosen so that the blend gives (1 - w) of the title's
++     * result over the water plus w of the reflection. */
++    EMIT("    if (mirror_stage != 0u) {\n");
++    EMIT("        float4 mrf = mirror_stage == 1u ? m_t0 : mirror_stage == 2u ? m_t1 :"
++         " mirror_stage == 3u ? m_t2 : m_t3;\n");
++    EMIT("        float mw = mirror_weight * saturate(max(mrf.r, max(mrf.g, mrf.b)) * mirror_gain);\n");
++    EMIT("        if (mirror_blend != 0u) {\n");
++    EMIT("            float ma = 1.0 - (1.0 - mw) * (1.0 - saturate(result.a));\n");
++    EMIT("            result.rgb = (result.rgb * saturate(result.a) * (1.0 - mw) + mrf.rgb * mw)"
++         " / max(ma, 0.0001);\n");
++    EMIT("            result.a = ma;\n");
++    EMIT("        } else {\n");
++    EMIT("            result.rgb = lerp(result.rgb, mrf.rgb, mw);\n");
++    EMIT("        }\n");
++    EMIT("    }\n\n");
++
+     /* ---- Fog ---- */
+     /* No fog after the final combiner. The NV2A has no fog stage of its own:
+      * the XDK puts fog into the final combiner (A = fog alpha, B = r0,
+@@ -1701,6 +1729,8 @@ BOOL d3d8_combiners_prepare_draw(void)
+     mapped = rhi_buffer_map(g_combiner_cb, RHI_MAP_WRITE_DISCARD);
+     if (mapped) {
+         NV2APSConstants *cb = (NV2APSConstants *)mapped;
++        UINT  mirror_stage = 0;
++        float mirror_weight = 0.0f;
+ 
+         /* Per-stage constants */
+         for (i = 0; i < NV2A_MAX_COMBINER_STAGES; i++) {
+@@ -1769,6 +1799,26 @@ BOOL d3d8_combiners_prepare_draw(void)
+                     break;
+                 }
+             }
++            /* A reflection the title asked to have rippled less, or laid
++             * over the draw as a mirror (xbox_D3D8SetOffscreenEffect). The
++             * mirror only where it is drawn into a target of another kind,
++             * so the pass that builds it from another such target is not
++             * one. */
++            if (i > 0 && (g_combiner_state.xmode[i] == XTM_BUMPENVMAP ||
++                          g_combiner_state.xmode[i] == XTM_BUMPENVMAP_LUM)) {
++                float bump = 1.0f, mirror = 0.0f;
++
++                if (d3d8_offscreen_effect(tex, &bump, &mirror)) {
++                    int k;
++
++                    for (k = 0; k < 4; k++)
++                        cb->bump_mat[i][k] *= bump;
++                    if (mirror > 0.0f && !mirror_stage && !d3d8_target_is_offscreen_effect()) {
++                        mirror_stage = (UINT)i + 1;
++                        mirror_weight = mirror;
++                    }
++                }
++            }
+             /* Linear textures are addressed in texels on the NV2A; see
+              * NV2APSConstants.tex_scale. */
+             cb->tex_scale[i][0] = cb->tex_scale[i][1] = 1.0f;
+@@ -1788,6 +1838,12 @@ BOOL d3d8_combiners_prepare_draw(void)
+                 cb->shadow_max[i] = 1.0f; break;
+             }
+         }
++        cb->mirror_stage = mirror_stage;
++        cb->mirror_weight = mirror_weight;
++        cb->mirror_gain = 6.0f;
++        cb->mirror_blend = rs[D3DRS_ALPHABLENDENABLE] &&
++                           rs[D3DRS_SRCBLEND] == D3DBLEND_SRCALPHA &&
++                           rs[D3DRS_DESTBLEND] == D3DBLEND_INVSRCALPHA;
+         {
+             static int swap = -1;
+ 
+diff --git a/src/d3d/d3d8_combiners.h b/src/d3d/d3d8_combiners.h
+index b796518..34d960c 100644
+--- a/src/d3d/d3d8_combiners.h
++++ b/src/d3d/d3d8_combiners.h
+@@ -348,6 +348,15 @@ typedef struct NV2APSConstants {
+      * or is an unsigned colour whose bytes the NV2A reads as signed (0). */
+     float bump_mat[NV2A_MAX_TEXTURES][4];
+     UINT  bump_signed[NV2A_MAX_TEXTURES];
++    /* A title's reflection laid over the draw as a mirror
++     * (xbox_D3D8SetOffscreenEffect): the stage that samples it plus one (0
++     * none), whether the draw blends SRCALPHA/INVSRCALPHA (1) or not (0),
++     * the mirror's weight, and the gain from the texel's brightness to how
++     * much of the target holds something (its clear is black). */
++    UINT  mirror_stage;
++    UINT  mirror_blend;
++    float mirror_weight;
++    float mirror_gain;
+ } NV2APSConstants;
+ 
+ /* NV2APSConstants.fog_src. The fog unit sits before the combiners, so their
+diff --git a/src/d3d/d3d8_device.c b/src/d3d/d3d8_device.c
+index 6aadd32..0d1c145 100644
+--- a/src/d3d/d3d8_device.c
++++ b/src/d3d/d3d8_device.c
+@@ -385,6 +385,10 @@ BOOL d3d8_scene_target_size(UINT w, UINT h, UINT *host_w, UINT *host_h)
+  * "<scale>" for the title's sizes, "<scale>@WxH,WxH" for these, "1" none. */
+ #define OFFSCREEN_SIZES 8
+ static UINT g_off_scale[OFFSCREEN_SIZES], g_off_w[OFFSCREEN_SIZES], g_off_h[OFFSCREEN_SIZES];
++/* xbox_D3D8SetOffscreenEffect, per size: the bump-environment matrix's
++ * scale for a stage that samples such a target, and the weight it is laid
++ * over the picture with as a mirror (0: as the title draws it). */
++static float g_off_bump[OFFSCREEN_SIZES], g_off_mirror[OFFSCREEN_SIZES];
+ static int  g_off_n;
+ static int  g_off_env = -1;                 /* -1 not read, 0 none, 1 env decides the scale,
+                                              * 2 also the sizes, 3 malformed: nothing scaled */
+@@ -482,6 +486,69 @@ void xbox_D3D8SetOffscreenScale(UINT width, UINT height, UINT scale)
+             width, height, scale, g_off_env == 1 ? "; RECOMP_D3D8_RT_SCALE overrides the scale" : "");
+ }
+ 
++void xbox_D3D8SetOffscreenEffect(UINT width, UINT height, float bump_scale, float mirror)
++{
++    int i;
++
++    offscreen_env();
++    if (!width || !height)
++        return;
++    if (bump_scale < 0.01f) bump_scale = 0.01f;
++    if (bump_scale > 1.0f) bump_scale = 1.0f;
++    if (mirror < 0.0f) mirror = 0.0f;
++    if (mirror > 1.0f) mirror = 1.0f;
++    for (i = 0; i < g_off_n; i++)
++        if (g_off_w[i] == width && g_off_h[i] == height)
++            break;
++    if (i == g_off_n) {
++        if (g_off_n == OFFSCREEN_SIZES)
++            return;
++        g_off_n++;
++        g_off_w[i] = width;
++        g_off_h[i] = height;
++        g_off_scale[i] = 1;
++    }
++    g_off_bump[i] = bump_scale;
++    g_off_mirror[i] = mirror;
++    fprintf(stderr, "D3D8: %ux%u render target textures: bump x%.2f, mirror %.2f (title)\n",
++            width, height, (double)bump_scale, (double)mirror);
++}
++
++/* The effect a title asked for (xbox_D3D8SetOffscreenEffect) on a render
++ * target texture it samples: FALSE for any other texture. */
++BOOL d3d8_offscreen_effect(IDirect3DBaseTexture8 *texture, float *bump_scale, float *mirror)
++{
++    D3D8TextureInfo info;
++    int i;
++
++    if (!texture || !g_off_n || !d3d8_texture_info(texture, &info) ||
++        !(info.usage & D3DUSAGE_RENDERTARGET))
++        return FALSE;
++    for (i = 0; i < g_off_n; i++)
++        if (g_off_w[i] == info.width && g_off_h[i] == info.height) {
++            if (g_off_bump[i] == 0.0f && g_off_mirror[i] == 0.0f)
++                return FALSE;           /* never set: no effect */
++            *bump_scale = g_off_bump[i];
++            *mirror = g_off_mirror[i];
++            return TRUE;
++        }
++    return FALSE;
++}
++
++/* Whether the bound target is a render target texture of a size the title
++ * set an effect for: a pass building its reflection, not one showing it. */
++BOOL d3d8_target_is_offscreen_effect(void)
++{
++    int i;
++
++    if (!g_cur_rt || !g_off_n)
++        return FALSE;
++    for (i = 0; i < g_off_n; i++)
++        if (g_off_w[i] == g_cur_rt->width && g_off_h[i] == g_cur_rt->height)
++            return g_off_bump[i] != 0.0f || g_off_mirror[i] != 0.0f;
++    return FALSE;
++}
++
+ BOOL d3d8_offscreen_target_size(UINT w, UINT h, UINT *host_w, UINT *host_h)
+ {
+     UINT scale = 0;
+diff --git a/src/d3d/d3d8_internal.h b/src/d3d/d3d8_internal.h
+index e4c5e6c..39ffe91 100644
+--- a/src/d3d/d3d8_internal.h
++++ b/src/d3d/d3d8_internal.h
+@@ -127,6 +127,10 @@ BOOL d3d8_texture_info(IDirect3DBaseTexture8 *texture, D3D8TextureInfo *info);
+ BOOL d3d8_scene_target_size(UINT w, UINT h, UINT *host_w, UINT *host_h);
+ /* A smaller target the title asked to have drawn larger (xbox_D3D8SetOffscreenScale). */
+ BOOL d3d8_offscreen_target_size(UINT w, UINT h, UINT *host_w, UINT *host_h);
++/* The bump scale and mirror weight a title set for a render target texture's
++ * size (xbox_D3D8SetOffscreenEffect); FALSE when it set none. */
++BOOL d3d8_offscreen_effect(IDirect3DBaseTexture8 *texture, float *bump_scale, float *mirror);
++BOOL d3d8_target_is_offscreen_effect(void);
+ 
+ /* A cube texture's shape, for frame capture. TRUE only for a cube, so this
+  * doubles as the type test against d3d8_texture_info. */
+diff --git a/src/d3d/d3d8_xbox.h b/src/d3d/d3d8_xbox.h
+index b5716e6..b0991ba 100644
+--- a/src/d3d/d3d8_xbox.h
++++ b/src/d3d/d3d8_xbox.h
+@@ -1222,6 +1222,14 @@ void xbox_D3D8SetGuestSize(UINT width, UINT height);
+  * the targets are made, so at start-up; one already made keeps its size.
+  * RECOMP_D3D8_RT_SCALE overrides it ("<scale>" or "<scale>@WxH,WxH"). */
+ void xbox_D3D8SetOffscreenScale(UINT width, UINT height, UINT scale);
++/* For the title's render target textures of width x height, sampled through
++ * a bump-environment stage (a reflection the title ripples): bump_scale
++ * multiplies the stage's bump matrix (1 as the title has it, smaller is a
++ * calmer ripple), and mirror (0..1) lays the sampled texel over the draw's
++ * own colour as a mirror would, where the target holds anything but its
++ * black clear. Only while drawing to a target of another size, so the pass
++ * that builds the reflection is left alone. Call at start-up. */
++void xbox_D3D8SetOffscreenEffect(UINT width, UINT height, float bump_scale, float mirror);
+ 
+ /* The Xbox's D3DDevice_SetScissors: clip drawing to the rectangles (or, with
+  * exclusive set, outside them); count 0 turns it off. The host applies one
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index d2b9f6b..4490948 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -145,9 +145,10 @@ static const Item ITEMS[] = {
+       "Anisotropic filtering: keeps the ground, decks and water sharp at a slant. "
+       "Off uses the game's own filtering." },
+     { TAB_DISPLAY, "Picture", "Water reflections", "water_reflection", "RECOMP_PIRATES_WATER_REFLECTION", LIVE_NONE, 1, 0, 3,
+-      { "1", "2", "4" }, { "Console", "Sharp", "Sharpest" },
+-      "How detailed the ships' reflections in the sea are. The console draws them small and "
+-      "blurry; Sharp and Sharpest draw them at two and four times the size." },
++      { "1", "clear", "mirror" }, { "Console", "Clearer", "Mirror" },
++      "The ship's reflection in the sea. Console is the original faint, rippled smear. "
++      "Clearer draws it four times larger with gentler ripples. Mirror also shows it as a "
++      "mirror would: the hull and sail colours on the water." },
+     { TAB_DISPLAY, "Frame rate", "Frame rate cap", "frame_cap", "RECOMP_FPS_CAP", LIVE_CAP, 0, 0, 4,
+       { "adaptive", "60", "30", "0" }, { "Adaptive", "60", "30", "Off" },
+       "The most frames drawn a second. Adaptive follows the display. The game itself keeps "
