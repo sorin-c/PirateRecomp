@@ -707,3 +707,32 @@ Each one, with the reason it exists:
   console's size that hardly showed; drawn larger, the reflection's
   distortion pass broke into blocks (2x) and streaks (4x). The four texels
   are now read at their centres, made signed and blended in the shader.
+
+- **0069-settings-menu-title-rows-by-default** (`src/hle/hle_settings_menu.c`).
+  A title's F2 row was shown only when `pirates.ini` already held its key.
+  A file last saved before the key existed (an older launcher's save) lacks
+  it, so new rows such as Water reflections never appeared and could not be
+  set. A row is now shown when the title's settings header gives the key a
+  default as well.
+
+- **0070-reflection-clearer-and-mirror** (`src/d3d/d3d8_device.c`,
+  `d3d8_combiners.c`, `.h`, `d3d8_internal.h`, `d3d8_xbox.h`,
+  `src/hle/hle_settings_menu.c`). Sorin wanted a better reflection, not
+  only a sharper one. The game's sea (`PSOceanWaterEMBM`) lerps the
+  reflection in at 0.4 under an alpha of 0.6, about 24%, over a target
+  cleared to black, so dark parts such as the hull add nothing; the ripple
+  pass moves each texel up to 0.06 of the target (BUMPENVMAT -0.06, noise
+  tiled 4x). `xbox_D3D8SetOffscreenEffect(w, h, bump_scale, mirror)`: a
+  bump-environment stage sampling a render target texture of that size has
+  its bump matrix scaled, and, while the draw goes anywhere but such a
+  target, the texel any stage samples from it (the sea's is a plain
+  projected stage) is laid over the combiners' result with weight
+  `mirror` times its green/blue brightness x2 (the black clear adds
+  nothing, and neither does the red clear of the ripple target's strip
+  that its quad leaves uncovered; x6 drew a dark fringe at the edges;
+  `RECOMP_D3D8_MIRROR_GAIN` overrides the 2 for tests), solved for the
+  draw's SRCALPHA/INVSRCALPHA blend. The F2 row's values
+  become Console, Clearer and Mirror (`water_reflection` 1, `clear`,
+  `mirror`; 2 and 4 read as `clear`): both draw the 256x256 targets 4x
+  and ripple them a third as much, Mirror at weight 0.6. The 512x512 dialog
+  backdrop is no longer scaled.
