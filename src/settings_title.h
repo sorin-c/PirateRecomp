@@ -66,9 +66,9 @@ static const struct {
       "#                                          [RECOMP_PIRATES_MENU_FPS]\n" },
     { "water_reflection", "1",
       "# The ship's reflection in the sea: 1 (the default) as the console\n"
-      "# draws it, a faint rippled smear; clear draws it four times larger\n"
-      "# with gentler ripples; mirror also shows it as a mirror would, hull\n"
-      "# and sail colours on the water. Applies at the next start.\n"
+      "# draws it, a faint rippled smear; clear (Improved in the F2 menu)\n"
+      "# draws it four times larger with gentler ripples. Applies at the\n"
+      "# next start.\n"
       "#                                    [RECOMP_PIRATES_WATER_REFLECTION]\n" },
     { "sea_60", "0",
       "# The setting before sea_fps: 1 sails at 60 while sea_fps is 30.\n"
