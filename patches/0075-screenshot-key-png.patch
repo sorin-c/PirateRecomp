@@ -246,7 +246,7 @@ index b0991ba..08a9c49 100644
   * sets it from the title's present parameters (d3d8_GetGuestWidth). */
  void xbox_D3D8SetGuestSize(UINT width, UINT height);
 diff --git a/src/hle/hle_d3d8.c b/src/hle/hle_d3d8.c
-index 4eed2f5..3ed8bfb 100644
+index 4eed2f5..9a5b0a4 100644
 --- a/src/hle/hle_d3d8.c
 +++ b/src/hle/hle_d3d8.c
 @@ -65,6 +65,7 @@
@@ -273,7 +273,34 @@ index 4eed2f5..3ed8bfb 100644
  /* The shell reports no F2 or Esc yet: the settings menu opens from a pad
   * (Start+Back) there. */
  #define SHADOW_KEY_F2   (-1)
-@@ -3306,9 +3309,48 @@ void hle_set_frame_cap(const char *name)
+@@ -2453,6 +2456,9 @@ static void ram_dump_at_swap(void)
+  *     K:/runs/sea_01.bmp            the frame
+  *     capture K:/runs/sea_01.bmp    the frame, and a replayable capture
+  *                                    as F11 makes one (beside the executable)
++ *     png K:/runs/sea_01.png        the PNG F12 writes: the picture alone,
++ *                                    at output size, without the overlay
++ *                                    or the settings menu
+  *
+  * Write the request to another name and rename it into place, so it is
+  * never read half-written. The game deletes it when it takes it, and writes
+@@ -2559,6 +2565,16 @@ static void shot_request_poll(void)
+         xbox_D3D8KeepPresented(TRUE);
+         return;
+     }
++    if (strncmp(p, "png ", 4) == 0) {
++        /* What F12 writes, to a name of the script's choosing: a headless
++         * window never has the focus, so the key cannot be pressed. */
++        p += 4;
++        while (*p == ' ')
++            p++;
++        if (*p && !xbox_D3D8ScreenshotNext(p))
++            fprintf(stderr, "[HLE-D3D8] png request while a screenshot is being written, ignored\n");
++        return;
++    }
+     if (strncmp(p, "capture ", 8) == 0) {
+         p += 8;
+         while (*p == ' ')
+@@ -3306,9 +3322,48 @@ void hle_set_frame_cap(const char *name)
          xbox_Nv2aFlipGateCycle();
  }
  
@@ -323,7 +350,7 @@ index 4eed2f5..3ed8bfb 100644
      static LARGE_INTEGER qpf, window_start;
      static unsigned window_frames;
      static unsigned long window_extra;
-@@ -3316,7 +3358,7 @@ static void overlay_frame(void)
+@@ -3316,7 +3371,7 @@ static void overlay_frame(void)
      char *line = g_overlay_line;
      const size_t line_size = sizeof g_overlay_line;
      LARGE_INTEGER now;
@@ -332,7 +359,7 @@ index 4eed2f5..3ed8bfb 100644
  
      if (!configured) {
          const char *v = recomp_config_lookup("RECOMP_FPS_OVERLAY", "fps_overlay");
-@@ -3377,6 +3419,10 @@ static void overlay_frame(void)
+@@ -3377,6 +3432,10 @@ static void overlay_frame(void)
          shadow_dump_next_frame();
      }
      f11_was_down = f11;
