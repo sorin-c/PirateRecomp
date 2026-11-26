@@ -1,0 +1,14 @@
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -165,6 +165,10 @@ static const Item ITEMS[] = {
+       FPS_VALS, { "30 (off)", "60", "90", "120", "144", "240", "Unlocked" },
+       "A real higher frame rate in ship battles: cannons, smoke and ship motion. "
+       "30 is the original." },
++    { TAB_DISPLAY, "Frame rate by scene", "Land battles", "land_fps", "RECOMP_PIRATES_LAND_FPS", LIVE_TITLE, 1, 1, 7,
++      FPS_VALS, { "30 (off)", "60", "90", "120", "144", "240", "Unlocked" },
++      "A real higher frame rate in land battles: the troops marching and fighting, "
++      "and the flags, at their normal speed. 30 is the original." },
+     { TAB_DISPLAY, "Frame rate by scene", "Towns and rooms", "town_fps", "RECOMP_PIRATES_TOWN_FPS", LIVE_TITLE, 1, 1, 7,
+       FPS_VALS, { "33 (off)", "60", "90", "120", "144", "240", "Unlocked" },
+       "Taverns, the governor's mansion and the other rooms in a town. 33 is the original pacing." },

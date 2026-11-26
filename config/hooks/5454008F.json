@@ -460,6 +460,26 @@
   {
    "address": "0x0008FD32",
    "note": "menu_fps: the new career flow's Sleep(5) a frame (sub_0008F7D0), Sleep(0) above 60"
+  },
+  {
+   "address": "0x0004DFCC",
+   "note": "land_fps: the land battle frame's length in ms ([0x40D188]), remainder carried"
+  },
+  {
+   "address": "0x0004DF60",
+   "note": "land_fps: frame counter [0x4D6574], undone off the tick"
+  },
+  {
+   "address": "0x0004B57B",
+   "note": "land_fps: the won/lost countdown [0x4D657C], a step a tick"
+  },
+  {
+   "address": "0x00049C5C",
+   "note": "land_fps: a flag's wave phase, this frame's share of a tick"
+  },
+  {
+   "address": "0x0004DFEF",
+   "note": "land_fps: the land battle is over; the gate back to its own"
   }
  ]
 }

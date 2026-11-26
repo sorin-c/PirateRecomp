@@ -51,6 +51,12 @@ static const struct {
       "# second at the speed they have at 30 (slow motion included); 0 is\n"
       "# unlocked. Paced as sea_fps is. Applies at once from the F2 menu.\n"
       "#                                          [RECOMP_PIRATES_BATTLE_FPS]\n" },
+    { "land_fps", "30",
+      "# Experimental: the frame rate in land battles, at the game's own\n"
+      "# speed: 30 (the default) as the console; 60, 90, 120, 144 or 240 draw\n"
+      "# the battle that many times a second, its troops, fights, flags and\n"
+      "# timers at the speed they have at 30; 0 is unlocked. Paced as sea_fps\n"
+      "# is. Applies at once from the F2 menu.     [RECOMP_PIRATES_LAND_FPS]\n" },
     { "town_fps", "30",
       "# Experimental: the frame rate in a town's rooms -- the tavern, the\n"
       "# governor's -- which the console draws 33 times a second: 30 (the\n"

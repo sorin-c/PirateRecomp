@@ -741,3 +741,9 @@ Each one, with the reason it exists:
   Display tab's "Frame rate by scene" group gets a "Menus" row for the
   game's `menu_fps` (60 (off), 90, 120, 144, 240, Unlocked; applies at
   once): the front end's frame rate, paced in `src/recomp_manual.c`.
+
+- **0072-settings-menu-land-rate** (`src/hle/hle_settings_menu.c`). The F2
+  Display tab's "Frame rate by scene" group gets a "Land battles" row for
+  the game's `land_fps` (30 (off), 60, 90, 120, 144, 240, Unlocked; applies
+  at once), after "Sea battles": the land battle's frame rate, paced in
+  `src/recomp_manual.c`.
