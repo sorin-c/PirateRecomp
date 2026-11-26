@@ -1,0 +1,14 @@
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -167,6 +167,10 @@
+     { TAB_DISPLAY, "Frame rate by scene", "Towns and rooms", "town_fps", "RECOMP_PIRATES_TOWN_FPS", LIVE_TITLE, 1, 1, 7,
+       FPS_VALS, { "33 (off)", "60", "90", "120", "144", "240", "Unlocked" },
+       "Taverns, the governor's mansion and the other rooms in a town. 33 is the original pacing." },
++    { TAB_DISPLAY, "Frame rate by scene", "Menus", "menu_fps", "RECOMP_PIRATES_MENU_FPS", LIVE_TITLE, 1, 1, 6,
++      { "60", "90", "120", "144", "240", "0" }, { "60 (off)", "90", "120", "144", "240", "Unlocked" },
++      "The title, the main menu, the new career pages and loading and saving. "
++      "60 is the original." },
+ 
+     /* Game: the title's own lines */
+     { TAB_GAME, "Start-up", "Movies", "skip_intro", "RECOMP_PIRATES_SKIP_INTRO", LIVE_NONE, 1, 0, 3,

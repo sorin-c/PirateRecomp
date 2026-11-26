@@ -736,3 +736,8 @@ Each one, with the reason it exists:
   `mirror`; 2 and 4 read as `clear`): both draw the 256x256 targets 4x
   and ripple them a third as much, Mirror at weight 0.6. The 512x512 dialog
   backdrop is no longer scaled.
+
+- **0071-settings-menu-menu-rate** (`src/hle/hle_settings_menu.c`). The F2
+  Display tab's "Frame rate by scene" group gets a "Menus" row for the
+  game's `menu_fps` (60 (off), 90, 120, 144, 240, Unlocked; applies at
+  once): the front end's frame rate, paced in `src/recomp_manual.c`.

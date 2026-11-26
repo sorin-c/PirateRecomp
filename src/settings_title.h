@@ -57,6 +57,13 @@ static const struct {
       "# default) as the console; 60, 90, 120, 144 or 240, or 0 unlocked,\n"
       "# draw them that often, at the speed they have on the console. Applies\n"
       "# at once from the F2 menu.                  [RECOMP_PIRATES_TOWN_FPS]\n" },
+    { "menu_fps", "60",
+      "# Experimental: the frame rate of the front end -- the title, the main\n"
+      "# menu, the new career pages, loading and saving -- which the console\n"
+      "# draws 60 times a second: 60 (the default) as the console; 90, 120,\n"
+      "# 144 or 240, or 0 unlocked, draw it that often, its animations at the\n"
+      "# speed they have on the console. Applies at once from the F2 menu.\n"
+      "#                                          [RECOMP_PIRATES_MENU_FPS]\n" },
     { "water_reflection", "1",
       "# The ship's reflection in the sea: 1 (the default) as the console\n"
       "# draws it, a faint rippled smear; clear draws it four times larger\n"
