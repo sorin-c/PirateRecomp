@@ -1,0 +1,32 @@
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index dbb7e5c..a661d98 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -144,11 +144,10 @@ static const Item ITEMS[] = {
+       { "0", "1", "2", "4", "8", "16" }, { "Off", "1x", "2x", "4x", "8x", "16x" },
+       "Anisotropic filtering: keeps the ground, decks and water sharp at a slant. "
+       "Off uses the game's own filtering." },
+-    { TAB_DISPLAY, "Picture", "Water reflections", "water_reflection", "RECOMP_PIRATES_WATER_REFLECTION", LIVE_NONE, 1, 0, 3,
+-      { "1", "clear", "mirror" }, { "Console", "Clearer", "Mirror" },
++    { TAB_DISPLAY, "Picture", "Water reflections", "water_reflection", "RECOMP_PIRATES_WATER_REFLECTION", LIVE_NONE, 1, 0, 2,
++      { "1", "clear" }, { "Console", "Improved" },
+       "The ship's reflection in the sea. Console is the original faint, rippled smear. "
+-      "Clearer draws it four times larger with gentler ripples. Mirror also shows it as a "
+-      "mirror would: the hull and sail colours on the water." },
++      "Improved draws it four times larger with gentler ripples." },
+     { TAB_DISPLAY, "Frame rate", "Frame rate cap", "frame_cap", "RECOMP_FPS_CAP", LIVE_CAP, 0, 0, 4,
+       { "adaptive", "60", "30", "0" }, { "Adaptive", "60", "30", "Off" },
+       "The most frames drawn a second. Adaptive follows the display. The game itself keeps "
+@@ -316,6 +315,12 @@ static int current_index(const Item *it)
+         }
+         if (!v || !*v)
+             v = recomp_config_default(it->key);
++        /* Other values of water_reflection the game reads as Improved
++         * ("clear"): 2 and 4 (Sharp, Sharpest), mirror, and improved. */
++        if (v && strcmp(it->key, "water_reflection") == 0 &&
++            (strcmp(v, "2") == 0 || strcmp(v, "4") == 0 || strcmp(v, "mirror") == 0 ||
++             strcmp(v, "improved") == 0))
++            v = "clear";
+         break;
+     }
+     if ((i = value_index(it, v)) >= 0)

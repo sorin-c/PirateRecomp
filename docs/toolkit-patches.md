@@ -741,7 +741,16 @@ Each one, with the reason it exists:
   Display tab's "Frame rate by scene" group gets a "Menus" row for the
   game's `menu_fps` (60 (off), 90, 120, 144, 240, Unlocked; applies at
   once): the front end's frame rate, paced in `src/recomp_manual.c`.
-- **0073-settings-menu-duel-rate** (`src/hle/hle_settings_menu.c`). The same
-  group gets a "Sword duels" row for the game's `duel_fps` (30 (off), 60,
+
+- **0072-water-reflection-console-or-improved** (`src/hle/hle_settings_menu.c`).
+  Sorin did not like Mirror and asked for two values: the F2 row is now
+  Console (`1`) and Improved (`clear`). `mirror`, `2` and `4` from an older
+  file show as Improved, which is how the game reads them. The mirror
+  composite (0070) stays in the toolkit; the game uses it only when
+  `RECOMP_PIRATES_MIRROR_WEIGHT` is set, for tests.
+
+- **0073-settings-menu-duel-rate** (`src/hle/hle_settings_menu.c`). The F2
+  Display tab's "Frame rate by scene" group gets a "Sword duels" row for
+  the game's `duel_fps` (30 (off), 60,
   90, 120, 144, 240, Unlocked; applies at once), after "Sea battles": the
   duel's frame rate, paced in `src/recomp_manual.c`.
