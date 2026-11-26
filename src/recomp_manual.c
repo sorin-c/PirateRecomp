@@ -1397,6 +1397,12 @@ static void land_begin_frame(void)
         if (!on && g_land.gate_rate)
             land_set_gate(0);
     } else {
+        /* A late frame is one tick, with at most one more owed to the
+         * next: the console's counter and countdown also take one step
+         * for a frame however long it ran (what moves by time takes the
+         * frame's whole length, as on the console), and catching up on
+         * every missed tick would run the flags and the countdown on in a
+         * burst after a hitch. Ship battles do the same (btl_begin_frame). */
         g_land.acc_us += g_land.dt_us;
         if (g_land.acc_us >= LAND_TICK_US) {
             g_land.tick = 1;
