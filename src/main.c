@@ -59,8 +59,7 @@ const char *recomp_config_lookup(const char *env_name, const char *key);
 int recomp_config_bool(const char *env_name, const char *key, int fallback);
 int recomp_config_int(const char *env_name, const char *key, int fallback);
 void xbox_D3D8SetOffscreenScale(unsigned width, unsigned height, unsigned scale);
-/* The render target textures the sea's reflection is drawn into. */
-static const unsigned k_reflection_targets[][2] = { { 256, 256 }, { 512, 512 } };
+void xbox_D3D8SetOffscreenEffect(unsigned width, unsigned height, float bump_scale, float mirror);
 
 /*
  * If xboxrecomp.h is not an umbrella header in your setup, include
@@ -434,6 +433,23 @@ static void log_hint(char *buf, size_t bytes)
 /* The title, start to finish: the same on every host. On POSIX it runs on a
  * thread of its own (host_main_posix), so the process's main thread is free
  * for the window. */
+/* A test override of a reflection amount (RECOMP_PIRATES_MIRROR_*): a whole
+ * finite number from 0 to 1, or the default is kept and the line says so. */
+static void env_amount(const char *name, float *value)
+{
+    const char *e = getenv(name);
+    char *end;
+    float v;
+
+    if (!e || !*e)
+        return;
+    v = strtof(e, &end);
+    if (end == e || *end || !isfinite(v) || v < 0.0f || v > 1.0f) {
+        fprintf(stderr, "[PIRATES] %s=%s ignored: give a number from 0 to 1\n", name, e);
+        return;
+    }
+    *value = v;
+}
 static int title_main(int argc, char **argv)
 {
     void *xbe_data = NULL;
@@ -484,18 +500,35 @@ static int title_main(int argc, char **argv)
         }
     }
 
-    /* water_reflection (src/settings_title.h): the sea's reflection
-     * targets drawn at 2 or 4 times the console's size (toolkit patch 0068).
-     * Set before the device makes them; a change applies at the next start. */
+    /* water_reflection (src/settings_title.h), toolkit patches 0068 and
+     * 0070. The sea's reflection is the player's ship drawn mirrored into a
+     * 256x256 target, rippled into a second one by a noise texture, and
+     * blended into the water at about a quarter strength over a black
+     * clear, so only the sails show, as a pale smear. "clear" draws both
+     * targets 4x larger and ripples them a third as much; "mirror" also lays
+     * the reflection over the water as a mirror would (the hull darkens it).
+     * 2 and 4, the setting's first values, read as "clear". Set before the
+     * device makes the targets; a change applies at the next start.
+     * RECOMP_PIRATES_MIRROR_WEIGHT / _MIRROR_BUMP override the two amounts. */
     {
-        int scale = recomp_config_int("RECOMP_PIRATES_WATER_REFLECTION", "water_reflection", 1);
-        size_t i;
+        const char *v = recomp_config_lookup("RECOMP_PIRATES_WATER_REFLECTION", "water_reflection");
+        int mode = 0;                       /* 0 console, 1 clear, 2 mirror */
 
-        if (scale != 2 && scale != 4)
-            scale = 1;
-        for (i = 0; i < sizeof k_reflection_targets / sizeof k_reflection_targets[0]; i++)
-            xbox_D3D8SetOffscreenScale(k_reflection_targets[i][0], k_reflection_targets[i][1],
-                                       (unsigned)scale);
+        if (v && (strcmp(v, "clear") == 0 || strcmp(v, "2") == 0 || strcmp(v, "4") == 0))
+            mode = 1;
+        else if (v && strcmp(v, "mirror") == 0)
+            mode = 2;
+        if (mode) {
+            float bump = 0.35f, mirror = mode == 2 ? 0.6f : 0.0f;
+
+            env_amount("RECOMP_PIRATES_MIRROR_BUMP", &bump);
+            if (mode == 2)
+                env_amount("RECOMP_PIRATES_MIRROR_WEIGHT", &mirror);
+            xbox_D3D8SetOffscreenScale(256, 256, 4);
+            xbox_D3D8SetOffscreenEffect(256, 256, bump, mirror);
+        }
+        fprintf(stderr, "[PIRATES] water reflections: %s\n",
+                mode == 2 ? "mirror" : mode == 1 ? "clear" : "console");
     }
 
     /* stdout unbuffered for immediate visibility. stderr, the log, is

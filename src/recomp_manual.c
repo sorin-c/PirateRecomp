@@ -2533,8 +2533,10 @@ void sub_0005D8C0(void)
     g_sea_menu_map++;
     sub_0005D8C0_gen();
     g_sea_menu_map--;
-    if (trace && g_sea_menu_depth > 0 && g_sea_map_frames > 0) {   /* for the tests */
-        fprintf(stderr, "[SEA60] world map closed: view %d,%d after %d stick frames\n",
+    if (trace && (g_sea_menu_depth > 0 || g_town_menu_depth > 0) &&
+        g_sea_map_frames > 0) {   /* for the tests */
+        fprintf(stderr, "[%s] world map closed: view %d,%d after %d stick frames\n",
+                g_sea_menu_depth > 0 ? "SEA60" : "TOWN60",
                 g_sea_map_x, g_sea_map_y, g_sea_map_frames);
         fflush(stderr);
     }
@@ -2558,12 +2560,32 @@ void sub_0005D8C0(void)
  * 60th; a slow frame counts as at most three. At 30 and 60 the map runs at
  * 60 and nothing changes. */
 
+/* The town's world map tab (its status pages, the town menu sub_00021D70
+ * with no sea menu open) does the same at town_fps above 60: the town menu's
+ * Swaps (sub_002C0F70) pace it at that rate, and this keeps its stick at
+ * the speed it has at 60. Not while a scene with its own frame wait runs
+ * inside the town. */
+static int town_map_fast(void)
+{
+    int rate;
+
+    if (g_town_menu_depth <= 0 || g_sea_menu_depth > 0 || g_sea_menu_map <= 0 ||
+        g_btl.in_frame ||
+        (g_pirates_world_seen &&
+         pirates_host_ms() - g_pirates_world_ms <= PIRATES_WORLD_RECENT_MS))
+        return 0;
+    rate = town_read_rate();
+    return rate != 30 && rate != 60;
+}
+
 static int sea_map_fast(void)
 {
     int rate;
 
-    if (g_sea_menu_depth <= 0 || g_sea_menu_map <= 0)
+    if (g_sea_menu_map <= 0)
         return 0;
+    if (g_sea_menu_depth <= 0)
+        return town_map_fast();
     rate = sea60_read_rate();
     return rate != 30 && rate != 60;
 }
@@ -2596,7 +2618,8 @@ static int sea_map_guest_hook(uint32_t va)
         int64_t now;
         double frames;
 
-        if (g_sea_menu_depth > 0 && g_sea_menu_map > 0 && !g_sea_map.armed) {
+        if ((g_sea_menu_depth > 0 || g_town_menu_depth > 0) && g_sea_menu_map > 0 &&
+            !g_sea_map.armed) {
             if ((int32_t)g_ebp != g_sea_map_x || (int32_t)g_edi != g_sea_map_y)
                 g_sea_map_frames++;
             g_sea_map_x = (int32_t)g_ebp;
@@ -2681,9 +2704,9 @@ void sub_000FD780(void)
  * while a scene with its own frame wait runs inside the town (a duel or
  * a battle: the world frame waits, sub_001A958A), which sets its own rate
  * or the vblank's; the dance paces itself. The world map tab of the
- * status pages is held at 60 by the host clock whatever town_fps and the
- * frame cap say, as at sea: its stick moves the view a fixed step a
- * frame. Elsewhere at 30 and 60 nothing changes. Once the town is left nobody renews it and the gate drops it
+ * status pages runs at town_fps above 60 too, its stick kept at the speed
+ * it has at 60 (town_map_fast); at 30 and 60 it is held at 60 by the host
+ * clock whatever the frame cap says, as at sea. Elsewhere at 30 and 60 nothing changes. Once the town is left nobody renews it and the gate drops it
  * after 100 ms. */
 extern void sub_002C0F70_gen(void);
 void sub_002C0F70(void)
@@ -2692,10 +2715,10 @@ void sub_002C0F70(void)
         !(g_pirates_world_seen &&
           pirates_host_ms() - g_pirates_world_ms <= PIRATES_WORLD_RECENT_MS)) {
         int rate = town_read_rate();
-        if (g_sea_menu_map > 0) {          /* the world map tab: its stick */
-            g_town.gate_rate = 60;         /* steps by the frame; 60 at any */
-            xbox_Nv2aFlipGateSetTitleRate(60);   /* town_fps and frame cap */
-        } else if (rate != 30 && rate != 60) {
+        if (g_sea_menu_map > 0 && (rate == 30 || rate == 60)) {
+            g_town.gate_rate = 60;         /* the world map tab: 60 by the host */
+            xbox_Nv2aFlipGateSetTitleRate(60);   /* clock at 30 and 60, as before */
+        } else if (rate != 30 && rate != 60) {   /* the map too: town_map_fast */
             g_town.gate_rate = rate;
             xbox_Nv2aFlipGateSetTitleRate(rate);
         }

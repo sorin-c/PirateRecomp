@@ -102,8 +102,8 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   every frame, which otherwise held it to about 60 (90 on and off), as do
   the town's dialogs without a room (dividing the plunder). Above 60 the
   town menu and the screens it opens (merchant, shipwright, plunder,
-  status) follow it too, instead of the 60 of the vblank; the world map
-  tab stays at 60, since its stick moves a fixed step a frame.
+  status) follow it too, instead of the 60 of the vblank, and so does the
+  world map tab, its stick scrolling as fast as it does at 60 (as at sea).
 - **Menu frame rate (experimental).** `menu_fps` (F2 Display tab "Menus",
   applies at once): the front end -- the title, the main menu, the new
   career pages, loading and saving -- which the console draws 60 times a
@@ -172,7 +172,7 @@ defaults. Every line names the environment variable that overrides it, so a
 | `fps_overlay` | `0` | Frame-rate counter. |
 | `fullscreen` | `0` | Fullscreen window. |
 | `anisotropy` | `0` | Texture sharpness: `0` off (the game's own filtering), `1`, `2`, `4`, `8` or `16`. |
-| `water_reflection` | `1` | Ships' reflections in the sea: `1` the console's size, `2` or `4` times that (sharper). Applies at the next start. |
+| `water_reflection` | `1` | The ship's reflection in the sea: `1` as the console (a faint rippled smear), `clear` four times larger with gentler ripples, `mirror` also shown as a mirror would (hull and sail colours on the water). Applies at the next start. |
 | `vrr` | `0` | Variable refresh rate. |
 | `vsync` | `1` | Wait for the monitor's refresh: no tearing, frame rate at most the refresh rate. `0` off. |
 | `pad_follow_input` | `1` | Controller 1 is the pad used last. |
