@@ -1,5 +1,5 @@
 diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
-index dbb7e5c..46ae285 100644
+index dbb7e5c..a661d98 100644
 --- a/src/hle/hle_settings_menu.c
 +++ b/src/hle/hle_settings_menu.c
 @@ -144,11 +144,10 @@ static const Item ITEMS[] = {
@@ -17,14 +17,15 @@ index dbb7e5c..46ae285 100644
      { TAB_DISPLAY, "Frame rate", "Frame rate cap", "frame_cap", "RECOMP_FPS_CAP", LIVE_CAP, 0, 0, 4,
        { "adaptive", "60", "30", "0" }, { "Adaptive", "60", "30", "Off" },
        "The most frames drawn a second. Adaptive follows the display. The game itself keeps "
-@@ -316,6 +315,11 @@ static int current_index(const Item *it)
+@@ -316,6 +315,12 @@ static int current_index(const Item *it)
          }
          if (!v || !*v)
              v = recomp_config_default(it->key);
-+        /* Earlier values of water_reflection, which the game reads as
-+         * Improved ("clear"): 2 and 4 (Sharp, Sharpest) and mirror. */
++        /* Other values of water_reflection the game reads as Improved
++         * ("clear"): 2 and 4 (Sharp, Sharpest), mirror, and improved. */
 +        if (v && strcmp(it->key, "water_reflection") == 0 &&
-+            (strcmp(v, "2") == 0 || strcmp(v, "4") == 0 || strcmp(v, "mirror") == 0))
++            (strcmp(v, "2") == 0 || strcmp(v, "4") == 0 || strcmp(v, "mirror") == 0 ||
++             strcmp(v, "improved") == 0))
 +            v = "clear";
          break;
      }
