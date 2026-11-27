@@ -768,3 +768,12 @@ Each one, with the reason it exists:
   and written on a thread of its own (under `.part` until whole), so the
   game does not stop for it. The F2 About tab lists the key. F11's BMP and
   frame capture for bug reports are unchanged.
+
+- **0077-fps-overlay-key-f8** (`src/hle/hle_d3d8.c`, `hle_settings_menu.c`,
+  `hle_settings.h`, `hle_d3d8_record.h`; `src/host/host.h`, `host_sdl.c`;
+  `src/config/recomp_config.c`; `src/launcher/launcher.c`;
+  `src/kernel/xbox_memory_layout.c`). The frame-rate counter toggles with
+  **F8** instead of F9 (Windows shadow window and the SDL shell alike).
+  F8 was bound to nothing; F2, F10, F11 and F12 keep their jobs. The F2
+  About tab, the setting's help line, the `pirates.ini` comment and the log
+  line say F8. F9 now does nothing.
