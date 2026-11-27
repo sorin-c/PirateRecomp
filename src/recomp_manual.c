@@ -1618,6 +1618,81 @@ static int duel_guest_hook(uint32_t va)
     return 1;
 }
 
+/* ---- Dancing faster than 60 (dance_fps, experimental) ----
+ *
+ * The dance (sub_00027450) waits at least 10 ms a frame (the tick read at
+ * 0x2A579, against the frame's start in [esp+0xC0]) and the vblank holds it
+ * to 60; its steps, prompts and camera follow the music and the engine's
+ * clock, so with the wait passed and the frame rate unlocked (80 frames a
+ * second headless) the same prompts and camera came at the same moments.
+ * dance_fps (RECOMP_PIRATES_DANCE_FPS): 60 (the default) as the console;
+ * 90, 120, 144 or 240 pass the wait and let the flip gate pace the frames
+ * by the host clock, 0 unlocked. */
+static struct {
+    int setting;          /* the rate as last read */
+    int gate_rate;        /* the rate this module set on the gate, 0 none */
+    int64_t last_us;      /* the last dance frame's wait */
+    int active;           /* faster than 60 */
+    int dt_us;            /* this frame's length */
+    int32_t rem;          /* dance_scale's remainder */
+} g_dance;
+
+#define DANCE_FRAME_US 16667               /* a console frame: 60 a second */
+
+/* A step taken once a console frame: this frame's share of it. */
+static int32_t dance_scale(int32_t step)
+{
+    int64_t t = (int64_t)step * g_dance.dt_us + g_dance.rem;
+    g_dance.rem = (int32_t)(t % DANCE_FRAME_US);
+    return (int32_t)(t / DANCE_FRAME_US);
+}
+
+static int dance_read_rate(void)
+{
+    const char *v = recomp_config_lookup("RECOMP_PIRATES_DANCE_FPS", "dance_fps");
+    int r;
+
+    if (!v || !*v)
+        return 60;
+    r = pirates_parse_fps(v);
+    if (r < 0)
+        return -1;
+    if (r <= 60)
+        return 60;
+    return r > 1000 ? 1000 : r;
+}
+
+/* At the dance frame's wait (ra 0x2A57E). */
+static void dance_frame_wait(void)
+{
+    int rate = dance_read_rate();
+    int64_t now = pirates_host_us();
+
+    g_dance.dt_us = !g_dance.last_us || now - g_dance.last_us > 250000 ? DANCE_FRAME_US
+                    : (int)(now - g_dance.last_us);
+    if (g_dance.dt_us > 3 * DANCE_FRAME_US)
+        g_dance.dt_us = 3 * DANCE_FRAME_US;
+    g_dance.last_us = now;
+    g_dance.active = rate != 60;
+    if (rate != g_dance.setting) {
+        g_dance.setting = rate;
+        if (rate < 0)
+            fprintf(stderr, "[DANCE60] dancing unlocked (dance_fps = 0)\n");
+        else
+            fprintf(stderr, "[DANCE60] dancing at %d frames a second\n", rate);
+        fflush(stderr);
+    }
+    if (rate == 60) {
+        if (g_dance.gate_rate) {
+            g_dance.gate_rate = 0;
+            xbox_Nv2aFlipGateSetTitleRate(0);
+        }
+        return;
+    }
+    g_eax += 1000u;                        /* "10 ms have passed" */
+    g_dance.gate_rate = rate;
+    xbox_Nv2aFlipGateSetTitleRate(rate);
+}
 /* sea_fps (RECOMP_PIRATES_SEA_FPS): 30 (the default) sails as the console
  * does, 60, 90, 120, 144 or 240 frames a second, 0 unlocked. sea_60 = 1, the
  * setting before it, still means 60 while sea_fps is 30. */
@@ -2357,6 +2432,14 @@ void recomp_guest_hook(uint32_t va)
     /* The same loop runs the town's dialogs that have no room behind them
      * (dividing the plunder: ~75 a second on its Sleep(10)), so inside a
      * town visit town_fps alone decides. */
+    /* The dance's one frame-counted motion: [esp+0x7C] += 25 a frame at
+     * 0x29B7D (a prompt's or a glow's phase, drawn at 0x29B30/0x29BB5).
+     * Faster than 60, this frame's share of 25 (made up before the add). */
+    if (va == 0x00029B7Du) {
+        if (g_dance.active && pirates_host_us() - g_dance.last_us < 250000)
+            S60_MEM32(g_esp + 0x7Cu) += dance_scale(25) - 25;
+        return;
+    }
     /* A new career's page loops sleep 5 ms a frame: only a yield faster
      * than 60 (front_frame paces them). */
     if (va == 0x0008EEFCu || va == 0x0008FD32u) {
@@ -2996,7 +3079,12 @@ void sub_001A958A(void)
             }
         }
     }
-    if (ra == 0x00099C4Eu)                /* a town scene's frame wait */
+    if (ra == 0x0002A57Eu)                /* a dance frame's wait */
+        dance_frame_wait();
+    else if (g_dance.gate_rate && pirates_host_us() - g_dance.last_us > 150000) {
+        g_dance.gate_rate = 0;            /* the dance is over: the gate as before */
+        xbox_Nv2aFlipGateSetTitleRate(0);
+    }    if (ra == 0x00099C4Eu)                /* a town scene's frame wait */
         town_frame_wait();
     if (ra == 0x000C397Fu) {              /* a battle frame begins */
         btl_begin_frame();

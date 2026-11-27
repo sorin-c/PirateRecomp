@@ -754,6 +754,12 @@ Each one, with the reason it exists:
   the game's `duel_fps` (30 (off), 60, 90, 120, 144, 240, Unlocked; applies
   at once), after "Sea battles": the duel's frame rate, paced in
   `src/recomp_manual.c`.
+
+- **0074-settings-menu-dance-rate** (`src/hle/hle_settings_menu.c`). A
+  "Dancing" row after "Sword duels" for the game's `dance_fps` (60 (off),
+  90, 120, 144, 240, Unlocked; applies at once): the dancing's frame rate,
+  paced in `src/recomp_manual.c`.
+
 - **0075-screenshot-key-png** (`src/d3d/d3d8_screenshot.c` and `.h`, new;
   `src/d3d/d3d8_device.c`, `d3d8_xbox.h`, `CMakeLists.txt`;
   `src/hle/hle_d3d8.c`, `hle_settings_menu.c`; `src/host/host.h`,
@@ -780,5 +786,14 @@ Each one, with the reason it exists:
   now says which sets the host vertex carries (an FVF's first ntex, a
   declaration's v9-v12, all four under a vertex program), and a stage with
   no set of its own reads an earlier stage's that names the same set.
-  Numbered 0076: 0073 is the duel row, 0074 is left for the land-battle
-  F2 row and 0075 is the screenshot key.
+  Numbered 0076: 0073 is the duel row, 0074 the dance row and 0075 the
+  screenshot key.
+
+- **0077-fps-overlay-key-f8** (`src/hle/hle_d3d8.c`, `hle_settings_menu.c`,
+  `hle_settings.h`, `hle_d3d8_record.h`; `src/host/host.h`, `host_sdl.c`;
+  `src/config/recomp_config.c`; `src/launcher/launcher.c`;
+  `src/kernel/xbox_memory_layout.c`). The frame-rate counter toggles with
+  **F8** instead of F9 (Windows shadow window and the SDL shell alike).
+  F8 was bound to nothing; F2, F10, F11 and F12 keep their jobs. The F2
+  About tab, the setting's help line, the `pirates.ini` comment and the log
+  line say F8. F9 no longer toggles the frame-rate counter.

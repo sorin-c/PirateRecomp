@@ -68,7 +68,7 @@ With Visual Studio, Git and Python. See [docs/building.md](docs/building.md).
 | Right stick | Right stick | (none) | |
 | Start + Back | Start + Back | F2 | Settings menu |
 
-Keyboard only: **F9** shows the frame rate, **F10** changes the frame cap,
+Keyboard only: **F8** shows the frame rate, **F10** changes the frame cap,
 **F12** saves a screenshot (`screenshot_<date>_<time>.png`, the game's
 picture at full output resolution, without the F2 menu or the frame-rate
 counter) beside `pirates_recomp.exe`, **F11** saves a frame for bug

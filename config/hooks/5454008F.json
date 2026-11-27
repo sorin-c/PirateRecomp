@@ -2,6 +2,10 @@
  "comment": "Guest hooks (toolkit patch 0042): each address calls recomp_guest_hook() in src/recomp_manual.c just before that instruction.",
  "hooks": [
   {
+   "address": "0x00029B7D",
+   "note": "dance_fps: the dance's per-frame phase += 25, this frame's share"
+  },
+  {
    "address": "0x00035845",
    "note": "duel_fps: an idle effect's 1-in-200 start, rolled once a tick"
   },
