@@ -775,6 +775,20 @@ Each one, with the reason it exists:
   game does not stop for it. The F2 About tab lists the key. F11's BMP and
   frame capture for bug reports are unchanged.
 
+- **0076-texcoord-routed-past-declaration-sets** (`src/hle/hle_d3d8.c`,
+  `src/hle/hle_d3d8_state.c`). 0056's rule for declarations too. A routed
+  draw under a fixed-function declaration is gathered with only the
+  coordinate registers the declaration lists, so a stage past them read
+  zeros. In the dancing minigame the dancers' heads (the player's hair and
+  face) come from push buffers under a two-set declaration (v9, v10) with a
+  reflection on stage 0 and stages 1-3 at set 0: stages 2 and 3 were sent to
+  sets 2 and 3 and the hair was drawn as stripes. `hle_d3d8_shadow_texcoord_sets`
+  now says which sets the host vertex carries (an FVF's first ntex, a
+  declaration's v9-v12, all four under a vertex program), and a stage with
+  no set of its own reads an earlier stage's that names the same set.
+  Numbered 0076: 0073 is the duel row, 0074 the dance row and 0075 the
+  screenshot key.
+
 - **0077-fps-overlay-key-f8** (`src/hle/hle_d3d8.c`, `hle_settings_menu.c`,
   `hle_settings.h`, `hle_d3d8_record.h`; `src/host/host.h`, `host_sdl.c`;
   `src/config/recomp_config.c`; `src/launcher/launcher.c`;
@@ -784,9 +798,18 @@ Each one, with the reason it exists:
   About tab, the setting's help line, the `pirates.ini` comment and the log
   line say F8. F9 no longer toggles the frame-rate counter.
 
+- **0078-headless-window-cloaked** (`src/hle/hle_d3d8.c`). A headless run
+  (`RECOMP_HEADLESS=1`, 0022) also cloaks its window (`DwmSetWindowAttribute`
+  `DWMWA_CLOAK`, from dwmapi.dll looked up at run time) before showing it.
+  Off every monitor was not enough: Windows still drew it, faded, at the top
+  left of the desk where Sorin was working. A cloaked window is still a shown
+  window to the game and its device, so frames are presented and timed as
+  before; DWM leaves it out of the picture. Normal play and plain
+  `RECOMP_WINDOW_BACKGROUND=1` runs are unchanged.
+
 - **0079-settings-menu-land-rate** (`src/hle/hle_settings_menu.c`). The F2
   Display tab's "Frame rate by scene" group gets a "Land battles" row for
   the game's `land_fps` (30 (off), 60, 90, 120, 144, 240, Unlocked; applies
   at once), after "Sea battles": the land battle's frame rate, paced in
   `src/recomp_manual.c`. Numbered 0079: 0076 to 0078 are taken (0078 is the
-  headless window fix on claude/headless-invisible).
+  headless window fix).
