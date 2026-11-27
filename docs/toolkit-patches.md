@@ -776,4 +776,4 @@ Each one, with the reason it exists:
   **F8** instead of F9 (Windows shadow window and the SDL shell alike).
   F8 was bound to nothing; F2, F10, F11 and F12 keep their jobs. The F2
   About tab, the setting's help line, the `pirates.ini` comment and the log
-  line say F8. F9 now does nothing.
+  line say F8. F9 no longer toggles the frame-rate counter.
