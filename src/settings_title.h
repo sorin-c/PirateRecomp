@@ -58,6 +58,12 @@ static const struct {
       "# times a second at the speed they have at 30; 0 is unlocked. Paced as\n"
       "# battle_fps is. Applies at once from the F2 menu.\n"
       "#                                            [RECOMP_PIRATES_DUEL_FPS]\n" },
+    { "dance_fps", "60",
+      "# Experimental: the frame rate of the dancing, which the console draws\n"
+      "# 60 times a second: 60 (the default) as the console; 90, 120, 144 or\n"
+      "# 240, or 0 unlocked, draw it that often, its steps and prompts still\n"
+      "# with the music. Applies at once from the F2 menu.\n"
+      "#                                           [RECOMP_PIRATES_DANCE_FPS]\n" },
     { "town_fps", "30",
       "# Experimental: the frame rate in a town's rooms -- the tavern, the\n"
       "# governor's -- which the console draws 33 times a second: 30 (the\n"
