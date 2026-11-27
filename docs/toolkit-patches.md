@@ -754,3 +754,17 @@ Each one, with the reason it exists:
   the game's `duel_fps` (30 (off), 60, 90, 120, 144, 240, Unlocked; applies
   at once), after "Sea battles": the duel's frame rate, paced in
   `src/recomp_manual.c`.
+- **0075-screenshot-key-png** (`src/d3d/d3d8_screenshot.c` and `.h`, new;
+  `src/d3d/d3d8_device.c`, `d3d8_xbox.h`, `CMakeLists.txt`;
+  `src/hle/hle_d3d8.c`, `hle_settings_menu.c`; `src/host/host.h`,
+  `host_sdl.c`; `third_party/stb/stb_image_write.h`, new, public domain or
+  MIT). **F12** saves a screenshot as a PNG beside the executable, named
+  `screenshot_YYYY-MM-DD_HH-MM-SS.png` (`_2`, `_3` for more in the same
+  second). `xbox_D3D8ScreenshotNext(path)` asks for the next presented
+  frame; `present_scene` reads the swap chain back after the display
+  resolve and before the corner line, the settings menu and the touch
+  controls are drawn, so the file holds the game's picture alone, at the
+  size it reaches the screen and without the bars. The PNG is compressed
+  and written on a thread of its own (under `.part` until whole), so the
+  game does not stop for it. The F2 About tab lists the key. F11's BMP and
+  frame capture for bug reports are unchanged.

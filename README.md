@@ -69,9 +69,11 @@ With Visual Studio, Git and Python. See [docs/building.md](docs/building.md).
 | Start + Back | Start + Back | F2 | Settings menu |
 
 Keyboard only: **F9** shows the frame rate, **F10** changes the frame cap,
-**F11** saves a screenshot (`frameNNN.bmp`, with a `frameNNN.d3dcap` frame
-capture for bug reports) beside `pirates_recomp.exe`, and **Alt+Enter**
-switches fullscreen.
+**F12** saves a screenshot (`screenshot_<date>_<time>.png`, the game's
+picture at full output resolution, without the F2 menu or the frame-rate
+counter) beside `pirates_recomp.exe`, **F11** saves a frame for bug
+reports (`frameNNN.bmp` with a `frameNNN.d3dcap` frame capture), and
+**Alt+Enter** switches fullscreen.
 
 Keys and buttons can be rebound in the launcher's Input tab. The pad
 columns are by position, so a PlayStation pad's Cross is A.
