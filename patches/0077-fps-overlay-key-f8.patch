@@ -1,0 +1,216 @@
+diff --git a/src/config/recomp_config.c b/src/config/recomp_config.c
+index 7a0b5a2..d153547 100644
+--- a/src/config/recomp_config.c
++++ b/src/config/recomp_config.c
+@@ -758,7 +758,7 @@ int recomp_settings_write(const char *path, const RecompSettings *s)
+         "# or 144; any other game runs fast above 60, as it does uncapped.\n"
+         "frame_cap = %s\n"
+         "\n"
+-        "# Show the frame rate from the moment the game starts. F9 toggles it\n"
++        "# Show the frame rate from the moment the game starts. F8 toggles it\n"
+         "# while playing either way.                      [RECOMP_FPS_OVERLAY]\n"
+         "fps_overlay = %d\n"
+         "\n"
+diff --git a/src/hle/hle_d3d8.c b/src/hle/hle_d3d8.c
+index 9a5b0a4..3cf44c7 100644
+--- a/src/hle/hle_d3d8.c
++++ b/src/hle/hle_d3d8.c
+@@ -826,7 +826,7 @@ static int shadow_key_down(int vk)
+     return g_shadow_hwnd && GetForegroundWindow() == g_shadow_hwnd &&
+            (GetAsyncKeyState(vk) & 0x8000) != 0;
+ }
+-#define SHADOW_KEY_F9   VK_F9
++#define SHADOW_KEY_F8   VK_F8
+ #define SHADOW_KEY_F10  VK_F10
+ #define SHADOW_KEY_F11  VK_F11
+ #define SHADOW_KEY_F12  VK_F12
+@@ -970,7 +970,7 @@ static int shadow_key_down(int key)
+ 
+     return (__atomic_fetch_and(&g_shadow_keys, ~bit, __ATOMIC_SEQ_CST) & bit) != 0;
+ }
+-#define SHADOW_KEY_F9   HOST_KEY_F9
++#define SHADOW_KEY_F8   HOST_KEY_F8
+ #define SHADOW_KEY_F10  HOST_KEY_F10
+ #define SHADOW_KEY_F11  HOST_KEY_F11
+ #define SHADOW_KEY_F12  HOST_KEY_F12
+@@ -3248,7 +3248,7 @@ static void swap_timing_report(void)
+  * what it says and when it appears is decided here, because this is where
+  * the frame rate is already counted and where the flip gate is reachable.
+  *
+- * F9 shows or hides the counter, F10 steps the cap. Both are read only while
++ * F8 shows or hides the counter, F10 steps the cap. Both are read only while
+  * the game's window is in front, so they do nothing while the player is in
+  * another application, and neither is a key the input bindings offer, so
+  * neither can collide with a control. RECOMP_FPS_OVERLAY=1 starts with the
+@@ -3269,7 +3269,7 @@ void hle_d3d8_overlay_redraw(void)
+ {
+ }
+ 
+-/* hle_settings.h: the same switches as F9 and F10, by value. Set from
++/* hle_settings.h: the same switches as F8 and F10, by value. Set from
+  * another thread; overlay_frame picks them up at its next frame. */
+ static volatile int g_overlay_set = -1;   /* -1: nothing asked */
+ 
+@@ -3363,7 +3363,7 @@ static void screenshot_key(void)
+ 
+ static void overlay_frame(void)
+ {
+-    static int configured, f9_was_down, f10_was_down, f11_was_down, f12_was_down;
++    static int configured, f8_was_down, f10_was_down, f11_was_down, f12_was_down;
+     static LARGE_INTEGER qpf, window_start;
+     static unsigned window_frames;
+     static unsigned long window_extra;
+@@ -3371,7 +3371,7 @@ static void overlay_frame(void)
+     char *line = g_overlay_line;
+     const size_t line_size = sizeof g_overlay_line;
+     LARGE_INTEGER now;
+-    int f9, f10, f11, f12;
++    int f8, f10, f11, f12;
+ 
+     if (!configured) {
+         const char *v = recomp_config_lookup("RECOMP_FPS_OVERLAY", "fps_overlay");
+@@ -3381,7 +3381,7 @@ static void overlay_frame(void)
+         QueryPerformanceFrequency(&qpf);
+         QueryPerformanceCounter(&window_start);
+         snprintf(line, line_size, "-- fps   cap %s", xbox_Nv2aFlipGateModeName());
+-        fprintf(stderr, "[HLE-D3D8] F9 shows the frame rate on screen, F10 steps the "
++        fprintf(stderr, "[HLE-D3D8] F8 shows the frame rate on screen, F10 steps the "
+                 "frame cap (now %s)\n", xbox_Nv2aFlipGateModeName());
+         fflush(stderr);
+     }
+@@ -3421,7 +3421,7 @@ static void overlay_frame(void)
+         del_was_down = del;
+         hle_settings_menu_publish();
+     }
+-    f9  = shadow_key_down(SHADOW_KEY_F9);
++    f8  = shadow_key_down(SHADOW_KEY_F8);
+     f10 = shadow_key_down(SHADOW_KEY_F10);
+     f11 = shadow_key_down(SHADOW_KEY_F11);
+     if (f11 && !f11_was_down) {
+@@ -3436,7 +3436,7 @@ static void overlay_frame(void)
+     if (f12 && !f12_was_down)
+         screenshot_key();
+     f12_was_down = f12;
+-    if (f9 && !f9_was_down)
++    if (f8 && !f8_was_down)
+         enabled = !enabled;
+     if (g_overlay_set >= 0) {
+         enabled = g_overlay_set;
+@@ -3446,7 +3446,7 @@ static void overlay_frame(void)
+         xbox_Nv2aFlipGateCycle();
+         window_start.QuadPart = 0;           /* the old window straddles the change */
+     }
+-    f9_was_down = f9;
++    f8_was_down = f8;
+     f10_was_down = f10;
+ 
+     QueryPerformanceCounter(&now);
+diff --git a/src/hle/hle_d3d8_record.h b/src/hle/hle_d3d8_record.h
+index d1ccd44..54582f6 100644
+--- a/src/hle/hle_d3d8_record.h
++++ b/src/hle/hle_d3d8_record.h
+@@ -123,7 +123,7 @@ void hle_d3d8_interp_retire(void (*fn)(const void *arg), const void *arg, size_t
+  * (before Hor+ scaled any). */
+ void hle_d3d8_interp_snapshot(void);
+ const float *hle_d3d8_interp_constants(void);   /* NV2A_VS_MAX_CONSTANTS float4s */
+-/* hle_d3d8.c: the F9 overlay over an in-between frame too; and whether a
++/* hle_d3d8.c: the F8 overlay over an in-between frame too; and whether a
+  * movie went over the last frame on the movie layer. */
+ void hle_d3d8_overlay_redraw(void);
+ int  hle_d3d8_movie_layer_shown(void);
+diff --git a/src/hle/hle_settings.h b/src/hle/hle_settings.h
+index 81c634f..dc40085 100644
+--- a/src/hle/hle_settings.h
++++ b/src/hle/hle_settings.h
+@@ -1,7 +1,7 @@
+ /*
+  * hle_settings.h - the settings a player can change while a title runs.
+  *
+- * What the desktop's F9 and F10 do, for a host with no keyboard: Android's
++ * What the desktop's F8 and F10 do, for a host with no keyboard: Android's
+  * in-game menu (src/host/android_main.c) calls these. Each takes effect at
+  * the next frame and needs no restart. Any thread.
+  */
+@@ -12,7 +12,7 @@
+ extern "C" {
+ #endif
+ 
+-/* The frame-rate counter in the top-left corner (F9). */
++/* The frame-rate counter in the top-left corner (F8). */
+ int  hle_fps_overlay(void);
+ void hle_set_fps_overlay(int on);
+ 
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index d55f6c6..a52be6d 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -124,7 +124,7 @@ static const Item ITEMS[] = {
+       "unchanged." },
+     { TAB_DISPLAY, "Window", "Frame-rate counter", "fps_overlay", "RECOMP_FPS_OVERLAY", LIVE_FPS, 0, 0, 2,
+       { "0", "1" }, { "Off", "On" },
+-      "Shows frames per second in the top-left corner. F9 toggles it too." },
++      "Shows frames per second in the top-left corner. F8 toggles it too." },
+     { TAB_DISPLAY, "Picture", "Widescreen (16:9)", "widescreen", "RECOMP_WIDESCREEN", LIVE_NONE, 0, 0, 2,
+       { "0", "1" }, { "Off", "On" },
+       "Shows more of the world to the sides instead of the original 4:3 picture. "
+@@ -365,7 +365,7 @@ static void build_rows(void)
+         ROW(D3D8_MENU_ROW_INFO, -1, "This menu");
+         snprintf(g_rows[g_row_count - 1].value, sizeof g_rows[0].value, "F2 or Start+Back");
+         ROW(D3D8_MENU_ROW_INFO, -1, "Frame-rate counter");
+-        snprintf(g_rows[g_row_count - 1].value, sizeof g_rows[0].value, "F9");
++        snprintf(g_rows[g_row_count - 1].value, sizeof g_rows[0].value, "F8");
+         ROW(D3D8_MENU_ROW_INFO, -1, "Fullscreen");
+         snprintf(g_rows[g_row_count - 1].value, sizeof g_rows[0].value, "Alt+Enter");
+         ROW(D3D8_MENU_ROW_INFO, -1, "Screenshot");
+diff --git a/src/host/host.h b/src/host/host.h
+index ad7ddf7..66def7f 100644
+--- a/src/host/host.h
++++ b/src/host/host.h
+@@ -52,7 +52,7 @@ typedef struct host_window host_window;
+ 
+ /* Keys the shell itself answers; everything else is the input bindings'. */
+ enum {
+-    HOST_KEY_F9 = 1,        /* frame-rate overlay */
++    HOST_KEY_F8 = 1,        /* frame-rate overlay */
+     HOST_KEY_F10,           /* frame cap step */
+     HOST_KEY_F11,           /* frame capture */
+     HOST_KEY_FULLSCREEN,    /* Alt+Enter (Option+Enter, or Cmd+Enter, on a Mac) */
+diff --git a/src/host/host_sdl.c b/src/host/host_sdl.c
+index fb80c14..758deca 100644
+--- a/src/host/host_sdl.c
++++ b/src/host/host_sdl.c
+@@ -746,7 +746,7 @@ static void dispatch_event(const SDL_Event *e)
+             op.on = !SDL_GetAtomicInt(&w->fullscreen);
+             fullscreen_on_main(&op);
+         } else if (w->cb.on_key) {
+-            int k = e->key.key == SDLK_F9 ? HOST_KEY_F9 :
++            int k = e->key.key == SDLK_F8 ? HOST_KEY_F8 :
+                     e->key.key == SDLK_F10 ? HOST_KEY_F10 :
+                     e->key.key == SDLK_F11 ? HOST_KEY_F11 :
+                     e->key.key == SDLK_F12 ? HOST_KEY_F12 : 0;
+diff --git a/src/kernel/xbox_memory_layout.c b/src/kernel/xbox_memory_layout.c
+index 81f49e0..789960d 100644
+--- a/src/kernel/xbox_memory_layout.c
++++ b/src/kernel/xbox_memory_layout.c
+@@ -2407,7 +2407,7 @@ void xbox_Nv2aFlipGateSetIdle(xbox_FlipGateIdleFn fn)
+  * The same with the cap off: off means no ceiling, not that the title's own
+  * interval is ignored -- and with the gate never waiting there was no wait
+  * for interpolation to draw in, so Pirates!' sea stayed at 30. The cap's
+- * name (F9 overlay, F10, the settings menu) stays the player's. */
++ * name (F8 overlay, F10, the settings menu) stays the player's. */
+ static int flip_gate_effective_divisor(void)
+ {
+     int d = flip_gate_divisor();
+diff --git a/src/launcher/launcher.c b/src/launcher/launcher.c
+index be5d5a4..25ae448 100644
+--- a/src/launcher/launcher.c
++++ b/src/launcher/launcher.c
+@@ -239,7 +239,7 @@ static void build_rows(void)
+     r++;
+ 
+     r->label = "Show frame rate";
+-    r->help  = "Start with the counter on screen. F9 toggles it while playing.";
++    r->help  = "Start with the counter on screen. F8 toggles it while playing.";
+     r->kind  = ROW_BOOL; r->ival = &g_settings.fps_overlay;
+     r++;
+ 
