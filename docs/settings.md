@@ -38,6 +38,7 @@ Back pressed alone still reaches the game as usual.
 | Sailing frame rate (experimental: 30, 60, 90, 120, 144, 240, unlocked) | at once |
 | Battle frame rate (experimental: 30, 60, 90, 120, 144, 240, unlocked) | at once |
 | Sword duels frame rate (experimental: 30, 60, 90, 120, 144, 240, unlocked) | at once |
+| Dancing frame rate (experimental: 60, 90, 120, 144, 240, unlocked) | at once |
 | Town frame rate (experimental: 33, 60, 90, 120, 144, 240, unlocked) | at once |
 
 Every change is written to `pirates.ini` straight away, keeping its comments.
@@ -104,6 +105,11 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   30th and moves a share of it each frame. Paced as sailing is. Measured
   against 30 fps in scripted duels (the fighters' animation within 1%, the
   duel ending at the same moment); not yet played through many duels.
+- **Dancing frame rate (experimental).** `dance_fps` (F2 "Dancing", applies
+  at once): the dancing, which the console draws 60 times a second. Its
+  steps, prompts and camera follow the music and the game's clock, so 90,
+  120, 144, 240 or 0 (unlocked) only let the frames come faster, paced as
+  sailing is; the default, 60, is the console's.
 - **Town frame rate (experimental).** `town_fps` (F2 "Town frame rate"):
   the tavern, the governor's room and the town's other rooms, which the
   console draws 33 times a second (a 30 ms wait, frame cap or not). Their
@@ -180,6 +186,7 @@ defaults. Every line names the environment variable that overrides it, so a
 | `sea_fps` | `30` | Experimental: frames a second while sailing (`0` unlocked). |
 | `battle_fps` | `30` | Experimental: frames a second in ship battles (`0` unlocked). |
 | `duel_fps` | `30` | Experimental: frames a second in sword duels (`0` unlocked). |
+| `dance_fps` | `60` | Experimental: frames a second while dancing (`0` unlocked). |
 | `town_fps` | `30` | Experimental: frames a second in a town: the menu, its rooms (the tavern, the governor's) and its other screens (`0` unlocked). |
 | `menu_fps` | `60` | Experimental: frames a second in the front end: title, main menu, new career, load and save (`0` unlocked). |
 | `fps_overlay` | `0` | Frame-rate counter. |

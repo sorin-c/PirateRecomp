@@ -754,3 +754,8 @@ Each one, with the reason it exists:
   the game's `duel_fps` (30 (off), 60, 90, 120, 144, 240, Unlocked; applies
   at once), after "Sea battles": the duel's frame rate, paced in
   `src/recomp_manual.c`.
+
+- **0074-settings-menu-dance-rate** (`src/hle/hle_settings_menu.c`). A
+  "Dancing" row after "Sword duels" for the game's `dance_fps` (60 (off),
+  90, 120, 144, 240, Unlocked; applies at once): the dancing's frame rate,
+  paced in `src/recomp_manual.c`.
