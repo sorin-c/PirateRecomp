@@ -1491,6 +1491,10 @@ static void duel_begin_frame(void)
     int slow = (S60_MEM32(0x0049C298u) & 0x20) != 0;
     int gap;
 
+    if (rate == 30 && g_duel.gate_rate) {  /* turned back to 30: the gate as before */
+        g_duel.gate_rate = 0;
+        xbox_Nv2aFlipGateSetTitleRate(0);
+    }
     if (rate != g_duel.setting) {
         g_duel.setting = rate;
         if (rate < 0)
@@ -1545,11 +1549,11 @@ static void duel_frame_wait(void)
 /* The duel's hooks; 0 for an address that is not one of them. */
 static int duel_guest_hook(uint32_t va)
 {
-    if (!(va >= 0x0002D800u && va < 0x00037000u))
+    /* Only inside a duel faster than 30 (its frame top ran in the last
+     * 250 ms): anything else at these addresses is left to the other hooks. */
+    if (!(va >= 0x0002D800u && va < 0x00037000u) || !g_duel.active ||
+        pirates_host_us() - g_duel.last_us > 250000)
         return 0;
-    /* in the duel's loop: its frame top ran in the last 250 ms */
-    if (!g_duel.active || pirates_host_us() - g_duel.last_us > 250000)
-        return 1;
     switch (va) {
     /* The clock step ([esp+0xB4], and twice it at 0x40F62C): how far the
      * duel's clock-timed motions (the crowd, the ships, the fighters) move
@@ -2959,6 +2963,13 @@ void sub_001A958A(void)
                 g_pirates_ship_battle_seen = 1;
             }
         }
+    }
+    /* A duel left with its rate on the gate: the gate as before (it also
+     * drops a rate nobody renews within 100 ms, but not at once). */
+    if (g_duel.gate_rate && ra != 0x00031664u && ra != PIRATES_LIMITER_DUEL &&
+        pirates_host_us() - g_duel.last_us > 150000) {
+        g_duel.gate_rate = 0;
+        xbox_Nv2aFlipGateSetTitleRate(0);
     }
     if (ra == 0x00031664u) {              /* a duel frame's top */
         duel_begin_frame();
