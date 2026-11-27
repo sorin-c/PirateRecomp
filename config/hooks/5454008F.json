@@ -748,6 +748,10 @@
   {
    "address": "0x000BC4DE",
    "note": "sneak_fps: the every-other-frame count [0x4D2DF0] (music pick), on the tick only"
+  },
+  {
+   "address": "0x000A4B0B",
+   "note": "sneak_fps: past the sneak's frame wait (its frame closes)"
   }
  ]
 }

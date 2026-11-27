@@ -1819,7 +1819,10 @@ static int sneak_guest_hook(uint32_t va)
     uint32_t r = (uint32_t)g_ebp / 0x44u;   /* a guard's record (sub_000A07E0) */
 
     switch (va) {
-    /* The loop (sub_000A1E10): its counters, a tick's */
+    /* The loop (sub_000A1E10): past its wait (every read of the wait's
+     * tick, at 60 more than one, is passed until here) */
+    case 0x000A4B0Bu: g_sneak.in_frame = 0; return 1;
+    /* its counters, a tick's */
     case 0x000A4477u: if (off) g_edi += 1u; return 1;          /* dec edi: [esp+0x30] */
     case 0x000A4487u: if (off) g_ecx -= 1u; return 1;          /* inc [0x4CE71C], the clock */
     /* The world (sub_000A1C00) */
@@ -3865,7 +3868,6 @@ void sub_001A958A(void)
     }
     /* The town sneak faster than 30 (sneak_fps): its 31 ms wait passes. */
     if (g_sneak.active && g_sneak.in_frame && ra == PIRATES_LIMITER_SEA2) {
-        g_sneak.in_frame = 0;
         if (g_sneak.rate == 60) {
             g_eax += 31u - SEA60_WAIT_MS;
             if (g_sneak.gate_rate)
