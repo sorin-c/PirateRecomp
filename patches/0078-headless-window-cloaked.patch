@@ -1,0 +1,26 @@
+diff --git a/src/hle/hle_d3d8.c b/src/hle/hle_d3d8.c
+--- a/src/hle/hle_d3d8.c
++++ b/src/hle/hle_d3d8.c
+@@ -731,6 +731,22 @@
+         const char *bg = getenv("RECOMP_WINDOW_BACKGROUND");
+ 
+         if (bg && *bg && strcmp(bg, "0") != 0) {
++            /* Headless: cloaked as well, so the desktop never draws it. Off
++             * every monitor was not enough: Windows still showed it, faded,
++             * at the top left of the desk. A cloaked window is still shown
++             * to the game and its device, so frames are presented and timed
++             * as before; DWM just leaves it out of the picture. */
++            if (recomp_headless()) {
++                typedef HRESULT (WINAPI *dwm_set_attr_fn)(HWND, DWORD, LPCVOID, DWORD);
++                HMODULE dwm = LoadLibraryA("dwmapi.dll");
++                dwm_set_attr_fn set_attr = dwm ? (dwm_set_attr_fn)(void *)
++                    GetProcAddress(dwm, "DwmSetWindowAttribute") : NULL;
++                BOOL cloak = TRUE;
++
++                if (!set_attr || FAILED(set_attr(req->hwnd, 13 /* DWMWA_CLOAK */,
++                                                 &cloak, sizeof cloak)))
++                    fprintf(stderr, "[HLE-D3D8] headless: could not cloak the window\n");
++            }
+             ShowWindow(req->hwnd, SW_SHOWNOACTIVATE);
+             SetWindowPos(req->hwnd, HWND_BOTTOM, 0, 0, 0, 0,
+                          SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
