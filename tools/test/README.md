@@ -38,7 +38,7 @@ folder, so a run never touches `game\UDATA` or your real saves.
 | `xpu.py` | Decode the game's compiled pixel shaders (`.xpu`): texture modes, combiner count. |
 | `governor.ps1` | Drives a new career (English, default name) into the start town's governor's welcome, for the governor-scene freeze. |
 | `indoor-lighting.ps1`, `indoor_compare.py` | Regression test for room lighting: a new career's nation-choice tables and the St. Kitts tavern, headless and 4:3, compared region by region (brightness, and a coarse brightness pattern) with xemu's pictures of the same screens. Exit code 1 when they differ. The xemu references are pictures of the game, so they live beside the repository (`..\fixtures\xemu-indoor\tavern.png` and `nation.png`, or `-Reference` / `PIRATES_INDOOR_REF`). See "Before merging a renderer change". |
-| `duel.ps1`, `townsneak.ps1` | Start the garden sword duel or the town sneak from the debug MINIGAMES menu (`RECOMP_PIRATES_MINIGAMES=1`). |
+| `duel.ps1`, `dance.ps1`, `townsneak.ps1` | Start the garden sword duel, the dancing (Easy, Spanish ballroom) or the town sneak from the debug MINIGAMES menu (`RECOMP_PIRATES_MINIGAMES=1`). |
 | `vs-battle.ps1` | Drives a fresh start into a VS MODE ship battle. |
 | `xdis.py`, `findimm.py`, `secxrefs.py` | Disassemble a guest address, find code using a constant, count code references into a section (capstone). |
 

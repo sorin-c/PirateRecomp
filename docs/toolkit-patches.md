@@ -768,3 +768,17 @@ Each one, with the reason it exists:
   and written on a thread of its own (under `.part` until whole), so the
   game does not stop for it. The F2 About tab lists the key. F11's BMP and
   frame capture for bug reports are unchanged.
+
+- **0076-texcoord-routed-past-declaration-sets** (`src/hle/hle_d3d8.c`,
+  `src/hle/hle_d3d8_state.c`). 0056's rule for declarations too. A routed
+  draw under a fixed-function declaration is gathered with only the
+  coordinate registers the declaration lists, so a stage past them read
+  zeros. In the dancing minigame the dancers' heads (the player's hair and
+  face) come from push buffers under a two-set declaration (v9, v10) with a
+  reflection on stage 0 and stages 1-3 at set 0: stages 2 and 3 were sent to
+  sets 2 and 3 and the hair was drawn as stripes. `hle_d3d8_shadow_texcoord_sets`
+  now says which sets the host vertex carries (an FVF's first ntex, a
+  declaration's v9-v12, all four under a vertex program), and a stage with
+  no set of its own reads an earlier stage's that names the same set.
+  Numbered 0076: 0073 is the duel row, 0074 is left for the land-battle
+  F2 row and 0075 is the screenshot key.
