@@ -512,6 +512,62 @@
   {
    "address": "0x0008FD32",
    "note": "menu_fps: the new career flow's Sleep(5) a frame (sub_0008F7D0), Sleep(0) above 60"
+  },
+  {
+   "address": "0x0004DFCC",
+   "note": "land_fps: the land battle frame's length in ms ([0x40D188]), remainder carried"
+  },
+  {
+   "address": "0x0004DF60",
+   "note": "land_fps: frame counter [0x4D6574], undone off the tick"
+  },
+  {
+   "address": "0x0004B57B",
+   "note": "land_fps: the won/lost countdown [0x4D657C], a step a tick"
+  },
+  {
+   "address": "0x00049C5C",
+   "note": "land_fps: a flag's wave phase, this frame's share of a tick"
+  },
+  {
+   "address": "0x0004DFEF",
+   "note": "land_fps: the land battle is over; the gate back to its own"
+  },
+  {
+   "address": "0x0004C864",
+   "note": "land_fps: a unit's march, the slope's share of the step for a console frame"
+  },
+  {
+   "address": "0x0004C8D4",
+   "note": "land_fps: a unit's march step a frame, for this frame's length"
+  },
+  {
+   "address": "0x0004CE30",
+   "note": "land_fps: a man's fighting clock (counter * 30 ms), a tick's"
+  },
+  {
+   "address": "0x00049DD8",
+   "note": "land_fps: a fleeing man's fade, a step a tick"
+  },
+  {
+   "address": "0x0004AE60",
+   "note": "land_fps: a message's frames [0x40D18C], a tick's"
+  },
+  {
+   "address": "0x0004AFF0",
+   "note": "land_fps: the camera's pan speed, its change for this frame's length"
+  },
+  {
+   "address": "0x0004B005",
+   "note": "land_fps: the camera's pan in x for this frame's length"
+  },
+  {
+   "address": "0x0004B021",
+   "note": "land_fps: the camera's pan in y for this frame's length"
+  },
+  {
+   "address": "0x0004B0C1",
+   "note": "land_fps: the camera's zoom, 500 a console frame"
   }
  ]
 }

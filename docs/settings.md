@@ -37,6 +37,7 @@ Back pressed alone still reaches the game as usual.
 | Sound | next start |
 | Sailing frame rate (experimental: 30, 60, 90, 120, 144, 240, unlocked) | at once |
 | Battle frame rate (experimental: 30, 60, 90, 120, 144, 240, unlocked) | at once |
+| Land battle frame rate (experimental: 30, 60, 90, 120, 144, 240, unlocked) | at once |
 | Sword duels frame rate (experimental: 30, 60, 90, 120, 144, 240, unlocked) | at once |
 | Dancing frame rate (experimental: 60, 90, 120, 144, 240, unlocked) | at once |
 | Town frame rate (experimental: 33, 60, 90, 120, 144, 240, unlocked) | at once |
@@ -94,6 +95,18 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   sailing is. Measured against 30 fps in scripted battles (ships within 2%,
   every cannonball's flight time the console's); not yet played through
   many battles. Frame interpolation is not used in a battle faster than 30.
+- **Land battle frame rate (experimental).** `land_fps` (F2 Display tab
+  "Land battles", applies at once): the same for land battles. 30, the
+  default, is the console's; 60, 90, 120, 144 or 240 (0 unlocked) draw the
+  battle that many times a second at the speed they have at 30: the men's
+  march step, their fighting clock (aim, shot, blow, reload), the camera's
+  pan and zoom and a message's time, which the console moves once a frame,
+  go by each frame's length (kept to the microsecond); the flags' wave, the
+  target highlight's blink, the men's idle fidgets and the pause after a
+  battle is won or lost keep the console's 30 a second.
+  Paced as sailing is. Measured against 30 fps in scripted battles; not yet
+  played through many battles. Frame interpolation is not used in a land
+  battle faster than 30.
 - **Sword duel frame rate (experimental).** `duel_fps` (F2 "Sword duels",
   applies at once): the same for sword duels. 30, the default, is the
   console's; 60, 90, 120, 144 or 240 (0 unlocked) run the duel that many
@@ -185,6 +198,7 @@ defaults. Every line names the environment variable that overrides it, so a
 | `frame_interp` | `1` | `1` off, `2` shows 60 where the game runs at 30. |
 | `sea_fps` | `30` | Experimental: frames a second while sailing (`0` unlocked). |
 | `battle_fps` | `30` | Experimental: frames a second in ship battles (`0` unlocked). |
+| `land_fps` | `30` | Experimental: frames a second in land battles (`0` unlocked). |
 | `duel_fps` | `30` | Experimental: frames a second in sword duels (`0` unlocked). |
 | `dance_fps` | `60` | Experimental: frames a second while dancing (`0` unlocked). |
 | `town_fps` | `30` | Experimental: frames a second in a town: the menu, its rooms (the tavern, the governor's) and its other screens (`0` unlocked). |
@@ -215,6 +229,8 @@ defaults. Every line names the environment variable that overrides it, so a
 | `cache_pause`, `RECOMP_PIRATES_CACHE_PAUSE` | `0` | The game copies its `.FPK` archives to the cache only while a movie or loading screen is up. With movies skipped the copy stopped part-way and a first load froze; `1` restores the console's behaviour. |
 | `treasure_map`, `RECOMP_PIRATES_TREASURE_MAP` | `0` | Gives `n` pieces of a buried-treasure map when a town menu opens (`2` is a whole map), for testing treasure hunts. |
 | `test_probe`, `RECOMP_PIRATES_TEST_PROBE` | (empty) | A folder where the game writes ship positions (`pos.txt`, `ships.txt`, `battle.txt`) and reads `teleport.txt`, for scripted test runs. |
+| `RECOMP_PIRATES_SRAND` | (unset) | A number the game's random seed is set to instead of the clock (at start-up and when a land battle begins), so a scripted run repeats: the same start location and the same draws. |
+| `RECOMP_PIRATES_LAND_LOG` | (unset) | A file a land battle writes a line a frame to (time, tick, frame length, counters, the first man of each side's first four units), for comparing frame rates. |
 
 The toolkit's own variables are listed in `xboxrecomp/CLAUDE.md`.
 
