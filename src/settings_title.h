@@ -51,6 +51,13 @@ static const struct {
       "# second at the speed they have at 30 (slow motion included); 0 is\n"
       "# unlocked. Paced as sea_fps is. Applies at once from the F2 menu.\n"
       "#                                          [RECOMP_PIRATES_BATTLE_FPS]\n" },
+    { "duel_fps", "30",
+      "# Experimental: the frame rate in sword duels, at the game's own\n"
+      "# speed: 30 (the default) as the console; 60, 90, 120, 144 or 240 run\n"
+      "# the duel's fighters, their swings, the crowd and the camera that many\n"
+      "# times a second at the speed they have at 30; 0 is unlocked. Paced as\n"
+      "# battle_fps is. Applies at once from the F2 menu.\n"
+      "#                                            [RECOMP_PIRATES_DUEL_FPS]\n" },
     { "town_fps", "30",
       "# Experimental: the frame rate in a town's rooms -- the tavern, the\n"
       "# governor's -- which the console draws 33 times a second: 30 (the\n"

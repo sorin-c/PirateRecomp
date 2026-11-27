@@ -749,6 +749,11 @@ Each one, with the reason it exists:
   composite (0070) stays in the toolkit; the game uses it only when
   `RECOMP_PIRATES_MIRROR_WEIGHT` is set, for tests.
 
+- **0073-settings-menu-duel-rate** (`src/hle/hle_settings_menu.c`). The F2
+  Display tab's "Frame rate by scene" group gets a "Sword duels" row for
+  the game's `duel_fps` (30 (off), 60, 90, 120, 144, 240, Unlocked; applies
+  at once), after "Sea battles": the duel's frame rate, paced in
+  `src/recomp_manual.c`.
 - **0075-screenshot-key-png** (`src/d3d/d3d8_screenshot.c` and `.h`, new;
   `src/d3d/d3d8_device.c`, `d3d8_xbox.h`, `CMakeLists.txt`;
   `src/hle/hle_d3d8.c`, `hle_settings_menu.c`; `src/host/host.h`,

@@ -1427,6 +1427,197 @@ static void town_frame_wait(void)
     }
 }
 
+/* ---- Sword duels faster than 30 (duel_fps, experimental) ----
+ *
+ * A duel (sub_0002D800, one loop: frame top 0x31508, the tick read at
+ * 0x3165F, the frame wait at 0x36C5B) steps everything once a frame and
+ * waits until 31 ms have passed since the last (120 when slowed, flag 0x20
+ * of 0x49C298). Faster, the loop runs every frame the PC draws and a logic
+ * tick on real time keeps the console's timing: g_duel.tick says whether
+ * this frame advances a console frame (what the duel decides once a frame,
+ * by chance or by count, waits for it), and steps that move something
+ * continuously take this frame's share of a console frame's (duel_scale). */
+#define DUEL_TICK_US 31000
+#define DUEL_SLOW_US 120000
+/* The clock step a console frame gets: 0.4 a millisecond of the engine's
+ * clock, clamped to 5..20 (0x31671): 12 for a frame of 31 ms. */
+#define DUEL_CLOCK_STEP 12
+static struct {
+    int setting;          /* the rate as last read (30 = off) */
+    int rate;             /* 60..1000, -1 unlocked */
+    int active;           /* this duel frame runs faster than 30 */
+    int tick;             /* this frame advances a console frame */
+    int tick_us, dt_us, acc_us;
+    int64_t last_us;
+    int gate_rate;
+    int32_t rem[16];      /* duel_scale's remainders */
+    int32_t frem[2][8];   /* duel_fscale's, a fighter and a kind each */
+} g_duel;
+
+/* duel_fps (RECOMP_PIRATES_DUEL_FPS): 30 (the default) as the console, 60,
+ * 90, 120, 144 or 240, 0 unlocked (-1 here). */
+static int duel_read_rate(void)
+{
+    int r = pirates_parse_fps(recomp_config_lookup("RECOMP_PIRATES_DUEL_FPS", "duel_fps"));
+
+    if (r < 0)
+        return -1;
+    if (r <= 30)
+        return 30;
+    return r < 60 ? 60 : r > 1000 ? 1000 : r;
+}
+
+/* A step taken once a console frame: this frame's share of it. */
+static int32_t duel_scale(int slot, int32_t step)
+{
+    int64_t t = (int64_t)step * g_duel.dt_us + g_duel.rem[slot];
+    g_duel.rem[slot] = (int32_t)(t % g_duel.tick_us);
+    return (int32_t)(t / g_duel.tick_us);
+}
+/* The same, a fighter's own (ebp 0 or 0x4C: the records at 0x424D88). */
+static int32_t duel_fscale(uint32_t rec, int kind, int32_t step)
+{
+    int32_t *rem = &g_duel.frem[rec ? 1 : 0][kind & 7];
+    int64_t t = (int64_t)step * g_duel.dt_us + *rem;
+    *rem = (int32_t)(t % g_duel.tick_us);
+    return (int32_t)(t / g_duel.tick_us);
+}
+
+/* The duel frame's top (the tick read, ra 0x31664). */
+static void duel_begin_frame(void)
+{
+    int64_t now = pirates_host_us();
+    int rate = duel_read_rate();
+    int slow = (S60_MEM32(0x0049C298u) & 0x20) != 0;
+    int gap;
+
+    if (rate == 30 && g_duel.gate_rate) {  /* turned back to 30: the gate as before */
+        g_duel.gate_rate = 0;
+        xbox_Nv2aFlipGateSetTitleRate(0);
+    }
+    if (rate != g_duel.setting) {
+        g_duel.setting = rate;
+        if (rate < 0)
+            fprintf(stderr, "[DUEL60] duels unlocked (duel_fps = 0)\n");
+        else
+            fprintf(stderr, "[DUEL60] duels at %d frames a second\n", rate);
+        fflush(stderr);
+    }
+    gap = g_duel.last_us == 0 || now - g_duel.last_us > 250000;
+    g_duel.tick_us = slow ? DUEL_SLOW_US : DUEL_TICK_US;
+    g_duel.dt_us = gap ? g_duel.tick_us : (int)(now - g_duel.last_us);
+    if (g_duel.dt_us > g_duel.tick_us * 3) g_duel.dt_us = g_duel.tick_us * 3;
+    if (g_duel.dt_us < 1) g_duel.dt_us = 1;
+    g_duel.last_us = now;
+    g_duel.rate = rate;
+    g_duel.active = rate != 30;
+    if (!g_duel.active || gap) {
+        g_duel.tick = 1;
+        g_duel.acc_us = 0;
+        g_duel.dt_us = g_duel.tick_us;
+    } else {
+        g_duel.acc_us += g_duel.dt_us;
+        if (g_duel.acc_us >= g_duel.tick_us) {
+            g_duel.tick = 1;
+            g_duel.acc_us -= g_duel.tick_us;
+            if (g_duel.acc_us > g_duel.tick_us)
+                g_duel.acc_us = g_duel.tick_us;
+        } else {
+            g_duel.tick = 0;
+        }
+    }
+}
+
+/* The duel frame's wait (ra 0x36C60), faster than 30: passed at once (the
+ * elapsed time it compares, eax, made the largest -- its target moves
+ * with the duel's own schedule, so a fixed 31 was not always enough); the
+ * flip gate paces the frames, by the vblank at 60 and the host clock above. */
+static void duel_frame_wait(void)
+{
+    g_eax = 0x7FFFFFFFu;
+    if (g_duel.rate == 60) {
+        if (g_duel.gate_rate) {
+            g_duel.gate_rate = 0;
+            xbox_Nv2aFlipGateSetTitleRate(0);
+        }
+    } else {
+        g_duel.gate_rate = g_duel.rate;
+        xbox_Nv2aFlipGateSetTitleRate(g_duel.rate);
+    }
+}
+
+/* The duel's hooks; 0 for an address that is not one of them. */
+static int duel_guest_hook(uint32_t va)
+{
+    /* Only inside a duel faster than 30 (its frame top ran in the last
+     * 250 ms): anything else at these addresses is left to the other hooks. */
+    if (!(va >= 0x0002D800u && va < 0x00037000u) || !g_duel.active ||
+        pirates_host_us() - g_duel.last_us > 250000)
+        return 0;
+    switch (va) {
+    /* The clock step ([esp+0xB4], and twice it at 0x40F62C): how far the
+     * duel's clock-timed motions (the crowd, the ships, the fighters) move
+     * this frame: 0.4 a millisecond of the engine's clock but never less
+     * than 5, so frames shorter than 12 ms moved them too far (0 when the
+     * clock has not moved). Faster than 30, each frame its share of a
+     * console frame's 12. */
+    case 0x000316BAu: {
+        int32_t v = duel_scale(1, DUEL_CLOCK_STEP);
+        S60_MEM32(g_esp + 0xB4u) = v;
+        S60_MEM32(0x0040F62Cu) = 2 * v;
+        break;
+    }
+    /* A fighter's animation step (from 0x34B7A, ebp 0 or 0x4C: the records
+     * at 0x424D88; its time, +8, moves by it, twice or half of it a frame):
+     * its move's own pace plus the clock step less 3, held between bounds
+     * the clock step sets. The step as a console frame has it (clock step
+     * 12), this frame's share of it at 0x34D9A. */
+    case 0x00034B81u: g_edi = DUEL_CLOCK_STEP; break;
+    case 0x00034D9Au: g_ecx = (uint32_t)duel_fscale(g_ebp, 0, (int32_t)g_ecx); break;
+    /* The duel's frame count ([esp+0x90], inc at 0x36BF7): the crew fight
+     * behind the duellists (0x3172D) strikes every 100 of them, and
+     * others time by it. Once a tick. */
+    case 0x00036BF7u: if (!g_duel.tick) S60_MEM32(g_esp + 0x90u) -= 1; break;
+    /* The opponent's next move (the second record, ebp 0x4C: +0x20, +0x24,
+     * stored at 0x323F0): its AI picks one each frame, by chance; faster
+     * than 30 it picked 3.5 times as often. Taken once a tick (the one
+     * before is stored again on other frames). The player's own record is
+     * left alone, so no press is lost. */
+    case 0x000323F0u:
+        if (!g_duel.tick && g_ebp == 0x4Cu) {
+            g_edi = (uint32_t)S60_MEM32(0x00424DA8u + g_ebp);
+            g_ecx = (uint32_t)S60_MEM32(0x00424DACu + g_ebp);
+        }
+        break;
+    /* Short effects around the duel ([esp+0x130 + 4n] each, 0x357D0): an
+     * idle one starts by a 1 in 200 chance a frame (rand at 0x35840); faster
+     * than 30 that is drawn once a tick (other frames the roll misses). */
+    case 0x00035845u: if (!g_duel.tick) g_eax = 1; break;
+    /* The fade-in's frame count (ebx, [esp+0x13C]; to 70): once a tick. */
+    case 0x00031546u: if (!g_duel.tick) g_ebx -= 1; break;
+
+    /* The camera (0x35F27..0x35FF6): its x (0x49C26C) and its turn
+     * ([esp+0xC4]) each move by a speed that sub_0009F090 eases toward
+     * the target every frame (sped up by 1 a frame to at most 20, slowed
+     * near it), the speeds kept at [esp+0x198] and [esp+0x88]. The speed
+     * changes once a tick (the one before is kept on other frames); the
+     * move is this frame's share of it. After each call the 4 arguments
+     * are still on the stack. */
+    case 0x00035F41u: if (!g_duel.tick) g_eax = (uint32_t)S60_MEM32(g_esp + 0x1A8u); break;
+    case 0x00035F49u:   /* ecx = x + speed: x + this frame's share */
+        g_ecx = g_ecx - g_eax + (uint32_t)duel_scale(2, (int32_t)g_eax);
+        break;
+    case 0x00035FCCu: if (!g_duel.tick) g_eax = (uint32_t)S60_MEM32(g_esp + 0x98u); break;
+    case 0x00035FD5u:   /* ecx = turn + speed */
+        g_ecx = g_ecx - g_eax + (uint32_t)duel_scale(3, (int32_t)g_eax);
+        break;
+    /* And its height (0x49C260) coming in at the start, 2 a frame to 160. */
+    case 0x00035F68u: g_eax = g_eax - 2u + (uint32_t)duel_scale(4, 2); break;
+    default: break;
+    }
+    return 1;
+}
+
 /* sea_fps (RECOMP_PIRATES_SEA_FPS): 30 (the default) sails as the console
  * does, 60, 90, 120, 144 or 240 frames a second, 0 unlocked. sea_60 = 1, the
  * setting before it, still means 60 while sea_fps is 30. */
@@ -2143,6 +2334,8 @@ void recomp_guest_hook(uint32_t va)
 
     if (menu_guest_hook(va))                /* the main menu's EXIT row */
         return;
+    if (duel_guest_hook(va))                /* the sword duel's */
+        return;
     if (sea_map_guest_hook(va))             /* the world map's stick at sea */
         return;
 
@@ -2771,6 +2964,38 @@ void sub_001A958A(void)
             }
         }
     }
+    /* A duel left with its rate on the gate: the gate as before (it also
+     * drops a rate nobody renews within 100 ms, but not at once). */
+    if (g_duel.gate_rate && ra != 0x00031664u && ra != PIRATES_LIMITER_DUEL &&
+        pirates_host_us() - g_duel.last_us > 150000) {
+        g_duel.gate_rate = 0;
+        xbox_Nv2aFlipGateSetTitleRate(0);
+    }
+    if (ra == 0x00031664u) {              /* a duel frame's top */
+        duel_begin_frame();
+        {   /* RECOMP_PIRATES_DUEL_DUMP=<file> (test): a record a duel frame --
+             * the host time in us (8 bytes), then 0x424C00..0x425000 (the
+             * fighters' records at 0x424D88, stride 0x4C), 0x40F600..0x40F700
+             * and the loop's locals ([esp]..[esp+0x600]) -- to compare runs
+             * at 30 and faster. */
+            static FILE *df;
+            static int dopen;
+            if (!dopen) {
+                const char *dv = getenv("RECOMP_PIRATES_DUEL_DUMP");
+                dopen = 1;
+                if (dv && *dv)
+                    df = fopen(dv, "wb");
+            }
+            if (df) {
+                int64_t us = pirates_host_us();
+                fwrite(&us, 8, 1, df);
+                fwrite((const void *)((uintptr_t)0x00424C00u + g_xbox_mem_offset), 1, 0x400, df);
+                fwrite((const void *)((uintptr_t)0x0040F600u + g_xbox_mem_offset), 1, 0x100, df);
+                fwrite((const void *)((uintptr_t)g_esp + 4u + g_xbox_mem_offset), 1, 0x600, df);
+                fflush(df);   /* the test stops the game without closing it */
+            }
+        }
+    }
     if (ra == 0x00099C4Eu)                /* a town scene's frame wait */
         town_frame_wait();
     if (ra == 0x000C397Fu) {              /* a battle frame begins */
@@ -2842,6 +3067,15 @@ void sub_001A958A(void)
             g_eax += wait;
             btl_set_gate(g_btl.rate);
         }
+        if (at30) {
+            at30 = 0;
+            xbox_Nv2aFlipGateSetTitleInterval(1);
+        }
+        return;
+    }
+    /* Duels faster than 30 (duel_fps): the same (duel_frame_wait). */
+    if (g_duel.active && ra == PIRATES_LIMITER_DUEL) {
+        duel_frame_wait();
         if (at30) {
             at30 = 0;
             xbox_Nv2aFlipGateSetTitleInterval(1);
