@@ -783,3 +783,12 @@ Each one, with the reason it exists:
   F8 was bound to nothing; F2, F10, F11 and F12 keep their jobs. The F2
   About tab, the setting's help line, the `pirates.ini` comment and the log
   line say F8. F9 no longer toggles the frame-rate counter.
+
+- **0078-headless-window-cloaked** (`src/hle/hle_d3d8.c`). A headless run
+  (`RECOMP_HEADLESS=1`, 0022) also cloaks its window (`DwmSetWindowAttribute`
+  `DWMWA_CLOAK`, from dwmapi.dll looked up at run time) before showing it.
+  Off every monitor was not enough: Windows still drew it, faded, at the top
+  left of the desk where Sorin was working. A cloaked window is still a shown
+  window to the game and its device, so frames are presented and timed as
+  before; DWM leaves it out of the picture. Normal play and plain
+  `RECOMP_WINDOW_BACKGROUND=1` runs are unchanged.
