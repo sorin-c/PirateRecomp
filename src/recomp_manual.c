@@ -992,7 +992,7 @@ found with RECOMP_PIRATES_TICK_SITES=1); on the console the Swap then
  * its own pacing back. Frame interpolation is not used at sea then; battles
  * and duels still use it when it is on. Only sub_00091170, the sea: the
  * other "sea" wait, 0xA4AEE, belongs to the town sneak (sub_000A1E10,
- * town.cpp) and keeps 30.
+ * town.cpp), which has sneak_fps.
  *
  * Nothing below depends on the rate: frame times are the host clock's (in
  * microseconds), the logic tick comes when 33.3 ms have passed (every 2nd
@@ -1595,6 +1595,335 @@ static int land_guest_hook(uint32_t va)
         memset(g_land.cam_rem, 0, sizeof g_land.cam_rem);       /* carried on */
         if (g_land.gate_rate)
             land_set_gate(0);
+        return 1;
+    }
+    return 0;
+}
+
+/* ---- The town sneak faster than 30 (sneak_fps, experimental) ----
+ *
+ * The town sneak (sub_000A1E10, town.cpp) runs its frame from the tick read
+ * at 0xA43F5 and then waits until 31 ms have passed since (0xA4AE9): 30 a
+ * second, as on the console. Nothing in it keeps time: the player (record 0
+ * at 0x4CDC48, sub_0009F8B0) and the guards (records 1.. of 0x44 bytes,
+ * sub_000A07E0) step, turn and animate by a fixed amount a frame, the
+ * camera (sub_000A55B0) eases toward the player a step a frame, and every
+ * count -- the clock [0x4CE71C], the alert [0x4CE740] and its hold, the
+ * hold meter [0x4CE6F0] when a guard has the player, the countdowns --
+ * goes by the frame. Faster than 30 the wait is passed and the flip gate
+ * paces the frames (as at sea and in battles), and each of those steps is
+ * either given this frame's share of a console frame (sneak_scale, the
+ * remainder carried for each record) or kept to a 30 Hz tick (g_sneak.tick):
+ *  - shared out: the steps in x and y (the step the console takes, cut as
+ *    sub_00103A90 cuts it, not a step from a share of the speed: that
+ *    rounds down four times as often), the animation clocks, the turns,
+ *    the player's idle clock, the camera's pan and zoom, the pointer's fade;
+ *  - a tick's: the turn and camera speeds (sub_0009F090 eases them by a
+ *    step a frame, so they change once a tick and are moved by a frame's
+ *    share), the counters and countdowns, the guards' paths to the player
+ *    and the music's pick (every other frame on the console), and the hold
+ *    meter's fall, whose random draw (sub_002E0424) off the tick takes no
+ *    number from the game's sequence. A press of A while held still adds
+ *    at once, and spares that tick's fall as a press's frame does.
+ * What the guards decide (a turn at a crossing, a look around) happens at
+ * the end of an animation cycle or on a tile, so it comes as often as on
+ * the console; a guard looks for the player every frame, at most a tick
+ * sooner than the console would see him. The pause menu opened in the
+ * sneak follows the rate too (sub_00131170). */
+#define SNEAK_TICK_US 33333
+static struct {
+    int setting;          /* the rate as last read (30 = off) */
+    int rate;             /* 60..1000, -1 unlocked */
+    int active;           /* this frame runs faster than 30 */
+    int tick;             /* this frame advances a console frame */
+    int acc_us;           /* time since the last tick */
+    int dt_us;            /* this frame's length, at most a console frame */
+    int64_t last_us;      /* host time of the last frame start */
+    int in_frame;         /* between the frame's start and its wait */
+    int gate_rate;
+    int anim_rem[32];     /* each record's animation clock, what the scaling left */
+    int turn_rem[32];     /* each guard's turn */
+    int walk_rem[32][2];  /* each record's step in x and y */
+    int rem[16];          /* the single steps: see sneak_guest_hook */
+    uint32_t saved;       /* a register a hook changed, given back after */
+    int decay;            /* the hold meter's fall is held back this frame */
+    int pressed;          /* a press of A off the tick: the next tick does not fall */
+    FILE *log;            /* RECOMP_PIRATES_SNEAK_LOG: a line a frame */
+} g_sneak;
+
+static int sneak_read_rate(void)
+{
+    int r = pirates_parse_fps(recomp_config_lookup("RECOMP_PIRATES_SNEAK_FPS", "sneak_fps"));
+
+    if (r < 0)
+        return -1;
+    if (r <= 30)
+        return 30;
+    return r < 60 ? 60 : r > 1000 ? 1000 : r;
+}
+
+static void sneak_set_gate(int rate)
+{
+    g_sneak.gate_rate = rate;
+    xbox_Nv2aFlipGateSetTitleRate(rate);
+}
+
+/* The sneak is left (another scene's frame, the front end): no frame of
+ * it is open, and the next one starts afresh, as after a gap. */
+static void sneak_leave(void)
+{
+    g_sneak.in_frame = 0;
+    g_sneak.last_us = 0;
+}
+
+/* Once a town sneak frame, at its start (the tick read at 0xA43F5). */
+static void sneak_begin_frame(void)
+{
+    int64_t now = pirates_host_us();
+    int rate = sneak_read_rate(), on = rate != 30, gap;
+
+    if (rate != g_sneak.setting) {
+        g_sneak.setting = rate;
+        if (rate < 0)
+            fprintf(stderr, "[SNEAK] town sneak unlocked (sneak_fps = 0)\n");
+        else
+            fprintf(stderr, "[SNEAK] town sneak at %d frames a second\n", rate);
+        fflush(stderr);
+    }
+    gap = g_sneak.last_us == 0 || now - g_sneak.last_us > 250000;
+    g_sneak.dt_us = gap ? SNEAK_TICK_US : (int)(now - g_sneak.last_us);
+    if (g_sneak.dt_us > SNEAK_TICK_US)
+        g_sneak.dt_us = SNEAK_TICK_US;
+    g_sneak.last_us = now;
+    g_sneak.rate = rate;
+    g_sneak.active = on;
+    if (!on || gap) {
+        g_sneak.tick = 1;
+        g_sneak.acc_us = 0;
+        if (!on && g_sneak.gate_rate)
+            sneak_set_gate(0);
+    } else {
+        g_sneak.acc_us += g_sneak.dt_us;
+        if (g_sneak.acc_us >= SNEAK_TICK_US) {
+            g_sneak.tick = 1;
+            g_sneak.acc_us -= SNEAK_TICK_US;
+            if (g_sneak.acc_us > SNEAK_TICK_US)
+                g_sneak.acc_us = SNEAK_TICK_US;
+        } else {
+            g_sneak.tick = 0;
+        }
+    }
+    if (gap) {
+        memset(g_sneak.anim_rem, 0, sizeof g_sneak.anim_rem);
+        memset(g_sneak.turn_rem, 0, sizeof g_sneak.turn_rem);
+        memset(g_sneak.walk_rem, 0, sizeof g_sneak.walk_rem);
+        memset(g_sneak.rem, 0, sizeof g_sneak.rem);
+        g_sneak.pressed = 0;
+    }
+    g_sneak.in_frame = 1;
+    {   /* the test log: "us tick dt | the 0x4CE71C clock, alert 0x4CE740,
+         * its hold 0x4CE744, meter 0x4CE6F0, 0x4CE6F8, 0x4CE6F4, 0x4119EC,
+         * 0x4D66F4 | camera x y zoom | each record: x y angle anim time" */
+        static int opened;
+        if (!opened) {
+            const char *v = getenv("RECOMP_PIRATES_SNEAK_LOG");
+            opened = 1;
+            if (v && *v)
+                g_sneak.log = fopen(v, "w");
+        }
+        if (g_sneak.log) {
+            int r, n = S60_MEM32(0x0040DE44u);
+            /* RECOMP_PIRATES_SNEAK_TEST_NOGUARDS=1, with the log only: the
+             * guards are left out (their records off), to time the
+             * player's own moves */
+            if (getenv("RECOMP_PIRATES_SNEAK_TEST_NOGUARDS"))
+                for (r = 1; r <= n && r < 32; r++)
+                    S60_MEM32(0x004CDC48u + (uint32_t)r * 0x44u) = 0;
+            {   /* RECOMP_PIRATES_SNEAK_TEST_GRAB=<s>, with the log only: s
+                 * seconds in, the first guard is put at 16000,1700 and the
+                 * player 400 short of him (a guard that near takes hold),
+                 * the other guards left out, to time a hold and a catch */
+                static int64_t first_us;
+                static int done;
+                const char *w = getenv("RECOMP_PIRATES_SNEAK_TEST_GRAB");
+                if (!first_us)
+                    first_us = now;
+                if (w && done)
+                    for (r = 2; r <= n && r < 32; r++)
+                        S60_MEM32(0x004CDC48u + (uint32_t)r * 0x44u) = 0;
+                if (w && !done && n >= 1 && now - first_us >= (int64_t)(atof(w) * 1e6)) {
+                    done = 1;
+                    S60_MEM32(0x004CDC90u) = 16000;      /* the guard: x, y, */
+                    S60_MEM32(0x004CDC94u) = 1700;
+                    S60_MEM32(0x004CDCA8u) = 4;          /* facing the player (-y), */
+                    S60_MEM32(0x004CDCB4u) = 4;
+                    S60_MEM32(0x004CDCC8u) = (int32_t)0x80000000u;
+                    S60_MEM32(0x004CDCCCu) = 0;
+                    S60_MEM32(0x004CDCB0u) = 0;          /* no countdowns, */
+                    S60_MEM32(0x004CDCC4u) = 0;
+                    S60_MEM32(0x004CDCB8u) = 1;          /* walking */
+                    S60_MEM32(0x004CDCBCu) = 4;
+                    S60_MEM32(0x004CDCC0u) = 0;
+                    S60_MEM32(0x004CE740u) = 0;          /* nobody alerted */
+                    S60_MEM32(0x004CE744u) = 0;
+                    S60_MEM32(0x004CE6F0u) = 0;
+                    S60_MEM32(0x004CE6F8u) = 0;
+                    S60_MEM32(0x004CE6F4u) = 0;
+                    S60_MEM32(0x004CDC74u) = 0;
+                    S60_MEM32(0x004CDC4Cu) = 16000;
+                    S60_MEM32(0x004CDC50u) = 1300;
+                    fprintf(g_sneak.log, "# grab\n");
+                }
+            }
+            fprintf(g_sneak.log, "%lld %d %d | %d %d %d %d %d %d %d %d %d %d | %d %d %d |", (long long)now,
+                    g_sneak.tick, g_sneak.dt_us, S60_MEM32(0x004CE71Cu), S60_MEM32(0x004CE740u),
+                    S60_MEM32(0x004CE744u), S60_MEM32(0x004CE6F0u), S60_MEM32(0x004CE6F8u),
+                    S60_MEM32(0x004CE6F4u), S60_MEM32(0x004119ECu), S60_MEM32(0x004D66F4u),
+                    S60_MEM32(0x004D66FCu), S60_MEM32(0x004CDC74u),
+                    S60_MEM32(0x0049C26Cu), S60_MEM32(0x0049C268u), S60_MEM32(0x004CE724u));
+            for (r = 0; r <= n && r < 32; r++) {
+                uint32_t b = 0x004CDC48u + (uint32_t)r * 0x44u;
+                fprintf(g_sneak.log, " %d %d %d %d %d", S60_MEM32(b + 4u), S60_MEM32(b + 8u),
+                        r ? S60_MEM32(b + 0x3Cu) : S60_MEM32(0x004CDC64u), S60_MEM32(b + 0x30u),
+                        S60_MEM32(b + 0x34u));
+            }
+            fprintf(g_sneak.log, "\n");
+            fflush(g_sneak.log);
+        }
+    }
+}
+
+/* v, a step the console takes once a frame, for this frame (its length,
+ * at most a console frame); what the scaling leaves is carried in *rem. */
+static int sneak_scale(int v, int *rem)
+{
+    int64_t n = (int64_t)v * g_sneak.dt_us + *rem;
+    int r = (int)(n / SNEAK_TICK_US);
+    *rem = (int)(n - (int64_t)r * SNEAK_TICK_US);
+    return r;
+}
+
+/* A value the console moves by (reg - mem) a frame, stored from reg to
+ * mem: the move for this frame's length. Angles wrap: the move is taken
+ * modulo 2^32. */
+static void sneak_scale_store(uint32_t *reg, uint32_t mem, int *rem)
+{
+    uint32_t old = (uint32_t)S60_MEM32(mem);
+    *reg = old + (uint32_t)sneak_scale((int32_t)(*reg - old), rem);
+}
+
+/* The town sneak's guest hooks; 1 when va is one of them. */
+static int sneak_guest_hook(uint32_t va)
+{
+    int on = g_sneak.active && g_sneak.in_frame, off = on && !g_sneak.tick;
+    uint32_t r = (uint32_t)g_ebp / 0x44u;   /* a guard's record (sub_000A07E0) */
+
+    switch (va) {
+    /* The loop (sub_000A1E10): its counters, a tick's */
+    case 0x000A4477u: if (off) g_edi += 1u; return 1;          /* dec edi: [esp+0x30] */
+    case 0x000A4487u: if (off) g_ecx -= 1u; return 1;          /* inc [0x4CE71C], the clock */
+    /* The world (sub_000A1C00) */
+    case 0x000A1CBAu:                                          /* inc [0x4D66F4], every 34th */
+        if (off) { g_eax -= 1u; g_ecx = 0; }
+        return 1;
+    case 0x000A1D58u: if (off) g_ecx += 1u; return 1;          /* dec [0x4CE740], the alert */
+    case 0x000A1D78u: if (off) g_esi += 1u; return 1;          /* dec [0x4CE744], its hold */
+    case 0x000A1B92u:                                          /* the pointer's fade, -4 a frame */
+    case 0x000A1BD1u:                                          /* and +4 */
+        if (on) {
+            g_sneak.saved = g_eax;
+            g_eax = (uint32_t)sneak_scale((int)g_eax, &g_sneak.rem[0]);
+        }
+        return 1;
+    case 0x000A1B94u: if (on) g_eax = g_sneak.saved; return 1;
+    /* A guard (sub_000A07E0, ebp = its record's offset) */
+    case 0x000A09B4u: if (off) g_edx += 1u; return 1;          /* dec [rec+0x38] */
+    case 0x000A09E5u:                                          /* its animation clock +0x21/+0x42 */
+        if (on && r < 32u)
+            sneak_scale_store(&g_edx, 0x004CDC7Cu + g_ebp, &g_sneak.anim_rem[r]);
+        return 1;
+    case 0x000A1184u:                                          /* its turn's speed (sub_0009F090) */
+        if (off) g_eax = (uint32_t)S60_MEM32(0x004CDC88u + g_ebp);
+        return 1;
+    case 0x000A11A5u:                                          /* the turn */
+        if (on && r < 32u)
+            sneak_scale_store(&g_ecx, 0x004CDC84u + g_ebp, &g_sneak.turn_rem[r]);
+        return 1;
+    case 0x000A11C8u:                                          /* its step in x (speed * cos) */
+    case 0x000A11EBu:                                          /* and in y */
+        /* The step, not the speed, is scaled: sub_00103A90 rounds down,
+         * so a step from a quarter of the speed would lose up to a unit
+         * a frame, four times as often. */
+        if (on && r < 32u)
+            g_eax = (uint32_t)sneak_scale((int)g_eax, &g_sneak.walk_rem[r][va == 0x000A11EBu]);
+        return 1;
+    case 0x000A140Cu: if (off) g_eax += 1u; return 1;          /* dec [rec+0x24] */
+    /* The player (sub_0009F8B0, record 0) */
+    case 0x0009F968u:                                          /* the animation clock */
+    case 0x0009FE57u:                                          /* +5, turning */
+    case 0x0009FEB6u:
+        if (on)
+            sneak_scale_store(&g_edi, 0x004CDC7Cu, &g_sneak.anim_rem[0]);
+        return 1;
+    case 0x0009FA1Bu: if (off) g_eax -= 1u; return 1;          /* inc [0x4CE6F8] */
+    case 0x0009FB16u: if (off) g_ecx -= 1u; return 1;          /* inc [0x4CE6F4] */
+    case 0x0009FF9Eu: if (off) S60_MEM32(0x004CDC80u) += 1; return 1;   /* dec [0x4CDC80] */
+    case 0x000A022Au:                                          /* [0x4CDC44] += 30 */
+    case 0x000A02D6u:                                          /* and 10 */
+        if (on)
+            sneak_scale_store(&g_eax, 0x004CDC44u, &g_sneak.rem[1]);
+        return 1;
+    case 0x000A034Cu:                                          /* the turn, by the stick */
+    case 0x000A0387u:
+    case 0x000A03A6u:
+    case 0x000A03BDu:
+        if (on)
+            sneak_scale_store(&g_ebp, 0x004CDC64u, &g_sneak.rem[2]);
+        return 1;
+    case 0x000A039Cu: if (off) g_edx <<= 1; return 1;          /* the turn eases off, sar 1 a tick */
+    case 0x000A0585u:                                          /* the step in x (speed * cos) */
+    case 0x000A05C9u:
+    case 0x000A059Eu:                                          /* and in y */
+    case 0x000A05E2u:
+        if (on)
+            g_eax = (uint32_t)sneak_scale((int)g_eax,
+                                          &g_sneak.walk_rem[0][va == 0x000A059Eu || va == 0x000A05E2u]);
+        return 1;
+    case 0x000A077Bu: if (off) g_ecx -= 1u; return 1;          /* inc [0x4119EC] */
+    /* The camera (sub_000A55B0): speeds (sub_0009F090) a tick, moves a frame */
+    case 0x000A55F0u: if (off) g_eax = (uint32_t)S60_MEM32(0x004CE734u); return 1;
+    case 0x000A5608u: if (on) sneak_scale_store(&g_ecx, 0x0049C26Cu, &g_sneak.rem[3]); return 1;
+    case 0x000A561Au: if (off) g_eax = (uint32_t)S60_MEM32(0x004CE730u); return 1;
+    case 0x000A563Au: if (on) sneak_scale_store(&g_eax, 0x0049C268u, &g_sneak.rem[4]); return 1;
+    case 0x000A5652u: if (off) g_eax = (uint32_t)S60_MEM32(0x004CE728u); return 1;
+    case 0x000A56E4u: if (off) g_eax = (uint32_t)S60_MEM32(0x004CE720u); return 1;
+    case 0x000A5702u: if (on) sneak_scale_store(&g_esi, 0x004CE724u, &g_sneak.rem[5]); return 1;
+    /* Every other frame (sub_000BC220, sub_000BC460): [0x4D2DF4] and
+     * [0x4D2DF0] add the tick count since the limiter's base, so pass 5000
+     * at once and are cleared on the next frame -- the guards' paths to
+     * the player (sub_000BC690) and the music's pick (sub_000BC740, a
+     * random draw), 15 times a second on the console: on the tick only. */
+    case 0x000BC287u: if (off) g_ecx = (uint32_t)S60_MEM32(0x004D2DF4u); return 1;
+    case 0x000BC4DEu: if (off) g_ecx = (uint32_t)S60_MEM32(0x004D2DF0u); return 1;
+    /* The escape meter (sub_000A8300): its decay a tick */
+    /* A press of A (key 0x20) adds to it (0xA8308); a frame without one
+     * takes off 1..3 and more (0xA833B). On the console a frame with a
+     * press does not fall: a press off the tick spares the next tick's
+     * fall, and its draw. */
+    case 0x000A8308u:
+        g_sneak.decay = 0;
+        if (off)
+            g_sneak.pressed = 1;
+        return 1;
+    case 0x000A833Bu:
+        g_sneak.decay = off || (on && g_sneak.pressed);
+        if (on && g_sneak.tick)
+            g_sneak.pressed = 0;
+        return 1;
+    case 0x000A835Cu:
+        if (on && g_sneak.decay)
+            g_eax = (uint32_t)S60_MEM32(0x004CE6F0u);
+        g_sneak.decay = 0;
         return 1;
     }
     return 0;
@@ -2697,6 +3026,8 @@ void recomp_guest_hook(uint32_t va)
         return;
     if (land_guest_hook(va))                /* land battles (land_fps) */
         return;
+    if (sneak_guest_hook(va))               /* the town sneak (sneak_fps) */
+        return;
 
     /* The short-lived effects' ages in a town scene (as btl_guest_hook does
      * in a battle): a year a tick, never held at 0. */
@@ -3028,6 +3359,12 @@ void sub_002E0424(void)
             return;
         }
     }
+    if (g_sneak.active && g_sneak.in_frame && g_sneak.decay &&
+        (uint32_t)S60_MEM32(g_esp) == 0x000A8340u) {
+        g_eax = 0;                        /* the hold meter's fall: its draw a tick */
+        g_esp += 4u;
+        return;
+    }
     sub_002E0424_gen();
 }
 
@@ -3053,8 +3390,10 @@ void sub_002E0424(void)
  * Only the menu called from the sea loop itself, by those return
  * addresses: towns, ship battles and the town sneak run inside the sea's
  * frame too (sub_00085980 -> the town menu sub_00021D70, sub_000C3950 ->
- * sub_000C72F0), and their pause menus keep the vblank's 60. A tab switch
- * inside the menu calls sub_00131170 again and stays counted.
+ * sub_000C72F0), and their pause menus keep the vblank's 60 -- but the
+ * town sneak's (its Start, 0xA4948), which follows sneak_fps the same way
+ * (g_sneak_menu_depth). A tab switch inside the menu calls sub_00131170
+ * again and stays counted.
  *
  * The world map tab (sub_0005D8C0) runs at the sailing rate too when it is
  * above 60 (sea_map_guest_hook below keeps its stick at the speed it has
@@ -3063,6 +3402,7 @@ void sub_002E0424(void)
  * Its cursor's pulse runs on the clock (sub_0005BCC0 reads the tick). */
 static int g_sea_menu_depth;   /* menu calls running that were opened from the sea loop */
 static int g_sea_menu_map;     /* the world map tab is running inside it */
+static int g_sneak_menu_depth; /* and from the town sneak (0xA4948, its Start) */
 
 static uint32_t pirates_return_address(void)
 {
@@ -3076,11 +3416,19 @@ void sub_00131170(void)
     int at_sea = g_sea_menu_depth > 0 ||
                  (g_sea60.in_loop && (ra == 0x000923FDu || ra == 0x00092581u));
 
+    /* The town sneak's own Start (sub_000A1E10, at 0xA4948) opens the same
+     * menu inside its frame: it follows sneak_fps the same way. */
+    int in_sneak = !at_sea && (g_sneak_menu_depth > 0 || (g_sneak.in_frame && ra == 0x000A494Du));
+
     if (at_sea)
         g_sea_menu_depth++;
+    if (in_sneak)
+        g_sneak_menu_depth++;
     sub_00131170_gen();
     if (at_sea)
         g_sea_menu_depth--;
+    if (in_sneak)
+        g_sneak_menu_depth--;
 }
 
 extern void sub_001313F0_gen(void);
@@ -3177,6 +3525,10 @@ static int sea_map_fast(void)
 
     if (g_sea_menu_map <= 0)
         return 0;
+    if (g_sneak_menu_depth > 0) {
+        rate = sneak_read_rate();
+        return rate != 30 && rate != 60;
+    }
     if (g_sea_menu_depth <= 0)
         return town_map_fast();
     rate = sea60_read_rate();
@@ -3248,8 +3600,10 @@ static int sea_map_guest_hook(uint32_t va)
 extern void sub_000FD780_gen(void);
 void sub_000FD780(void)
 {
-    if (front_running())
+    if (front_running()) {
         front_frame();                     /* the front end (menu_fps) */
+        sneak_leave();
+    }
     if (g_sea_menu_depth > 0) {
         static int said = -2, said_map = -1;
         int setting = sea60_read_rate();
@@ -3278,6 +3632,15 @@ void sub_000FD780(void)
             sea60_set_gate(rate);
         else if (g_sea60.gate_rate)
             sea60_set_gate(0);
+    } else if (g_sneak_menu_depth > 0) {   /* the town sneak's: sneak_fps, the same way */
+        int rate = sneak_read_rate();
+
+        if (g_sea_menu_map > 0 && (rate == 30 || rate == 60))
+            sneak_set_gate(60);
+        else if (rate != 30 && rate != 60)
+            sneak_set_gate(rate);
+        else if (g_sneak.gate_rate)
+            sneak_set_gate(0);
     }
     sub_000FD780_gen();
 }
@@ -3326,7 +3689,7 @@ extern int hle_frame_interp(void);   /* toolkit: frames shown per frame drawn, n
 extern void xbox_Nv2aFlipGateSetTitleInterval(uint32_t interval);
 extern int xbox_Nv2aFlipGateVblanksPerSwap(void);
 #define PIRATES_LIMITER_SEA  0x00091DE1u     /* after the limiters' tick reads: */
-#define PIRATES_LIMITER_SEA2 0x000A4AEEu     /* the town sneak (sub_000A1E10, town.cpp; long taken for a second sea loop), */
+#define PIRATES_LIMITER_SEA2 0x000A4AEEu     /* the town sneak (sub_000A1E10, town.cpp; long taken for a second sea loop; sneak_fps), */
 #define PIRATES_LIMITER_BTL  0x000C3B4Eu     /* ship battles */
 #define PIRATES_LIMITER_DUEL 0x00036C60u     /* sword duels (120 ms when slowed) */
 #define PIRATES_LIMITER_30MS 0x0004DF8Fu     /* a 30 ms copy (sub_0004DE..) */
@@ -3342,6 +3705,13 @@ void sub_001A958A(void)
 
     sub_001A958A_gen();
     pirates_test_probe(g_eax);
+    /* Another scene's frame: no town sneak frame is open (its wait clears
+     * it, but a sneak frame that skips the wait -- 0x49C298 bit 8 -- and
+     * leaves the loop would leave it set), and the next sneak starts
+     * afresh (sneak_begin_frame). */
+    if (ra == 0x0009190Fu || ra == 0x000C397Fu || ra == 0x0004D3A3u || ra == 0x00031664u ||
+        ra == 0x00099C4Eu || ra == 0x0002A57Eu)
+        sneak_leave();
     if (g_pirates_front < 0)
         pirates_front_end(1);            /* start-up is the front end */
     if (ra == 0x00091DE1u || ra == 0x000A4AEEu || ra == 0x000C3B4Eu ||
@@ -3421,6 +3791,8 @@ void sub_001A958A(void)
     }
     if (ra == 0x0009190Fu || ra == 0x000A43FAu) { /* a sea frame begins */
         g_pirates_in_sea_frame = 1;
+        if (ra == 0x000A43FAu)           /* the town sneak (sub_000A1E10) */
+            sneak_begin_frame();
         if (ra == 0x0009190Fu) {         /* sub_00091170, the sea; 0xA43FA is the town sneak */
             sea60_begin_frame();
             sea60_test_frame(g_sea60.active, g_sea60.tick, g_sea60.dt,
@@ -3466,7 +3838,7 @@ void sub_001A958A(void)
     smooth = hle_frame_interp() >= 2;
     /* Sailing faster than 30 (sea_fps). Only the sea's loop (sub_00091170):
      * the second "sea" wait, 0xA4AEE, is the town sneak's loop
-     * (sub_000A1E10, town.cpp), which keeps 30. At 60 the sea's own wait
+     * (sub_000A1E10, town.cpp), which has sneak_fps. At 60 the sea's own wait
      * passes at SEA60_WAIT_MS and the gate's one Swap a vblank paces it;
      * above 60 (and unlocked) the wait passes at once and the gate paces it
      * by the host clock at the rate (toolkit patch 0044) for as long as sea
@@ -3484,6 +3856,23 @@ void sub_001A958A(void)
         } else {
             g_eax += 30u;
             land_set_gate(g_land.rate);
+        }
+        if (at30) {
+            at30 = 0;
+            xbox_Nv2aFlipGateSetTitleInterval(1);
+        }
+        return;
+    }
+    /* The town sneak faster than 30 (sneak_fps): its 31 ms wait passes. */
+    if (g_sneak.active && g_sneak.in_frame && ra == PIRATES_LIMITER_SEA2) {
+        g_sneak.in_frame = 0;
+        if (g_sneak.rate == 60) {
+            g_eax += 31u - SEA60_WAIT_MS;
+            if (g_sneak.gate_rate)
+                sneak_set_gate(0);
+        } else {
+            g_eax += 31u;
+            sneak_set_gate(g_sneak.rate);
         }
         if (at30) {
             at30 = 0;

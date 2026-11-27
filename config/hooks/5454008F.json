@@ -568,6 +568,186 @@
   {
    "address": "0x0004B0C1",
    "note": "land_fps: the camera's zoom, 500 a console frame"
+  },
+  {
+   "address": "0x000A4477",
+   "note": "sneak_fps: the sneak's local countdown [esp+0x30] (dec edi), a tick's"
+  },
+  {
+   "address": "0x000A4487",
+   "note": "sneak_fps: the sneak's frame clock [0x4CE71C] (inc ecx), a tick's"
+  },
+  {
+   "address": "0x000A1CBA",
+   "note": "sneak_fps: the guards' every-34th-frame check [0x4D66F4], a tick's"
+  },
+  {
+   "address": "0x000A1D58",
+   "note": "sneak_fps: the alert [0x4CE740] falls 1 a frame, a tick's"
+  },
+  {
+   "address": "0x000A1D78",
+   "note": "sneak_fps: the alert's hold [0x4CE744] falls 1 a frame, a tick's"
+  },
+  {
+   "address": "0x000A1B92",
+   "note": "sneak_fps: the pointer's fade -4 a frame, this frame's share"
+  },
+  {
+   "address": "0x000A1B94",
+   "note": "sneak_fps: the pointer's fade: eax back after 0xA1B92"
+  },
+  {
+   "address": "0x000A1BD1",
+   "note": "sneak_fps: the pointer's fade +4 a frame, this frame's share"
+  },
+  {
+   "address": "0x000A09B4",
+   "note": "sneak_fps: a guard's countdown [rec+0x38], a tick's"
+  },
+  {
+   "address": "0x000A09E5",
+   "note": "sneak_fps: a guard's animation clock +0x21/+0x42 a frame, this frame's share"
+  },
+  {
+   "address": "0x000A1184",
+   "note": "sneak_fps: a guard's turn speed (sub_0009F090), once a tick"
+  },
+  {
+   "address": "0x000A11A5",
+   "note": "sneak_fps: a guard's turn, this frame's share of its speed"
+  },
+  {
+   "address": "0x000A11C8",
+   "note": "sneak_fps: a guard's step in x, this frame's share"
+  },
+  {
+   "address": "0x000A11EB",
+   "note": "sneak_fps: a guard's step in y, this frame's share"
+  },
+  {
+   "address": "0x000A140C",
+   "note": "sneak_fps: a guard's look-out cooldown [rec+0x24], a tick's"
+  },
+  {
+   "address": "0x0009F968",
+   "note": "sneak_fps: the player's animation clock, this frame's share"
+  },
+  {
+   "address": "0x0009FE57",
+   "note": "sneak_fps: the player's animation clock +5 turning, this frame's share"
+  },
+  {
+   "address": "0x0009FEB6",
+   "note": "sneak_fps: the player's animation clock +5 turning, this frame's share"
+  },
+  {
+   "address": "0x0009FA1B",
+   "note": "sneak_fps: the player's count [0x4CE6F8], a tick's"
+  },
+  {
+   "address": "0x0009FB16",
+   "note": "sneak_fps: the player's count [0x4CE6F4], a tick's"
+  },
+  {
+   "address": "0x0009FF9E",
+   "note": "sneak_fps: the player's countdown [0x4CDC80], a tick's"
+  },
+  {
+   "address": "0x000A022A",
+   "note": "sneak_fps: the player's idle clock [0x4CDC44] +30 a frame, this frame's share"
+  },
+  {
+   "address": "0x000A02D6",
+   "note": "sneak_fps: the player's idle clock [0x4CDC44] +10 a frame, this frame's share"
+  },
+  {
+   "address": "0x000A034C",
+   "note": "sneak_fps: the player's turn by the stick, this frame's share"
+  },
+  {
+   "address": "0x000A0387",
+   "note": "sneak_fps: the player's turn by the stick, this frame's share"
+  },
+  {
+   "address": "0x000A03A6",
+   "note": "sneak_fps: the player's turn easing off, this frame's share"
+  },
+  {
+   "address": "0x000A03BD",
+   "note": "sneak_fps: the player's turn, this frame's share"
+  },
+  {
+   "address": "0x000A039C",
+   "note": "sneak_fps: the player's turn rate halves once a tick"
+  },
+  {
+   "address": "0x000A0585",
+   "note": "sneak_fps: the player's step in x, this frame's share"
+  },
+  {
+   "address": "0x000A059E",
+   "note": "sneak_fps: the player's step in y, this frame's share"
+  },
+  {
+   "address": "0x000A05C9",
+   "note": "sneak_fps: the player's step in x, this frame's share"
+  },
+  {
+   "address": "0x000A05E2",
+   "note": "sneak_fps: the player's step in y, this frame's share"
+  },
+  {
+   "address": "0x000A077B",
+   "note": "sneak_fps: the player's noise count [0x4119EC], a tick's"
+  },
+  {
+   "address": "0x000A55F0",
+   "note": "sneak_fps: the sneak camera's x speed (sub_0009F090), once a tick"
+  },
+  {
+   "address": "0x000A5608",
+   "note": "sneak_fps: the sneak camera's x, this frame's share"
+  },
+  {
+   "address": "0x000A561A",
+   "note": "sneak_fps: the sneak camera's y speed (sub_0009F090), once a tick"
+  },
+  {
+   "address": "0x000A563A",
+   "note": "sneak_fps: the sneak camera's y, this frame's share"
+  },
+  {
+   "address": "0x000A5652",
+   "note": "sneak_fps: the sneak camera's turn speed (sub_0009F090), once a tick"
+  },
+  {
+   "address": "0x000A56E4",
+   "note": "sneak_fps: the sneak camera's zoom speed (sub_0009F090), once a tick"
+  },
+  {
+   "address": "0x000A5702",
+   "note": "sneak_fps: the sneak camera's zoom, this frame's share"
+  },
+  {
+   "address": "0x000A8308",
+   "note": "sneak_fps: the escape meter: a press (not its decay)"
+  },
+  {
+   "address": "0x000A833B",
+   "note": "sneak_fps: the escape meter: its decay"
+  },
+  {
+   "address": "0x000A835C",
+   "note": "sneak_fps: the escape meter's decay, a tick's"
+  },
+  {
+   "address": "0x000BC287",
+   "note": "sneak_fps: the every-other-frame count [0x4D2DF4] (guard paths), on the tick only"
+  },
+  {
+   "address": "0x000BC4DE",
+   "note": "sneak_fps: the every-other-frame count [0x4D2DF0] (music pick), on the tick only"
   }
  ]
 }

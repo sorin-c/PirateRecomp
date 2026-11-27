@@ -107,6 +107,20 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   Paced as sailing is. Measured against 30 fps in scripted battles; not yet
   played through many battles. Frame interpolation is not used in a land
   battle faster than 30.
+- **Town sneak frame rate (experimental).** `sneak_fps` (F2 Display tab
+  "Town sneak", applies at once): the same for sneaking into a town past its
+  guards. 30, the default, is the console's; 60, 90, 120, 144 or 240 (0
+  unlocked) draw it that many times a second at the speed it has at 30: your
+  steps and the guards', your animations and theirs, the guards' turning
+  and the camera's pan and zoom go by each frame's length (each step the
+  console takes, cut as it cuts it, then shared out over the frames, the
+  remainder carried); the turn and camera speeds, the alert and its fall,
+  the countdowns, the hold meter's fall when a guard has you and every
+  other per-frame count keep the console's 30 a second. The pause menu
+  opened in the sneak follows the same rate (as sailing's does). Paced as
+  sailing is. Measured against 30 fps in scripted runs (walks, a guard's
+  hold and the catch, the escape by pressing A); not yet played through
+  many sneaks. Frame interpolation is not used in a sneak faster than 30.
 - **Sword duel frame rate (experimental).** `duel_fps` (F2 "Sword duels",
   applies at once): the same for sword duels. 30, the default, is the
   console's; 60, 90, 120, 144 or 240 (0 unlocked) run the duel that many
@@ -199,6 +213,7 @@ defaults. Every line names the environment variable that overrides it, so a
 | `sea_fps` | `30` | Experimental: frames a second while sailing (`0` unlocked). |
 | `battle_fps` | `30` | Experimental: frames a second in ship battles (`0` unlocked). |
 | `land_fps` | `30` | Experimental: frames a second in land battles (`0` unlocked). |
+| `sneak_fps` | `30` | Experimental: frames a second when sneaking into a town (`0` unlocked). |
 | `duel_fps` | `30` | Experimental: frames a second in sword duels (`0` unlocked). |
 | `dance_fps` | `60` | Experimental: frames a second while dancing (`0` unlocked). |
 | `town_fps` | `30` | Experimental: frames a second in a town: the menu, its rooms (the tavern, the governor's) and its other screens (`0` unlocked). |
