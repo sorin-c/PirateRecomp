@@ -514,9 +514,14 @@ static int title_main(int argc, char **argv)
         const char *v = recomp_config_lookup("RECOMP_PIRATES_WATER_REFLECTION", "water_reflection");
         int mode = 0;                       /* 0 console, 1 clear, 2 mirror */
 
-        if (v && (strcmp(v, "clear") == 0 || strcmp(v, "2") == 0 || strcmp(v, "4") == 0))
+        /* Sorin kept two values (2026-11-26): Console and Improved
+         * ("clear"). Mirror is gone from the menu; "mirror", 2 and 4 from
+         * an older file read as Improved. Mirror (mode 2) stays reachable
+         * only through RECOMP_PIRATES_MIRROR_WEIGHT, for tests. */
+        if (v && (strcmp(v, "clear") == 0 || strcmp(v, "improved") == 0 ||
+                  strcmp(v, "2") == 0 || strcmp(v, "4") == 0 || strcmp(v, "mirror") == 0))
             mode = 1;
-        else if (v && strcmp(v, "mirror") == 0)
+        if (mode && getenv("RECOMP_PIRATES_MIRROR_WEIGHT"))
             mode = 2;
         if (mode) {
             float bump = 0.35f, mirror = mode == 2 ? 0.6f : 0.0f;
@@ -528,7 +533,7 @@ static int title_main(int argc, char **argv)
             xbox_D3D8SetOffscreenEffect(256, 256, bump, mirror);
         }
         fprintf(stderr, "[PIRATES] water reflections: %s\n",
-                mode == 2 ? "mirror" : mode == 1 ? "clear" : "console");
+                mode == 2 ? "mirror (test)" : mode == 1 ? "improved" : "console");
     }
 
     /* stdout unbuffered for immediate visibility. stderr, the log, is

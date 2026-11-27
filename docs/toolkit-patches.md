@@ -742,8 +742,42 @@ Each one, with the reason it exists:
   game's `menu_fps` (60 (off), 90, 120, 144, 240, Unlocked; applies at
   once): the front end's frame rate, paced in `src/recomp_manual.c`.
 
-- **0072-settings-menu-land-rate** (`src/hle/hle_settings_menu.c`). The F2
+- **0072-water-reflection-console-or-improved** (`src/hle/hle_settings_menu.c`).
+  Sorin did not like Mirror and asked for two values: the F2 row is now
+  Console (`1`) and Improved (`clear`). `mirror`, `2` and `4` from an older
+  file show as Improved, which is how the game reads them. The mirror
+  composite (0070) stays in the toolkit; the game uses it only when
+  `RECOMP_PIRATES_MIRROR_WEIGHT` is set, for tests.
+
+- **0073-settings-menu-duel-rate** (`src/hle/hle_settings_menu.c`). The F2
+  Display tab's "Frame rate by scene" group gets a "Sword duels" row for
+  the game's `duel_fps` (30 (off), 60, 90, 120, 144, 240, Unlocked; applies
+  at once), after "Sea battles": the duel's frame rate, paced in
+  `src/recomp_manual.c`.
+
+- **0074-settings-menu-dance-rate** (`src/hle/hle_settings_menu.c`). A
+  "Dancing" row after "Sword duels" for the game's `dance_fps` (60 (off),
+  90, 120, 144, 240, Unlocked; applies at once): the dancing's frame rate,
+  paced in `src/recomp_manual.c`.
+
+- **0075-screenshot-key-png** (`src/d3d/d3d8_screenshot.c` and `.h`, new;
+  `src/d3d/d3d8_device.c`, `d3d8_xbox.h`, `CMakeLists.txt`;
+  `src/hle/hle_d3d8.c`, `hle_settings_menu.c`; `src/host/host.h`,
+  `host_sdl.c`; `third_party/stb/stb_image_write.h`, new, public domain or
+  MIT). **F12** saves a screenshot as a PNG beside the executable, named
+  `screenshot_YYYY-MM-DD_HH-MM-SS.png` (`_2`, `_3` for more in the same
+  second). `xbox_D3D8ScreenshotNext(path)` asks for the next presented
+  frame; `present_scene` reads the swap chain back after the display
+  resolve and before the corner line, the settings menu and the touch
+  controls are drawn, so the file holds the game's picture alone, at the
+  size it reaches the screen and without the bars. The PNG is compressed
+  and written on a thread of its own (under `.part` until whole), so the
+  game does not stop for it. The F2 About tab lists the key. F11's BMP and
+  frame capture for bug reports are unchanged.
+
+- **0078-settings-menu-land-rate** (`src/hle/hle_settings_menu.c`). The F2
   Display tab's "Frame rate by scene" group gets a "Land battles" row for
   the game's `land_fps` (30 (off), 60, 90, 120, 144, 240, Unlocked; applies
   at once), after "Sea battles": the land battle's frame rate, paced in
-  `src/recomp_manual.c`.
+  `src/recomp_manual.c`. Numbered 0078: 0076 and 0077 are taken on other
+  branches.

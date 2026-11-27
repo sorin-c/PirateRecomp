@@ -57,6 +57,19 @@ static const struct {
       "# the battle that many times a second, its troops, fights, flags and\n"
       "# timers at the speed they have at 30; 0 is unlocked. Paced as sea_fps\n"
       "# is. Applies at once from the F2 menu.     [RECOMP_PIRATES_LAND_FPS]\n" },
+    { "duel_fps", "30",
+      "# Experimental: the frame rate in sword duels, at the game's own\n"
+      "# speed: 30 (the default) as the console; 60, 90, 120, 144 or 240 run\n"
+      "# the duel's fighters, their swings, the crowd and the camera that many\n"
+      "# times a second at the speed they have at 30; 0 is unlocked. Paced as\n"
+      "# battle_fps is. Applies at once from the F2 menu.\n"
+      "#                                            [RECOMP_PIRATES_DUEL_FPS]\n" },
+    { "dance_fps", "60",
+      "# Experimental: the frame rate of the dancing, which the console draws\n"
+      "# 60 times a second: 60 (the default) as the console; 90, 120, 144 or\n"
+      "# 240, or 0 unlocked, draw it that often, its steps and prompts still\n"
+      "# with the music. Applies at once from the F2 menu.\n"
+      "#                                           [RECOMP_PIRATES_DANCE_FPS]\n" },
     { "town_fps", "30",
       "# Experimental: the frame rate in a town's rooms -- the tavern, the\n"
       "# governor's -- which the console draws 33 times a second: 30 (the\n"
@@ -72,9 +85,9 @@ static const struct {
       "#                                          [RECOMP_PIRATES_MENU_FPS]\n" },
     { "water_reflection", "1",
       "# The ship's reflection in the sea: 1 (the default) as the console\n"
-      "# draws it, a faint rippled smear; clear draws it four times larger\n"
-      "# with gentler ripples; mirror also shows it as a mirror would, hull\n"
-      "# and sail colours on the water. Applies at the next start.\n"
+      "# draws it, a faint rippled smear; clear (Improved in the F2 menu)\n"
+      "# draws it four times larger with gentler ripples. Applies at the\n"
+      "# next start.\n"
       "#                                    [RECOMP_PIRATES_WATER_REFLECTION]\n" },
     { "sea_60", "0",
       "# The setting before sea_fps: 1 sails at 60 while sea_fps is 30.\n"

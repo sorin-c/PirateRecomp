@@ -2,6 +2,58 @@
  "comment": "Guest hooks (toolkit patch 0042): each address calls recomp_guest_hook() in src/recomp_manual.c just before that instruction.",
  "hooks": [
   {
+   "address": "0x00029B7D",
+   "note": "dance_fps: the dance's per-frame phase += 25, this frame's share"
+  },
+  {
+   "address": "0x00035845",
+   "note": "duel_fps: an idle effect's 1-in-200 start, rolled once a tick"
+  },
+  {
+   "address": "0x000323F0",
+   "note": "duel_fps: the opponent's next move, taken once a tick"
+  },
+  {
+   "address": "0x00031546",
+   "note": "duel_fps: the fade-in frame count (ebx), once a tick"
+  },
+  {
+   "address": "0x00035F41",
+   "note": "duel_fps: camera x speed from sub_0009F090, once a tick"
+  },
+  {
+   "address": "0x00035F49",
+   "note": "duel_fps: camera x += this frame's share of the speed"
+  },
+  {
+   "address": "0x00035FCC",
+   "note": "duel_fps: camera turn speed, once a tick"
+  },
+  {
+   "address": "0x00035FD5",
+   "note": "duel_fps: camera turn += this frame's share"
+  },
+  {
+   "address": "0x00035F68",
+   "note": "duel_fps: camera height +2 a frame, this frame's share"
+  },
+  {
+   "address": "0x00036BF7",
+   "note": "duel_fps: the duel's frame count [esp+0x90], once a tick"
+  },
+  {
+   "address": "0x000316BA",
+   "note": "duel_fps: the clock step [esp+0xB4] / 0x40F62C, this frame's share of 5"
+  },
+  {
+   "address": "0x00034B81",
+   "note": "duel_fps: a fighter's animation step from a console frame's clock step (5)"
+  },
+  {
+   "address": "0x00034D9A",
+   "note": "duel_fps: a fighter's animation step (ecx, ebp the record), this frame's share"
+  },
+  {
    "address": "0x000420A0",
    "note": "town_fps: a town room dialog loop's Sleep(10) a pass (the governor's), Sleep(0) when faster than 33"
   },

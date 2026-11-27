@@ -1,0 +1,14 @@
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -168,6 +168,10 @@
+       FPS_VALS, { "30 (off)", "60", "90", "120", "144", "240", "Unlocked" },
+       "A real higher frame rate in sword duels: the fighters, their swings, the crowd and the camera. "
+       "30 is the original." },
++    { TAB_DISPLAY, "Frame rate by scene", "Dancing", "dance_fps", "RECOMP_PIRATES_DANCE_FPS", LIVE_TITLE, 1, 1, 6,
++      { "60", "90", "120", "144", "240", "0" }, { "60 (off)", "90", "120", "144", "240", "Unlocked" },
++      "The dancing: the dancers, the prompts and the camera, still with the music. "
++      "60 is the original." },
+     { TAB_DISPLAY, "Frame rate by scene", "Towns and rooms", "town_fps", "RECOMP_PIRATES_TOWN_FPS", LIVE_TITLE, 1, 1, 7,
+       FPS_VALS, { "33 (off)", "60", "90", "120", "144", "240", "Unlocked" },
+       "Taverns, the governor's mansion and the other rooms in a town. 33 is the original pacing." },
