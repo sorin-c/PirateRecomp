@@ -1350,8 +1350,29 @@ static struct {
     int gate_rate;
     int64_t ft_last_us;   /* host time of the last frame length stored */
     int ft_rem_us;        /* what the stored ms left over */
+    int march_rem[32];    /* each unit's march step, what the scaling left */
+    int cam_rem[4];       /* the camera's speed, x, y and zoom, the same */
     FILE *log;            /* RECOMP_PIRATES_LAND_LOG: a line a frame */
 } g_land;
+
+/* This frame's share of a console frame, in us of 33333: the frame's
+ * length in ms ([0x40D188], its remainder carried), at most one console
+ * frame (a hitch runs the battle slower, as the console does). */
+static int land_frame_us(void)
+{
+    int us = S60_MEM32(0x0040D188u) * 1000;
+    return us < 0 ? 0 : us > LAND_TICK_US ? LAND_TICK_US : us;
+}
+
+/* v, a step the console takes once a frame, for this frame; what the
+ * scaling leaves over is carried in *rem. */
+static int land_scale(int v, int *rem)
+{
+    int64_t n = (int64_t)v * land_frame_us() + *rem;
+    int r = (int)(n / LAND_TICK_US);
+    *rem = (int)(n - (int64_t)r * LAND_TICK_US);
+    return r;
+}
 
 /* land_fps (RECOMP_PIRATES_LAND_FPS): 30 (the default) as the console, 60,
  * 90, 120, 144 or 240, 0 unlocked (-1 here). */
@@ -1414,7 +1435,8 @@ static void land_begin_frame(void)
         }
     }
     g_land.in_frame = 1;
-    {   /* the test log: "us tick dt_us frames end_count frame_ms | unit x y ..."
+    {   /* the test log: "us tick dt_us frames end_count frame_ms cam_x cam_y
+         * zoom men0 men1 | unit x y ..."
          * (the first man of each side's first four units) */
         static int opened;
         if (!opened) {
@@ -1438,8 +1460,17 @@ static void land_begin_frame(void)
                 S60_MEM32(0x004D657Cu) = 1;
                 fprintf(g_land.log, "# won\n");
             }
-            fprintf(g_land.log, "%lld %d %d %d %d %d |", (long long)now, g_land.tick, g_land.dt_us,
-                    S60_MEM32(0x004D6574u), S60_MEM32(0x004D657Cu), S60_MEM32(0x0040D188u));
+            {   /* then the camera (x, y, zoom) and each side's men ([unit+2]) */
+                int men[2] = {0, 0};
+                for (s = 0; s < 2; s++)
+                    for (u = 0; u < 16; u++)
+                        if (S60_MEM16(0x004ADC10u + (uint32_t)(s * 16 + u) * 0x14Cu) != -1)
+                            men[s] += S60_MEM16(0x004ADC12u + (uint32_t)(s * 16 + u) * 0x14Cu);
+                fprintf(g_land.log, "%lld %d %d %d %d %d %d %d %d %d %d |", (long long)now, g_land.tick,
+                        g_land.dt_us, S60_MEM32(0x004D6574u), S60_MEM32(0x004D657Cu),
+                        S60_MEM32(0x0040D188u), S60_MEM32(0x004AB7A8u), S60_MEM32(0x004AB7A4u),
+                        S60_MEM32(0x004AB790u), men[0], men[1]);
+            }
             for (s = 0; s < 2; s++)
                 for (u = 0; u < 4; u++) {
                     uint32_t p = 0x004ADC10u + (uint32_t)(s * 16 + u) * 0x14Cu;
@@ -1483,8 +1514,85 @@ static int land_guest_hook(uint32_t va)
             g_ecx += (uint32_t)((g_land.tick ? 30 : 0) +
                                 (int)((int64_t)g_land.acc_us * 30 / LAND_TICK_US));
         return 1;
+    case 0x0004C864u:       /* a unit's march: the slope's slowing, x * frame ms */
+        /* The march step (below) is taken once a frame; the slope takes
+         * off a share of it in proportion to the frame's ms. Given for
+         * a console frame here, the whole step is then scaled. */
+        if (g_land.active && g_land.in_frame) {
+            int ms = S60_MEM32(0x0040D188u);
+            if (ms > 0)
+                g_ecx = (uint32_t)(int32_t)((int64_t)(int32_t)g_ecx * LAND_TICK_US / ((int64_t)ms * 1000));
+        }
+        return 1;
+    case 0x0004C8D4u: {     /* a unit's march step a frame (edi, [esp+0x20]) */
+        /* The men walk this far a frame toward their places (0x4CD21),
+         * and a man or the unit nearer than it is there: the step for
+         * this frame's length, its remainder kept for each unit. */
+        if (g_land.active && g_land.in_frame) {
+            uint32_t u = (uint32_t)g_ebp / 0x14Cu;
+            if (u < 32u) {
+                int s = land_scale((int)g_edi, &g_land.march_rem[u]);
+                g_edi = (uint32_t)s;
+                S60_MEM32(g_esp + 0x20u) = s;
+            }
+        }
+        return 1;
+    }
+    case 0x0004CE30u: {     /* a man's fighting clock: counter (ax) * 30 ms in esi */
+        /* The counter goes up once a frame (stored at 0x4CE37) and times
+         * a man's aim, shot or blow and his reload: a tick's, given this
+         * frame's share of a tick so his animation runs smoothly. A tick
+         * frame reads c and stores c + 1; the frames after it read c + 1.
+         * 0 stays 0 (the shot is cleared to be fired again there). */
+        if (g_land.active && g_land.in_frame) {
+            int c = (int16_t)(g_eax & 0xFFFFu);
+            int f = (int)((int64_t)g_land.acc_us * 30 / LAND_TICK_US);
+            if (!g_land.tick)
+                g_eax -= 1u;            /* the inc then stores c again */
+            if (c > 0)
+                g_esi = (uint32_t)((g_land.tick ? c : c - 1) * 30 + f);
+        }
+        return 1;
+    }
+    case 0x00049DD8u:       /* a fleeing man's fade, a step a frame: a tick's */
+        if (g_land.active && g_land.in_frame && !g_land.tick)
+            g_ecx -= 1u;
+        return 1;
+    case 0x0004AE60u:       /* dec [0x40D18C], a message's frames: a tick's */
+        if (g_land.active && g_land.in_frame && !g_land.tick)
+            S60_MEM32(0x0040D18Cu) += 1;
+        return 1;
+    case 0x0004AFF0u:       /* the camera's speed, +-50 a frame (ebx) */
+        /* The camera pans toward its target at a speed (0..400 a frame,
+         * [0x4AB79C]) that gains or loses 50 a frame: the change and the
+         * pan (0x4B005, 0x4B021) for this frame's length. */
+        if (g_land.active && g_land.in_frame) {
+            int old = S60_MEM32(g_esp + 0x40u);
+            g_ebx = (uint32_t)(old + land_scale((int)g_ebx - old, &g_land.cam_rem[0]));
+        }
+        return 1;
+    case 0x0004B005u:       /* the pan in x */
+        if (g_land.active && g_land.in_frame)
+            g_eax = (uint32_t)land_scale((int)g_eax, &g_land.cam_rem[1]);
+        return 1;
+    case 0x0004B021u:       /* and in y */
+        if (g_land.active && g_land.in_frame)
+            g_eax = (uint32_t)land_scale((int)g_eax, &g_land.cam_rem[2]);
+        return 1;
+    case 0x0004B0C1u: {     /* the zoom toward [0x4AB7A0] (eax), 500 a frame */
+        if (g_land.active && g_land.in_frame) {
+            int old = S60_MEM32(0x004AB790u), d = (int)g_eax - old, m;
+            if (d != 0) {
+                m = land_scale(500, &g_land.cam_rem[3]);
+                g_esi = (uint32_t)(d > m ? old + m : d < -m ? old - m : (int)g_eax);
+            }
+        }
+        return 1;
+    }
     case 0x0004DFEFu:       /* the battle is over: the gate back to its own */
         g_land.in_frame = 0;
+        memset(g_land.march_rem, 0, sizeof g_land.march_rem);   /* no share */
+        memset(g_land.cam_rem, 0, sizeof g_land.cam_rem);       /* carried on */
         if (g_land.gate_rate)
             land_set_gate(0);
         return 1;
@@ -2619,7 +2727,9 @@ void sub_000CBEE0(void) { if (!btl_off_tick_bit(4u, 0x20u)) sub_000CBEE0_gen(); 
  * rand() (the C library's, sub_002E0424). A land battle frame off the tick
  * gives the calls that the console makes once a frame for show -- a man's
  * fidget (1 in 50 at 0x4D1F9), a man's re-aim (1 in 2 at 0x4CCF2) and a
- * flag's height (1 in 2 at 0x4992D, 0x49953) -- the answer that does
+ * flag's height (1 in 2 at 0x4992D, 0x49953), a fighter's new cycle (1 in
+ * 16 at 0x4D17C), a man's fade as his unit leaves the field (1 in 10 at
+ * 0x4B54B) -- the answer that does
  * nothing, without taking a number from the game's sequence: the fights'
  * and the AI's draws then come as they do at 30. */
 extern void sub_002E0424_gen(void);
@@ -2633,6 +2743,8 @@ void sub_002E0424(void)
         case 0x0004CCF7u: v = 1; break;   /* odd: no re-aim (but the man it keeps) */
         case 0x00049932u:                 /* even: the flag stays */
         case 0x00049958u: v = 0; break;
+        case 0x0004D181u: v = 1; break;   /* & 15 != 0: a fighter's cycle goes on */
+        case 0x0004B550u: v = 1; break;   /* % 10 != 0: a man does not start to fade */
         }
         if (v >= 0) {
             g_eax = (uint32_t)v;
