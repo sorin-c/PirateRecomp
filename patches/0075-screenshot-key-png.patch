@@ -46,10 +46,10 @@ index 12fe891..0c45cec 100644
      keep_presented();
 diff --git a/src/d3d/d3d8_screenshot.c b/src/d3d/d3d8_screenshot.c
 new file mode 100644
-index 0000000..f463b45
+index 0000000..6b2ab2e
 --- /dev/null
 +++ b/src/d3d/d3d8_screenshot.c
-@@ -0,0 +1,156 @@
+@@ -0,0 +1,159 @@
 +/*
 + * The screenshot key: the frame as the player sees it, as a PNG.
 + *
@@ -66,6 +66,9 @@ index 0000000..f463b45
 + * The file appears under a temporary name and is renamed into place once
 + * whole, so whatever watches the folder never sees half a picture.
 + */
++#ifndef _CRT_SECURE_NO_WARNINGS
++#define _CRT_SECURE_NO_WARNINGS   /* fopen: MSVC's C4996 */
++#endif
 +#include "d3d8_internal.h"
 +#include "d3d8_screenshot.h"
 +#include <stdio.h>
