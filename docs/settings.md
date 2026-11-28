@@ -86,8 +86,8 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   file from before `game_fps` had every scene written at its console rate:
   at its next start the game turns those into `default`, and keeps any rate
   chosen by hand as an override.
-- **Sailing frame rate (experimental).** `sea_fps` (F2 "Sailing frame
-  rate", applies at once): 30, the default, sails as the console does; 60,
+- **Sailing frame rate (experimental).** `sea_fps` (F2 Debug tab "Sailing",
+  applies at once; `default`, No override, follows `game_fps`): 30 sails as the console does; 60,
   90, 120, 144 or 240 run the sea itself that many times a second, and 0 is
   unlocked (as fast as the PC draws it; `unlocked` may be written too). A
   value that is not a number, such as a typo, is read as 30. Ships, the wind's effect, turning,
@@ -108,8 +108,8 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   still sails at 60 while `sea_fps` is 30. Experimental: measured against
   30 fps in scripted test runs ([sea60-testing.md](sea60-testing.md)), not
   yet played through many battles and towns.
-- **Battle frame rate (experimental).** `battle_fps` (F2 "Battle frame
-  rate", applies at once): the same for ship battles. 30, the default, is
+- **Battle frame rate (experimental).** `battle_fps` (F2 Debug tab "Sea
+  battles", applies at once): the same for ship battles. 30 is
   the console's; 60, 90, 120, 144 or 240 (0 unlocked) run the battle that
   many times a second with the speed it has at 30: the ships' sailing,
   turning and drifting, the cannonballs' flight, the wind, the AI's
@@ -121,9 +121,9 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   sailing is. Measured against 30 fps in scripted battles (ships within 2%,
   every cannonball's flight time the console's); not yet played through
   many battles. Frame interpolation is not used in a battle faster than 30.
-- **Land battle frame rate (experimental).** `land_fps` (F2 Display tab
-  "Land battles", applies at once): the same for land battles. 30, the
-  default, is the console's; 60, 90, 120, 144 or 240 (0 unlocked) draw the
+- **Land battle frame rate (experimental).** `land_fps` (F2 Debug tab
+  "Land battles", applies at once): the same for land battles. 30 is the
+  console's; 60, 90, 120, 144 or 240 (0 unlocked) draw the
   battle that many times a second at the speed they have at 30: the men's
   march step, their fighting clock (aim, shot, blow, reload), the camera's
   pan and zoom and a message's time, which the console moves once a frame,
@@ -134,8 +134,8 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   played through many battles. Frame interpolation is not used in a land
   battle faster than 30.
 - **Town sneak frame rate (experimental).** `sneak_fps` (F2 Debug tab
-  "Town sneak", applies at once; `default` follows `game_fps`): the same for sneaking into a town past its
-  guards. 30, the default, is the console's; 60, 90, 120, 144 or 240 (0
+  "Town sneak", applies at once): the same for sneaking into a town past
+  its guards. 30 is the console's; 60, 90, 120, 144 or 240 (0
   unlocked) draw it that many times a second at the speed it has at 30: your
   steps and the guards', your animations and theirs, the guards' turning
   and the camera's pan and zoom go by each frame's length (each step the
@@ -147,8 +147,8 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   sailing is. Measured against 30 fps in scripted runs (walks, a guard's
   hold and the catch, the escape by pressing A); not yet played through
   many sneaks. Frame interpolation is not used in a sneak faster than 30.
-- **Sword duel frame rate (experimental).** `duel_fps` (F2 "Sword duels",
-  applies at once): the same for sword duels. 30, the default, is the
+- **Sword duel frame rate (experimental).** `duel_fps` (F2 Debug tab "Sword
+  duels", applies at once): the same for sword duels. 30 is the
   console's; 60, 90, 120, 144 or 240 (0 unlocked) run the duel that many
   times a second with the pace it has at 30: the duel times its moves by the
   game clock, which faster frames now share out instead of rounding each
@@ -158,27 +158,27 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   30th and moves a share of it each frame. Paced as sailing is. Measured
   against 30 fps in scripted duels (the fighters' animation within 1%, the
   duel ending at the same moment); not yet played through many duels.
-- **Dancing frame rate (experimental).** `dance_fps` (F2 "Dancing", applies
+- **Dancing frame rate (experimental).** `dance_fps` (F2 Debug tab "Dancing", applies
   at once): the dancing, which the console draws 60 times a second. Its
   steps, prompts and camera follow the music and the game's clock, so 90,
   120, 144, 240 or 0 (unlocked) only let the frames come faster, paced as
-  sailing is; the default, 60, is the console's.
-- **Town frame rate (experimental).** `town_fps` (F2 "Town frame rate"):
+  sailing is; 60 is the console's.
+- **Town frame rate (experimental).** `town_fps` (F2 Debug tab "Towns and rooms"):
   the tavern, the governor's room and the town's other rooms, which the
   console draws 33 times a second (a 30 ms wait, frame cap or not). Their
   characters and camera already run on the game's real-time clock, so 60,
   90, 120, 144, 240 or 0 (unlocked) only lets the frames come faster, paced
-  as sailing and battles are; the default, 30, keeps the console's 33.
+  as sailing and battles are; 30 keeps the console's 33.
   The governor's room also skips the 10 ms pause its dialog loop takes
   every frame, which otherwise held it to about 60 (90 on and off), as do
   the town's dialogs without a room (dividing the plunder). Above 60 the
   town menu and the screens it opens (merchant, shipwright, plunder,
   status) follow it too, instead of the 60 of the vblank, and so does the
   world map tab, its stick scrolling as fast as it does at 60 (as at sea).
-- **Menu frame rate (experimental).** `menu_fps` (F2 Display tab "Menus",
+- **Menu frame rate (experimental).** `menu_fps` (F2 Debug tab "Menus",
   applies at once): the front end -- the title, the main menu, the new
   career pages, loading and saving -- which the console draws 60 times a
-  second (a 16 ms pause a frame, then the vblank). 60, the default, keeps
+  second (a 16 ms pause a frame, then the vblank). 60 keeps
   that; 90, 120, 144, 240 or 0 (unlocked) let the frames come faster, paced
   by the PC's clock as sailing is. Its page changes and animations run on
   the game's real-time clock, so they keep their speed. With `sea_fps`
