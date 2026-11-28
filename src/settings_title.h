@@ -57,6 +57,13 @@ static const struct {
       "# the battle that many times a second, its troops, fights, flags and\n"
       "# timers at the speed they have at 30; 0 is unlocked. Paced as sea_fps\n"
       "# is. Applies at once from the F2 menu.     [RECOMP_PIRATES_LAND_FPS]\n" },
+    { "sneak_fps", "30",
+      "# Experimental: the frame rate when sneaking into a town, at the\n"
+      "# game's own speed: 30 (the default) as the console; 60, 90, 120, 144\n"
+      "# or 240 draw it that many times a second, you, the guards, the camera\n"
+      "# and the timers at the speed they have at 30; 0 is unlocked. Paced as\n"
+      "# sea_fps is. Applies at once from the F2 menu.\n"
+      "#                                           [RECOMP_PIRATES_SNEAK_FPS]\n" },
     { "duel_fps", "30",
       "# Experimental: the frame rate in sword duels, at the game's own\n"
       "# speed: 30 (the default) as the console; 60, 90, 120, 144 or 240 run\n"
