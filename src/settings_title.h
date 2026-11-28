@@ -34,62 +34,49 @@ static const struct {
       "# centered keeps them where the console draws them, in the middle 4:3\n"
       "# of the picture. No effect at 4:3. Applies at once from the F2 menu.\n"
       "#                                         [RECOMP_PIRATES_HUD_LAYOUT]\n" },
-    { "sea_fps", "30",
-      "# Experimental: the frame rate while sailing, at the game's own speed:\n"
-      "# 30 (the default) sails as the console does (frame interpolation, if\n"
-      "# on, then shows 60); 60, 90, 120, 144 or 240 run the sea's ships, wind,\n"
-      "# calendar and timers that many times a second at the speed they have\n"
-      "# at 30; 0 is unlocked (as fast as the PC draws it). Above 60 the sea\n"
-      "# is paced by the PC's clock, so a monitor that refreshes that fast (or\n"
-      "# variable refresh) shows every frame. Battles have battle_fps; duels,\n"
-      "# towns and menus are not changed. Applies at once from the F2 menu.\n"
+    { "game_fps", "30",
+      "# Experimental: the game's frame rate, in every scene, at the game's own\n"
+      "# speed: 30 or console (the default) runs each scene at the console's\n"
+      "# rate (30 at sea, in battles, duels, the sneak, 33 in towns, 60 in menus\n"
+      "# and the dancing); 60, 90, 120, 144 or 240 run them all that many times\n"
+      "# a second; 0 is unlocked (as fast as the PC draws it). Above 60 a\n"
+      "# scene is paced by the PC's clock, so a monitor that refreshes that\n"
+      "# fast (or variable refresh) shows every frame. Each scene below follows\n"
+      "# it unless its own line says a rate.\n"
+      "# Applies at once from the F2 menu (Display > Frame rate).\n"
+      "#                                            [RECOMP_PIRATES_GAME_FPS]\n" },
+    { "sea_fps", "default",
+      "# Each scene's own frame rate, over game_fps (the F2 menu's Debug tab):\n"
+      "# default (No override) follows game_fps; 30 is the console's rate\n"
+      "# (33 in towns, 60 for the dancing and the menus, the lowest those\n"
+      "# take); 60, 90, 120, 144 or 240; 0 unlocked. Each applies at once.\n"
+      "# A file from before game_fps had every scene at its console rate:\n"
+      "# the game makes those default at its next start.\n"
+      "#\n"
+      "# Sailing: the ship, the wind, other ships and the calendar.\n"
       "#                                             [RECOMP_PIRATES_SEA_FPS]\n" },
-    { "battle_fps", "30",
-      "# Experimental: the frame rate in ship battles, at the game's own\n"
-      "# speed: 30 (the default) as the console; 60, 90, 120, 144 or 240 run\n"
-      "# the battle's ships, cannonballs, wind and timers that many times a\n"
-      "# second at the speed they have at 30 (slow motion included); 0 is\n"
-      "# unlocked. Paced as sea_fps is. Applies at once from the F2 menu.\n"
+    { "battle_fps", "default",
+      "# Ship battles: ships, cannonballs, wind and timers (slow motion too).\n"
       "#                                          [RECOMP_PIRATES_BATTLE_FPS]\n" },
-    { "land_fps", "30",
-      "# Experimental: the frame rate in land battles, at the game's own\n"
-      "# speed: 30 (the default) as the console; 60, 90, 120, 144 or 240 draw\n"
-      "# the battle that many times a second, its troops, fights, flags and\n"
-      "# timers at the speed they have at 30; 0 is unlocked. Paced as sea_fps\n"
-      "# is. Applies at once from the F2 menu.     [RECOMP_PIRATES_LAND_FPS]\n" },
-    { "sneak_fps", "30",
-      "# Experimental: the frame rate when sneaking into a town, at the\n"
-      "# game's own speed: 30 (the default) as the console; 60, 90, 120, 144\n"
-      "# or 240 draw it that many times a second, you, the guards, the camera\n"
-      "# and the timers at the speed they have at 30; 0 is unlocked. Paced as\n"
-      "# sea_fps is. Applies at once from the F2 menu.\n"
+    { "land_fps", "default",
+      "# Land battles: the troops, their fights, the flags and timers.\n"
+      "#                                            [RECOMP_PIRATES_LAND_FPS]\n" },
+    { "sneak_fps", "default",
+      "# Sneaking into a town: you, the guards, the camera and timers.\n"
       "#                                           [RECOMP_PIRATES_SNEAK_FPS]\n" },
-    { "duel_fps", "30",
-      "# Experimental: the frame rate in sword duels, at the game's own\n"
-      "# speed: 30 (the default) as the console; 60, 90, 120, 144 or 240 run\n"
-      "# the duel's fighters, their swings, the crowd and the camera that many\n"
-      "# times a second at the speed they have at 30; 0 is unlocked. Paced as\n"
-      "# battle_fps is. Applies at once from the F2 menu.\n"
+    { "duel_fps", "default",
+      "# Sword duels: the fighters, their swings, the crowd and the camera.\n"
       "#                                            [RECOMP_PIRATES_DUEL_FPS]\n" },
-    { "dance_fps", "60",
-      "# Experimental: the frame rate of the dancing, which the console draws\n"
-      "# 60 times a second: 60 (the default) as the console; 90, 120, 144 or\n"
-      "# 240, or 0 unlocked, draw it that often, its steps and prompts still\n"
-      "# with the music. Applies at once from the F2 menu.\n"
+    { "dance_fps", "default",
+      "# The dancing, still with the music (never below its console 60).\n"
       "#                                           [RECOMP_PIRATES_DANCE_FPS]\n" },
-    { "town_fps", "30",
-      "# Experimental: the frame rate in a town's rooms -- the tavern, the\n"
-      "# governor's -- which the console draws 33 times a second: 30 (the\n"
-      "# default) as the console; 60, 90, 120, 144 or 240, or 0 unlocked,\n"
-      "# draw them that often, at the speed they have on the console. Applies\n"
-      "# at once from the F2 menu.                  [RECOMP_PIRATES_TOWN_FPS]\n" },
-    { "menu_fps", "60",
-      "# Experimental: the frame rate of the front end -- the title, the main\n"
-      "# menu, the new career pages, loading and saving -- which the console\n"
-      "# draws 60 times a second: 60 (the default) as the console; 90, 120,\n"
-      "# 144 or 240, or 0 unlocked, draw it that often, its animations at the\n"
-      "# speed they have on the console. Applies at once from the F2 menu.\n"
-      "#                                          [RECOMP_PIRATES_MENU_FPS]\n" },
+    { "town_fps", "default",
+      "# A town's rooms: the tavern, the governor's (the console's 33).\n"
+      "#                                            [RECOMP_PIRATES_TOWN_FPS]\n" },
+    { "menu_fps", "default",
+      "# The front end: the title, the main menu, the new career pages,\n"
+      "# loading and saving (never below its console 60).\n"
+      "#                                            [RECOMP_PIRATES_MENU_FPS]\n" },
     { "water_reflection", "1",
       "# The ship's reflection in the sea: 1 (the default) as the console\n"
       "# draws it, a faint rippled smear; clear (Improved in the F2 menu)\n"

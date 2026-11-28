@@ -841,4 +841,25 @@ Each one, with the reason it exists:
   old path exactly. Test switches: `RECOMP_HDR_FORCE=1` makes the swap
   chain HDR on any monitor; `RECOMP_HDR_PROBE_PIXEL=x,y` logs that back
   buffer pixel in nits each second. Vulkan has no HDR output. Numbered
-  0082: 0080 is the town sneak row and 0081 is left for the F2 restyle.
+  0082: 0080 is the town sneak row; the F2 restyle came after, as 0083.
+
+
+- **0083-settings-menu-restyle-debug-tab** (`src/d3d/d3d8_menu.cpp`,
+  `src/d3d/d3d8_overlay.h`, `src/hle/hle_settings_menu.c`). The F2 menu's
+  new look, after another recomp's menu Sorin pointed to: it covers the
+  window, with a top bar (title, the tabs between LB and RB chips, the
+  current tab lit and underlined), an opaque slate column of one-line rows
+  on the left (the value in a box on the row's right: two values side by
+  side with the current one lit, more between arrows; section headings with
+  a rule; a thin scroll bar), the game dimmed on the right under a card
+  describing the selected setting (its default, "Experimental", when it
+  applies and any warning as notes behind a bar), and a hint bar at the
+  bottom with Continue / Quit game and what each pad key does. A new Debug
+  tab, last, holds "Frame rate by scene" (the scene rows that were on
+  Display, each now No override, the console's rate, 60 ... 240 or
+  Unlocked); Display's "Frame rate" group gets "Frame rate" for the game's
+  `game_fps` (Console, 60 ... 240, Unlocked) over Frame rate cap and Frame
+  interpolation. `D3D8MenuRow.other` (a two-value row's other name) and
+  `D3D8Menu.info_tags` are new. Its "Town sneak" row (0080) moves to the
+  Debug tab with the others. Numbered 0083, after the HDR output (0082); the HDR group on
+  Display keeps its rows.

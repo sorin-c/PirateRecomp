@@ -1135,6 +1135,71 @@ static int pirates_parse_fps(const char *v)
     return r > 1000 ? 1000 : (int)r;
 }
 
+/* Whether a setting's text is the word w, spaces around it allowed. */
+static int pirates_word_is(const char *v, const char *w)
+{
+    size_t n = strlen(w);
+
+    if (!v)
+        return 0;
+    while (*v == ' ' || *v == '\t')
+        v++;
+    if (strncmp(v, w, n) != 0)
+        return 0;
+    for (v += n; *v == ' ' || *v == '\t' || *v == '\r' || *v == '\n'; v++)
+        ;
+    return *v == '\0';
+}
+
+/* A scene's frame-rate setting, as its reader parses it. The scene's own key
+ * (sea_fps, battle_fps, ... or its environment variable) when it says a rate;
+ * when it is "default" (the F2 menu's No override, on its Debug tab) or
+ * empty, the game's frame rate, game_fps (RECOMP_PIRATES_GAME_FPS, the F2
+ * menu's Display > Frame rate), which is the same for every scene. game_fps
+ * at 30 or "console" (its default) gives NULL: each reader's own console
+ * rate, 30 at sea, 33 in towns, 60 in the menus and the dancing. */
+static const char *pirates_scene_fps(const char *env, const char *key)
+{
+    const char *v = recomp_config_lookup(env, key);
+
+    if (v && *v && !pirates_word_is(v, "default"))
+        return v;
+    v = recomp_config_lookup("RECOMP_PIRATES_GAME_FPS", "game_fps");
+    if (!v || !*v || pirates_word_is(v, "console") || pirates_word_is(v, "30") ||
+        pirates_word_is(v, "default"))
+        return NULL;
+    return v;
+}
+
+/* A settings file from before game_fps: every scene had its own rate, and
+ * the launcher wrote each one out at its default (30, or 60 for the menus and
+ * the dancing). Read as overrides, those would keep every scene at the
+ * console's rate whatever game_fps says, so a scene still at its old default
+ * becomes "default" (No override) once, at start. A rate the player chose
+ * stays an override. Nothing is written when the file already has game_fps
+ * or no scene is at its old default. */
+void pirates_fps_settings_upgrade(void)
+{
+    static const struct { const char *key, *old_def; } scenes[] = {
+        { "sea_fps", "30" }, { "battle_fps", "30" }, { "land_fps", "30" },
+        { "duel_fps", "30" }, { "town_fps", "30" }, { "sneak_fps", "30" },
+        { "dance_fps", "60" }, { "menu_fps", "60" },
+    };
+    size_t i;
+
+    if (recomp_config_lookup(NULL, "game_fps"))
+        return;
+    for (i = 0; i < sizeof scenes / sizeof scenes[0]; i++) {
+        const char *v = recomp_config_lookup(NULL, scenes[i].key);
+
+        if (v && pirates_word_is(v, scenes[i].old_def)) {
+            recomp_config_set(scenes[i].key, "default");
+            fprintf(stderr, "[PIRATES] %s = %s was the old default: now default "
+                    "(follows game_fps)\n", scenes[i].key, scenes[i].old_def);
+        }
+    }
+}
+
 /* step * frac: how far a phase built as counter * step is from where the
  * frame's time puts it (0 on a tick frame). */
 static uint32_t sea60_phase(uint32_t step)
@@ -1211,7 +1276,7 @@ static struct {
  * 60, 90, 120, 144 or 240, 0 unlocked (-1 here). */
 static int btl_read_rate(void)
 {
-    int r = pirates_parse_fps(recomp_config_lookup("RECOMP_PIRATES_BATTLE_FPS", "battle_fps"));
+    int r = pirates_parse_fps(pirates_scene_fps("RECOMP_PIRATES_BATTLE_FPS", "battle_fps"));
 
     if (r < 0)
         return -1;
@@ -1378,7 +1443,7 @@ static int land_scale(int v, int *rem)
  * 90, 120, 144 or 240, 0 unlocked (-1 here). */
 static int land_read_rate(void)
 {
-    int r = pirates_parse_fps(recomp_config_lookup("RECOMP_PIRATES_LAND_FPS", "land_fps"));
+    int r = pirates_parse_fps(pirates_scene_fps("RECOMP_PIRATES_LAND_FPS", "land_fps"));
 
     if (r < 0)
         return -1;
@@ -1653,7 +1718,7 @@ static struct {
 
 static int sneak_read_rate(void)
 {
-    int r = pirates_parse_fps(recomp_config_lookup("RECOMP_PIRATES_SNEAK_FPS", "sneak_fps"));
+    int r = pirates_parse_fps(pirates_scene_fps("RECOMP_PIRATES_SNEAK_FPS", "sneak_fps"));
 
     if (r < 0)
         return -1;
@@ -1959,7 +2024,7 @@ static struct {
  * a second), 60, 90, 120, 144 or 240, 0 unlocked (-1 here). */
 static int town_read_rate(void)
 {
-    int r = pirates_parse_fps(recomp_config_lookup("RECOMP_PIRATES_TOWN_FPS", "town_fps"));
+    int r = pirates_parse_fps(pirates_scene_fps("RECOMP_PIRATES_TOWN_FPS", "town_fps"));
 
     if (r < 0)
         return -1;
@@ -2072,7 +2137,7 @@ static struct {
  * 90, 120, 144 or 240, 0 unlocked (-1 here). */
 static int duel_read_rate(void)
 {
-    int r = pirates_parse_fps(recomp_config_lookup("RECOMP_PIRATES_DUEL_FPS", "duel_fps"));
+    int r = pirates_parse_fps(pirates_scene_fps("RECOMP_PIRATES_DUEL_FPS", "duel_fps"));
 
     if (r < 0)
         return -1;
@@ -2263,7 +2328,7 @@ static int32_t dance_scale(int32_t step)
 
 static int dance_read_rate(void)
 {
-    const char *v = recomp_config_lookup("RECOMP_PIRATES_DANCE_FPS", "dance_fps");
+    const char *v = pirates_scene_fps("RECOMP_PIRATES_DANCE_FPS", "dance_fps");
     int r;
 
     if (!v || !*v)
@@ -2313,7 +2378,7 @@ static void dance_frame_wait(void)
 static int sea60_read_rate(void)
 {
     const char *v;
-    int r = pirates_parse_fps(recomp_config_lookup("RECOMP_PIRATES_SEA_FPS", "sea_fps"));
+    int r = pirates_parse_fps(pirates_scene_fps("RECOMP_PIRATES_SEA_FPS", "sea_fps"));
 
     if (r < 0)
         return -1;
@@ -2895,7 +2960,7 @@ static int parch_guest_hook(uint32_t va)
  * began at 0x4D5990), so they keep their speed at any rate. */
 static int menu_read_rate(void)
 {
-    const char *v = recomp_config_lookup("RECOMP_PIRATES_MENU_FPS", "menu_fps");
+    const char *v = pirates_scene_fps("RECOMP_PIRATES_MENU_FPS", "menu_fps");
     int r;
 
     if (!v || !*v)

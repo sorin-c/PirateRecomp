@@ -58,6 +58,7 @@
 const char *recomp_config_lookup(const char *env_name, const char *key);
 int recomp_config_bool(const char *env_name, const char *key, int fallback);
 int recomp_config_int(const char *env_name, const char *key, int fallback);
+void pirates_fps_settings_upgrade(void);   /* recomp_manual.c */
 void xbox_D3D8SetOffscreenScale(unsigned width, unsigned height, unsigned scale);
 void xbox_D3D8SetOffscreenEffect(unsigned width, unsigned height, float bump_scale, float mirror);
 
@@ -472,6 +473,10 @@ static int title_main(int argc, char **argv)
      * same load time (10-16 s) and the same battle frame time.
      * RECOMP_GUEST_LOCK=0 (or guest_lock = 0 in pirates.ini) runs without
      * it. */
+    /* A settings file from before game_fps: scenes still at their old
+     * default rate follow game_fps from now on (recomp_manual.c). */
+    pirates_fps_settings_upgrade();
+
     /* pirates.ini, beside the executable (src/settings_title.h): switches
      * the toolkit reads only from the environment are set from the file
      * here, unless the environment already says. */

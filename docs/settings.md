@@ -75,6 +75,17 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   off by default) draws the frame in between, so you see 60 while the game
   keeps its original speed; menus, towns and the governor's rooms already
   run at 60. Characters, ships and the camera are all interpolated.
+- **Frame rate (experimental).** `game_fps` (F2 Display tab "Frame rate",
+  applies at once) is the game's frame rate in every scene, at its normal
+  speed: `30` or `console`, the default, runs each scene at the console's
+  own rate (30 at sea, in battles, duels and the town sneak, 33 in towns, 60 in
+  the menus and the dancing); 60, 90, 120, 144 or 240 run them all that many times a
+  second; 0 is unlocked. Each scene's own setting below (the F2 Debug tab,
+  "Frame rate by scene") is `default` (No override) unless set, and then
+  follows `game_fps`; any other value sets that scene apart. A settings
+  file from before `game_fps` had every scene written at its console rate:
+  at its next start the game turns those into `default`, and keeps any rate
+  chosen by hand as an override.
 - **Sailing frame rate (experimental).** `sea_fps` (F2 "Sailing frame
   rate", applies at once): 30, the default, sails as the console does; 60,
   90, 120, 144 or 240 run the sea itself that many times a second, and 0 is
@@ -122,8 +133,8 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   Paced as sailing is. Measured against 30 fps in scripted battles; not yet
   played through many battles. Frame interpolation is not used in a land
   battle faster than 30.
-- **Town sneak frame rate (experimental).** `sneak_fps` (F2 Display tab
-  "Town sneak", applies at once): the same for sneaking into a town past its
+- **Town sneak frame rate (experimental).** `sneak_fps` (F2 Debug tab
+  "Town sneak", applies at once; `default` follows `game_fps`): the same for sneaking into a town past its
   guards. 30, the default, is the console's; 60, 90, 120, 144 or 240 (0
   unlocked) draw it that many times a second at the speed it has at 30: your
   steps and the guards', your animations and theirs, the guards' turning
@@ -225,14 +236,15 @@ defaults. Every line names the environment variable that overrides it, so a
 | `hud_layout` | `edges` | Widescreen HUD: `edges` (corners) or `centered` (the console's middle 4:3). |
 | `frame_cap` | `adaptive` | `adaptive` (as the console), `60`, `30` or `0` (off). |
 | `frame_interp` | `1` | `1` off, `2` shows 60 where the game runs at 30. |
-| `sea_fps` | `30` | Experimental: frames a second while sailing (`0` unlocked). |
-| `battle_fps` | `30` | Experimental: frames a second in ship battles (`0` unlocked). |
-| `land_fps` | `30` | Experimental: frames a second in land battles (`0` unlocked). |
-| `sneak_fps` | `30` | Experimental: frames a second when sneaking into a town (`0` unlocked). |
-| `duel_fps` | `30` | Experimental: frames a second in sword duels (`0` unlocked). |
-| `dance_fps` | `60` | Experimental: frames a second while dancing (`0` unlocked). |
-| `town_fps` | `30` | Experimental: frames a second in a town: the menu, its rooms (the tavern, the governor's) and its other screens (`0` unlocked). |
-| `menu_fps` | `60` | Experimental: frames a second in the front end: title, main menu, new career, load and save (`0` unlocked). |
+| `game_fps` | `30` | Experimental: frames a second in every scene (`30`/`console` each scene at the console rate, `0` unlocked). |
+| `sea_fps` | `default` | Experimental (F2 Debug tab; `default` follows `game_fps`): frames a second while sailing (`0` unlocked). |
+| `battle_fps` | `default` | Experimental (F2 Debug tab; `default` follows `game_fps`): frames a second in ship battles (`0` unlocked). |
+| `land_fps` | `default` | Experimental (F2 Debug tab; `default` follows `game_fps`): frames a second in land battles (`0` unlocked). |
+| `sneak_fps` | `default` | Experimental (F2 Debug tab; `default` follows `game_fps`): frames a second when sneaking into a town (`0` unlocked). |
+| `duel_fps` | `default` | Experimental (F2 Debug tab; `default` follows `game_fps`): frames a second in sword duels (`0` unlocked). |
+| `dance_fps` | `default` | Experimental (F2 Debug tab; `default` follows `game_fps`): frames a second while dancing (`0` unlocked). |
+| `town_fps` | `default` | Experimental (F2 Debug tab; `default` follows `game_fps`): frames a second in a town: the menu, its rooms (the tavern, the governor's) and its other screens (`0` unlocked). |
+| `menu_fps` | `default` | Experimental (F2 Debug tab; `default` follows `game_fps`): frames a second in the front end: title, main menu, new career, load and save (`0` unlocked). |
 | `fps_overlay` | `0` | Frame-rate counter. |
 | `fullscreen` | `0` | Fullscreen window. |
 | `anisotropy` | `0` | Texture sharpness: `0` off (the game's own filtering), `1`, `2`, `4`, `8` or `16`. |
