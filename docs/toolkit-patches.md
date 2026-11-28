@@ -821,7 +821,8 @@ Each one, with the reason it exists:
   nits) and `hdr_peak` (`auto`, `off` or nits), live from three rows in a
   new "HDR" group of the F2 Display tab. While it is on and the window's
   monitor is in HDR mode (`IDXGIOutput6::GetDesc1`, looked at again every
-  second through a factory remade when it goes out of date), the D3D11
+  second while HDR is asked for, through a factory remade when it goes out
+  of date; a failed switch is retried after 10 and 20 s), the D3D11
   flip-model swap chain is resized to R16G16B16A16_FLOAT with the scRGB
   colour space, and `rhi_swapchain_view` hands out an 8-bit target of the
   same size instead of the back buffer, so every pass draws as before. At
