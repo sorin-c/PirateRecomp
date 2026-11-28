@@ -263,7 +263,7 @@ index 000d798..b54e373 100644
  
  extern const RhiBackend rhi_d3d11_backend;
 diff --git a/src/d3d/rhi_d3d11.c b/src/d3d/rhi_d3d11.c
-index 3a62a46..6c96ce5 100644
+index 3a62a46..8e589f1 100644
 --- a/src/d3d/rhi_d3d11.c
 +++ b/src/d3d/rhi_d3d11.c
 @@ -13,6 +13,7 @@
@@ -296,7 +296,7 @@ index 3a62a46..6c96ce5 100644
  }
  
  static int make_back_buffer_view(void)
-@@ -250,15 +259,706 @@ static int make_back_buffer_view(void)
+@@ -250,15 +259,709 @@ static int make_back_buffer_view(void)
      if (FAILED(hr))
          return -1;
      hr = ID3D11Device_CreateRenderTargetView(g_dev, (ID3D11Resource *)bb, NULL, &g_present_rtv);
@@ -648,13 +648,16 @@ index 3a62a46..6c96ce5 100644
 +             * chain; the switch failed and is retried later. */
 +            fprintf(stderr, "[RHI] d3d11: HDR off: SDR colour space refused (0x%08lX); "
 +                    "staying HDR\n", (unsigned long)cs);
++            /* Active follows the buffers' format: FP16 buffers are only
++             * shown through the mapping pass, 8-bit ones only without it. */
 +            if (SUCCEEDED(IDXGISwapChain_ResizeBuffers(g_swap, 0, desc.BufferDesc.Width,
 +                                                       desc.BufferDesc.Height, HDR_OUT_FORMAT,
-+                                                       g_swap_flags)) &&
-+                SUCCEEDED(IDXGISwapChain3_SetColorSpace1(sc3, DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709))) {
++                                                       g_swap_flags))) {
 +                g_hdr_active = 1;
++                if (FAILED(IDXGISwapChain3_SetColorSpace1(sc3, DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709)))
++                    fprintf(stderr, "[RHI] d3d11: HDR off: scRGB colour space refused too\n");
 +            } else {
-+                fprintf(stderr, "[RHI] d3d11: HDR off: could not go back to HDR either; "
++                fprintf(stderr, "[RHI] d3d11: HDR off: could not go back to HDR buffers either; "
 +                        "presenting 8-bit\n");
 +            }
 +            if (make_back_buffer_view() != 0)
@@ -1005,7 +1008,7 @@ index 3a62a46..6c96ce5 100644
  /* The swap chain is the flip model where the system has it: a variable-
   * refresh display can only follow a flip-model swap chain, and only one
   * created to allow tearing can present without waiting for a vblank while
-@@ -272,7 +972,6 @@ static int make_back_buffer_view(void)
+@@ -272,7 +975,6 @@ static int make_back_buffer_view(void)
  #ifndef DXGI_SWAP_EFFECT_FLIP_DISCARD
  #define DXGI_SWAP_EFFECT_FLIP_DISCARD ((DXGI_SWAP_EFFECT)4)
  #endif
@@ -1013,7 +1016,7 @@ index 3a62a46..6c96ce5 100644
  static int  g_tearing;      /* created with ALLOW_TEARING */
  static int  g_vrr;          /* rhi_swapchain_set_vrr */
  
-@@ -341,6 +1040,8 @@ static int d_device_create(const RhiDeviceDesc *dd)
+@@ -341,6 +1043,8 @@ static int d_device_create(const RhiDeviceDesc *dd)
          if (SUCCEEDED(hr)) {
              g_swap_flags = tries[t].flags;
              g_tearing = (tries[t].flags & D3D11_SC_FLAG_ALLOW_TEARING) != 0;
@@ -1022,7 +1025,7 @@ index 3a62a46..6c96ce5 100644
              fprintf(stderr, "[RHI] d3d11: %s swap chain\n", tries[t].name);
              break;
          }
-@@ -367,6 +1068,7 @@ static void d_device_destroy(void)
+@@ -367,6 +1071,7 @@ static void d_device_destroy(void)
      occl_release();
      staging_release();
      release_back_buffer_view();
@@ -1030,7 +1033,7 @@ index 3a62a46..6c96ce5 100644
      if (g_swap) { IDXGISwapChain_Release(g_swap); g_swap = NULL; }
      if (g_ctx)  { ID3D11DeviceContext_Release(g_ctx); g_ctx = NULL; }
      if (g_dev)  { ID3D11Device_Release(g_dev); g_dev = NULL; }
-@@ -386,18 +1088,31 @@ static int d_swapchain_resize(uint32_t w, uint32_t h)
+@@ -386,18 +1091,31 @@ static int d_swapchain_resize(uint32_t w, uint32_t h)
  {
      ID3D11RenderTargetView *saved_rtv = NULL;
      ID3D11DepthStencilView *saved_dsv = NULL;
@@ -1064,7 +1067,7 @@ index 3a62a46..6c96ce5 100644
      if (saved_rtv) ID3D11RenderTargetView_Release(saved_rtv);
      if (saved_dsv) ID3D11DepthStencilView_Release(saved_dsv);
      return ok;
-@@ -428,21 +1143,36 @@ static void d_swapchain_set_vrr(int on)
+@@ -428,21 +1146,36 @@ static void d_swapchain_set_vrr(int on)
  static int32_t d_present(uint32_t interval)
  {
      UINT flags = (interval == 0 && g_vrr && g_tearing) ? DXGI_PRESENT_ALLOW_TEARING : 0;
@@ -1104,7 +1107,7 @@ index 3a62a46..6c96ce5 100644
      img = rhi_d3d11_wrap_image(bb);
      ID3D11Texture2D_Release(bb);
      if (!img)
-@@ -1379,6 +2109,7 @@ const RhiBackend rhi_d3d11_backend = {
+@@ -1379,6 +2112,7 @@ const RhiBackend rhi_d3d11_backend = {
      d_set_raster_state, d_draw, d_draw_indexed, d_clear_color, d_clear_depth,
      d_image_copy,
      d_occlusion_begin, d_occlusion_end, d_occlusion_result,
