@@ -1,5 +1,5 @@
 diff --git a/src/d3d/d3d8_menu.cpp b/src/d3d/d3d8_menu.cpp
-index 2e5f2dd..efa56a0 100644
+index 2e5f2dd..1f018d9 100644
 --- a/src/d3d/d3d8_menu.cpp
 +++ b/src/d3d/d3d8_menu.cpp
 @@ -10,12 +10,15 @@
@@ -303,7 +303,7 @@ index 2e5f2dd..efa56a0 100644
              if (sel_bot + 8 * u > g_scroll + view_h) g_scroll = sel_bot + 8 * u - view_h;
          }
          if (m.sel < 0 && m.button < 0) g_scroll = 0;
-@@ -463,84 +553,97 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
+@@ -463,84 +553,99 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
      if (g_scroll > total - view_h) g_scroll = total - view_h;
      if (g_scroll < 0) g_scroll = 0;
  
@@ -403,11 +403,13 @@ index 2e5f2dd..efa56a0 100644
 -            text(g.small, vx1 - text_w(g.small, d), line2, kMuted, d);
 +        int step_click = 0;                         /* what a click on it does */
 +        bool clicked_here = clicked && visible && inside(b, cx, cy) && inside(list, cx, cy);
-+        if (r.count == 2) {
-+            /* Two values: both shown, side by side, the current one lit.
-+             * Their names come from the row's own value for the current
-+             * one; the other is not known here, so the pair is drawn as
-+             * the current value in its half and the half beside it dark. */
++        /* Two values side by side when both names fit their half (a long
++         * one, such as a note in the name, goes between arrows instead). */
++        const float half_room = (v.x1 - v.x0) * 0.5f - 16 * u;
++        if (r.count == 2 && text_w(g.body_bold, r.value) <= half_room &&
++            text_w(g.body, r.other) <= half_room) {
++            /* Value 0 on the left, value 1 on the right, the current one
++             * lit: its name is the row's value, the other's is `other`. */
 +            const float mid = floorf((v.x0 + v.x1) * 0.5f);
 +            Box half[2] = { { v.x0, v.y0, mid, v.y1 }, { mid, v.y0, v.x1, v.y1 } };
 +            rect(v, kVal, 2 * u);
@@ -464,7 +466,7 @@ index 2e5f2dd..efa56a0 100644
          }
          y += row_h + gap;
      }
-@@ -550,41 +653,103 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
+@@ -550,41 +655,103 @@ void layout_and_draw(const D3D8Menu &m, float W, float H, float px0, float py0)
          if (hover >= 0 && hover != m.sel)
              push_action(D3D8_MENU_ACT_HOVER, hover, 0);
      }
@@ -588,7 +590,7 @@ index 2e5f2dd..efa56a0 100644
      }
  }
  
-@@ -769,12 +934,14 @@ extern "C" int d3d8_menu_present(RhiView *out, unsigned w, unsigned h,
+@@ -769,12 +936,14 @@ extern "C" int d3d8_menu_present(RhiView *out, unsigned w, unsigned h,
      if (!out || !w || !h) return 0;
      if (!gpu_create()) return 0;
  
@@ -609,7 +611,7 @@ index 2e5f2dd..efa56a0 100644
      ImGui::SetCurrentContext(g.ctx);
      if (!fonts_for(u)) return 0;
      U = u;
-@@ -784,11 +951,7 @@ extern "C" int d3d8_menu_present(RhiView *out, unsigned w, unsigned h,
+@@ -784,11 +953,7 @@ extern "C" int d3d8_menu_present(RhiView *out, unsigned w, unsigned h,
      io.DeltaTime = 1.0f / 60.0f;
      ImGui::NewFrame();
      dl = ImGui::GetForegroundDrawList();
