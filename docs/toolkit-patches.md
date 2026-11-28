@@ -813,3 +813,9 @@ Each one, with the reason it exists:
   at once), after "Sea battles": the land battle's frame rate, paced in
   `src/recomp_manual.c`. Numbered 0079: 0076 to 0078 are taken (0078 is the
   headless window fix).
+
+- **0080-settings-menu-sneak-rate** (`src/hle/hle_settings_menu.c`). The F2
+  Display tab's "Frame rate by scene" group gets a "Town sneak" row for the
+  game's `sneak_fps` (30 (off), 60, 90, 120, 144, 240, Unlocked; applies at
+  once), after "Land battles": the town sneak's frame rate, paced in
+  `src/recomp_manual.c`.
