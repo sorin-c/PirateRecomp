@@ -263,7 +263,7 @@ index 000d798..b54e373 100644
  
  extern const RhiBackend rhi_d3d11_backend;
 diff --git a/src/d3d/rhi_d3d11.c b/src/d3d/rhi_d3d11.c
-index 3a62a46..9fd9b11 100644
+index 3a62a46..f7887ad 100644
 --- a/src/d3d/rhi_d3d11.c
 +++ b/src/d3d/rhi_d3d11.c
 @@ -13,6 +13,7 @@
@@ -296,7 +296,7 @@ index 3a62a46..9fd9b11 100644
  }
  
  static int make_back_buffer_view(void)
-@@ -250,15 +259,659 @@ static int make_back_buffer_view(void)
+@@ -250,15 +259,689 @@ static int make_back_buffer_view(void)
      if (FAILED(hr))
          return -1;
      hr = ID3D11Device_CreateRenderTargetView(g_dev, (ID3D11Resource *)bb, NULL, &g_present_rtv);
@@ -377,6 +377,7 @@ index 3a62a46..9fd9b11 100644
 +static int  g_hdr_broken;       /* its shaders could not be made, or it failed too often */
 +static int  g_hdr_failures;     /* switches to HDR that failed, in a row */
 +static ULONGLONG g_hdr_retry_at; /* not before this after a failure */
++static int  g_hdr_failed_want = -1; /* the state the failures were switching to */
 +static int  g_hdr_seen_serial = -1;
 +static ULONGLONG g_hdr_probe_at;
 +static int  g_hdr_display;      /* the window's display is in HDR mode */
@@ -448,6 +449,7 @@ index 3a62a46..9fd9b11 100644
 +    g_hdr_probe_at = 0;
 +    g_hdr_failures = 0;
 +    g_hdr_retry_at = 0;
++    g_hdr_failed_want = -1;
 +    InterlockedExchange(&g_hdr_st_active, 0);
 +}
 +
@@ -640,9 +642,17 @@ index 3a62a46..9fd9b11 100644
 +        HRESULT cs = IDXGISwapChain3_SetColorSpace1(sc3, on ? DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709
 +                                                           : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
 +        g_hdr_active = on;
-+        if (make_back_buffer_view() == 0 && SUCCEEDED(cs)) {
++        if (!on) {
++            /* Back to 8-bit: the buffers are what an SDR swap chain has
++             * whatever the colour space says, and DXGI shows an 8-bit
++             * buffer as SDR; a refused G22 is said and not fatal. */
++            if (FAILED(cs))
++                fprintf(stderr, "[RHI] d3d11: HDR off: SDR colour space refused (0x%08lX)\n",
++                        (unsigned long)cs);
++            ok = make_back_buffer_view() == 0;
++        } else if (make_back_buffer_view() == 0 && SUCCEEDED(cs)) {
 +            ok = 1;
-+        } else if (on) {
++        } else {
 +            /* Back to the 8-bit swap chain it was. Each step is checked: if
 +             * the buffers cannot go back to 8-bit, they are still FP16, and
 +             * the renderer must say so (it maps into them as it would for
@@ -696,8 +706,10 @@ index 3a62a46..9fd9b11 100644
 +        return;
 +    if (serial == g_hdr_seen_serial && now < g_hdr_probe_at)
 +        return;
-+    if (serial != g_hdr_seen_serial)
++    if (serial != g_hdr_seen_serial) {
 +        g_hdr_retry_at = 0;             /* a new request: try again at once */
++        g_hdr_failures = 0;
++    }
 +    g_hdr_probe_at = now + 1000;
 +    g_hdr_seen_serial = (int)serial;
 +    /* Off and staying off: nothing to look at. */
@@ -706,14 +718,21 @@ index 3a62a46..9fd9b11 100644
 +    hdr_probe_display();
 +    force = env_on("RECOMP_HDR_FORCE");
 +    want = InterlockedCompareExchange(&g_hdr_req_on, 0, 0) && g_flip && (g_hdr_display || force);
++    /* The failures were on the way to the other state (Windows' HDR switch
++     * or the window's screen changed since): start afresh. */
++    if (g_hdr_failures && want != g_hdr_failed_want) {
++        g_hdr_failures = 0;
++        g_hdr_retry_at = 0;
++    }
 +    if (want != g_hdr_active && now < g_hdr_retry_at) {
 +        /* waiting after a failure */
 +    } else if (want != g_hdr_active) {
 +        if (hdr_switch(want) != 0) {
 +            fprintf(stderr, "[RHI] d3d11: HDR output could not be turned %s; staying %s\n",
 +                    want ? "on" : "off", g_hdr_active ? "HDR" : "SDR");
-+            /* Try again in 10 s, then 20, then give up until the next start
-+             * (a request from the menu tries once more). */
++            /* Try again in 10 s, then 20, then give up until something
++             * changes: a request from the menu, or the state wanted. */
++            g_hdr_failed_want = want;
 +            if (++g_hdr_failures >= 3 && !g_hdr_broken) {
 +                fprintf(stderr, "[RHI] d3d11: HDR output failed three times; not trying again\n");
 +                g_hdr_retry_at = (ULONGLONG)-1;
@@ -723,6 +742,7 @@ index 3a62a46..9fd9b11 100644
 +        } else {
 +            g_hdr_failures = 0;
 +            g_hdr_retry_at = 0;
++            g_hdr_failed_want = -1;
 +            if (g_hdr_active) {
 +                float paper = (float)InterlockedCompareExchange(&g_hdr_req_paper, 0, 0);
 +                float peak = hdr_peak_nits(paper);
@@ -758,8 +778,18 @@ index 3a62a46..9fd9b11 100644
 +    int x = 0, y = 0;
 +    ULONGLONG now;
 +
-+    if (!v || !*v || sscanf(v, "%d,%d", &x, &y) != 2 || x < 0 || y < 0)
-+        return;
++    {
++        char *end = NULL;
++
++        if (!v || !*v)
++            return;
++        x = (int)strtol(v, &end, 10);
++        if (!end || *end != ',')
++            return;
++        y = (int)strtol(end + 1, NULL, 10);
++        if (x < 0 || y < 0)
++            return;
++    }
 +    now = GetTickCount64();
 +    if (now < next)
 +        return;
@@ -958,7 +988,7 @@ index 3a62a46..9fd9b11 100644
  /* The swap chain is the flip model where the system has it: a variable-
   * refresh display can only follow a flip-model swap chain, and only one
   * created to allow tearing can present without waiting for a vblank while
-@@ -272,7 +925,6 @@ static int make_back_buffer_view(void)
+@@ -272,7 +955,6 @@ static int make_back_buffer_view(void)
  #ifndef DXGI_SWAP_EFFECT_FLIP_DISCARD
  #define DXGI_SWAP_EFFECT_FLIP_DISCARD ((DXGI_SWAP_EFFECT)4)
  #endif
@@ -966,7 +996,7 @@ index 3a62a46..9fd9b11 100644
  static int  g_tearing;      /* created with ALLOW_TEARING */
  static int  g_vrr;          /* rhi_swapchain_set_vrr */
  
-@@ -341,6 +993,8 @@ static int d_device_create(const RhiDeviceDesc *dd)
+@@ -341,6 +1023,8 @@ static int d_device_create(const RhiDeviceDesc *dd)
          if (SUCCEEDED(hr)) {
              g_swap_flags = tries[t].flags;
              g_tearing = (tries[t].flags & D3D11_SC_FLAG_ALLOW_TEARING) != 0;
@@ -975,7 +1005,7 @@ index 3a62a46..9fd9b11 100644
              fprintf(stderr, "[RHI] d3d11: %s swap chain\n", tries[t].name);
              break;
          }
-@@ -367,6 +1021,7 @@ static void d_device_destroy(void)
+@@ -367,6 +1051,7 @@ static void d_device_destroy(void)
      occl_release();
      staging_release();
      release_back_buffer_view();
@@ -983,7 +1013,7 @@ index 3a62a46..9fd9b11 100644
      if (g_swap) { IDXGISwapChain_Release(g_swap); g_swap = NULL; }
      if (g_ctx)  { ID3D11DeviceContext_Release(g_ctx); g_ctx = NULL; }
      if (g_dev)  { ID3D11Device_Release(g_dev); g_dev = NULL; }
-@@ -386,18 +1041,31 @@ static int d_swapchain_resize(uint32_t w, uint32_t h)
+@@ -386,18 +1071,31 @@ static int d_swapchain_resize(uint32_t w, uint32_t h)
  {
      ID3D11RenderTargetView *saved_rtv = NULL;
      ID3D11DepthStencilView *saved_dsv = NULL;
@@ -1017,7 +1047,7 @@ index 3a62a46..9fd9b11 100644
      if (saved_rtv) ID3D11RenderTargetView_Release(saved_rtv);
      if (saved_dsv) ID3D11DepthStencilView_Release(saved_dsv);
      return ok;
-@@ -428,21 +1096,36 @@ static void d_swapchain_set_vrr(int on)
+@@ -428,21 +1126,36 @@ static void d_swapchain_set_vrr(int on)
  static int32_t d_present(uint32_t interval)
  {
      UINT flags = (interval == 0 && g_vrr && g_tearing) ? DXGI_PRESENT_ALLOW_TEARING : 0;
@@ -1047,17 +1077,17 @@ index 3a62a46..9fd9b11 100644
  
 -    if (!g_swap || FAILED(IDXGISwapChain_GetBuffer(g_swap, 0, &IID_ID3D11Texture2D, (void **)&bb)))
 +    if (!g_swap)
-+        return -1;
+         return -1;
 +    if (g_hdr_active && g_sdr_tex) {
 +        bb = g_sdr_tex;
 +        ID3D11Texture2D_AddRef(bb);
 +    } else if (FAILED(IDXGISwapChain_GetBuffer(g_swap, 0, &IID_ID3D11Texture2D, (void **)&bb))) {
-         return -1;
++        return -1;
 +    }
      img = rhi_d3d11_wrap_image(bb);
      ID3D11Texture2D_Release(bb);
      if (!img)
-@@ -1379,6 +2062,7 @@ const RhiBackend rhi_d3d11_backend = {
+@@ -1379,6 +2092,7 @@ const RhiBackend rhi_d3d11_backend = {
      d_set_raster_state, d_draw, d_draw_indexed, d_clear_color, d_clear_depth,
      d_image_copy,
      d_occlusion_begin, d_occlusion_end, d_occlusion_result,
