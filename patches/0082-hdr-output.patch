@@ -1,0 +1,1177 @@
+diff --git a/src/config/recomp_config.c b/src/config/recomp_config.c
+index d153547..ecc7a68 100644
+--- a/src/config/recomp_config.c
++++ b/src/config/recomp_config.c
+@@ -456,6 +456,9 @@ void recomp_settings_defaults(RecompSettings *s)
+     s->fullscreen        = 0;
+     s->vrr               = 1;
+     s->vsync             = 1;
++    s->hdr               = 0;
++    s->hdr_brightness    = RECOMP_HDR_BRIGHTNESS_DEF;
++    s->hdr_peak          = RECOMP_HDR_PEAK_AUTO;
+     s->frame_interp      = recomp_settings_default_frame_interp();
+     s->mouse_look        = 0;
+     s->mouse_sensitivity = RECOMP_MOUSE_SENSITIVITY_DEFAULT;
+@@ -500,6 +503,9 @@ const char *recomp_config_default(const char *key)
+     else if (strcmp(key, "fullscreen") == 0)   i = d.fullscreen;
+     else if (strcmp(key, "vrr") == 0)          i = d.vrr;
+     else if (strcmp(key, "vsync") == 0)        i = d.vsync;
++    else if (strcmp(key, "hdr") == 0)          i = d.hdr;
++    else if (strcmp(key, "hdr_brightness") == 0) i = d.hdr_brightness;
++    else if (strcmp(key, "hdr_peak") == 0)     return "auto";
+     else if (strcmp(key, "frame_interp") == 0) i = d.frame_interp < 1 ? 1 : d.frame_interp;
+     else if (strcmp(key, "frame_cap") == 0)    return "adaptive";
+     else if (strcmp(key, "priority") == 0)     return "1";
+@@ -512,6 +518,38 @@ const char *recomp_config_default(const char *key)
+ 
+ static int clamp_int(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+ 
++int recomp_hdr_brightness_parse(const char *v)
++{
++    if (!v || !*v)
++        return RECOMP_HDR_BRIGHTNESS_DEF;
++    return clamp_int(atoi(v), RECOMP_HDR_BRIGHTNESS_MIN, RECOMP_HDR_BRIGHTNESS_MAX);
++}
++
++int recomp_hdr_peak_parse(const char *v)
++{
++    int n;
++
++    if (!v || !*v || strcmp(v, "auto") == 0)
++        return RECOMP_HDR_PEAK_AUTO;
++    if (off_word(v))
++        return 0;
++    n = atoi(v);
++    if (n <= 0)
++        return RECOMP_HDR_PEAK_AUTO;    /* not a number: as if unset */
++    return clamp_int(n, RECOMP_HDR_PEAK_MIN, RECOMP_HDR_PEAK_MAX);
++}
++
++/* hdr_peak as the file writes it: auto, off or nits. */
++static const char *hdr_peak_word(int peak, char *buf)
++{
++    if (peak == RECOMP_HDR_PEAK_AUTO)
++        return "auto";
++    if (peak <= 0)
++        return "off";
++    snprintf(buf, 16, "%d", clamp_int(peak, RECOMP_HDR_PEAK_MIN, RECOMP_HDR_PEAK_MAX));
++    return buf;
++}
++
+ int recomp_settings_read(const char *path, RecompSettings *s)
+ {
+     Entry saved[MAX_ENTRIES];
+@@ -581,6 +619,12 @@ int recomp_settings_read(const char *path, RecompSettings *s)
+             s->vrr = !off_word(v);
+         if ((v = from_table("vsync")) != NULL)
+             s->vsync = !off_word(v);
++        if ((v = from_table("hdr")) != NULL)
++            s->hdr = !off_word(v);
++        if ((v = from_table("hdr_brightness")) != NULL)
++            s->hdr_brightness = recomp_hdr_brightness_parse(v);
++        if ((v = from_table("hdr_peak")) != NULL)
++            s->hdr_peak = recomp_hdr_peak_parse(v);
+         if ((v = from_table("frame_interp")) != NULL)
+             s->frame_interp = clamp_int(atoi(v), 1, 4);
+         if ((v = from_table("mouse_look")) != NULL)
+@@ -639,7 +683,7 @@ static void make_parents(const char *path)
+ int recomp_settings_write(const char *path, const RecompSettings *s)
+ {
+     RecompSettings d;
+-    char hor_plus[48], reg[48], res[16];
++    char hor_plus[48], reg[48], res[16], hdr_peak[16];
+     FILE *f;
+ 
+     if (!path)
+@@ -780,6 +824,16 @@ int recomp_settings_write(const char *path, const RecompSettings *s)
+         "# 0 turns it off.                                     [RECOMP_VSYNC]\n"
+         "vsync = %d\n"
+         "\n"
++        "# HDR: with HDR on for the display in Windows (Win+Alt+B), the\n"
++        "# picture goes out as HDR. hdr_brightness is where the game's white\n"
++        "# sits, in nits (%d to %d). hdr_peak lets the brightest parts of the\n"
++        "# picture (sun, sails, sparkles) go above it, up to this many nits:\n"
++        "# auto is the display's own peak, off keeps them at hdr_brightness.\n"
++        "#              [RECOMP_HDR, RECOMP_HDR_BRIGHTNESS, RECOMP_HDR_PEAK]\n"
++        "hdr = %d\n"
++        "hdr_brightness = %d\n"
++        "hdr_peak = %s\n"
++        "\n"
+         "# Frame interpolation: draw frames between the game's own, so 2 shows\n"
+         "# 120 a second while the game itself still runs at 60. Best with\n"
+         "# variable refresh. 1 is off.                   [RECOMP_FRAME_INTERP]\n"
+@@ -797,7 +851,11 @@ int recomp_settings_write(const char *path, const RecompSettings *s)
+         res, s->widescreen, hor_plus, reg,
+         s->widescreen_2d[0] ? s->widescreen_2d : "auto",
+         s->anisotropy, s->frame_cap[0] ? s->frame_cap : "adaptive", s->fps_overlay,
+-        s->fullscreen, s->vrr, s->vsync, s->frame_interp < 1 ? 1 : s->frame_interp,
++        s->fullscreen, s->vrr, s->vsync,
++        RECOMP_HDR_BRIGHTNESS_MIN, RECOMP_HDR_BRIGHTNESS_MAX, s->hdr ? 1 : 0,
++        clamp_int(s->hdr_brightness, RECOMP_HDR_BRIGHTNESS_MIN, RECOMP_HDR_BRIGHTNESS_MAX),
++        hdr_peak_word(s->hdr_peak, hdr_peak),
++        s->frame_interp < 1 ? 1 : s->frame_interp,
+         s->mouse_look ? 1 : 0,
+         RECOMP_MOUSE_SENSITIVITY_MIN, RECOMP_MOUSE_SENSITIVITY_MAX,
+         RECOMP_MOUSE_SENSITIVITY_DEFAULT, 100000 / RECOMP_MOUSE_SENSITIVITY_DEFAULT,
+diff --git a/src/config/recomp_config.h b/src/config/recomp_config.h
+index 6205f9b..41a1fae 100644
+--- a/src/config/recomp_config.h
++++ b/src/config/recomp_config.h
+@@ -86,6 +86,12 @@ int    recomp_config_int(const char *env_name, const char *key, int fallback);
+ int    recomp_config_bool(const char *env_name, const char *key, int fallback);
+ double recomp_config_float(const char *env_name, const char *key, double fallback);
+ 
++/* hdr_brightness and hdr_peak as written, into what RecompSettings holds:
++ * nits clamped to their range; hdr_peak also auto (RECOMP_HDR_PEAK_AUTO,
++ * as is anything unreadable) and off (0). */
++int    recomp_hdr_brightness_parse(const char *v);
++int    recomp_hdr_peak_parse(const char *v);
++
+ /* RECOMP_HEADLESS / `headless`: a scripted test run that must leave the
+  * desk alone -- window off-screen and never active, no real input device
+  * read or written. Implies RECOMP_WINDOW_BACKGROUND. See recomp_config.c. */
+@@ -275,6 +281,14 @@ int  recomp_resolution_rows(void);
+  * what the file contains. The runtime still reads values one at a time
+  * through the lookups above -- that keeps the environment override
+  * visible where each setting is used -- but the file's shape is here. */
++/* hdr_peak: the display's own peak, as Windows reports it. */
++#define RECOMP_HDR_PEAK_AUTO       (-1)
++#define RECOMP_HDR_BRIGHTNESS_MIN  80
++#define RECOMP_HDR_BRIGHTNESS_MAX  1000
++#define RECOMP_HDR_BRIGHTNESS_DEF  200
++#define RECOMP_HDR_PEAK_MIN        100
++#define RECOMP_HDR_PEAK_MAX        10000
++
+ typedef struct RecompSettings {
+     /* The picture's height in rows (720, 1080, 1440, 2160...), or
+      * RECOMP_RESOLUTION_NATIVE for the display's own. Its width follows
+@@ -296,6 +310,11 @@ typedef struct RecompSettings {
+     int  fullscreen;            /* 0 or 1: borderless, on the window's monitor */
+     int  vrr;                   /* 0 or 1: present for variable refresh when fullscreen */
+     int  vsync;                 /* 0 or 1: every present waits for the display's refresh */
++    /* HDR output (rhi_swapchain_set_hdr): the picture mapped into an HDR
++     * swap chain when Windows has HDR on for the display. */
++    int  hdr;                   /* 0 or 1 */
++    int  hdr_brightness;        /* paper white in nits: where the game's white sits */
++    int  hdr_peak;              /* highlights: RECOMP_HDR_PEAK_AUTO, 0 (off) or nits */
+     int  frame_interp;          /* 1 (off) to 4: frames shown for each the game draws */
+     /* Mouse look (src/input/input_bindings.c): the mouse moves controller
+      * 1's right stick, on top of whatever is bound to it. Per title, unlike
+diff --git a/src/d3d/d3d8_device.c b/src/d3d/d3d8_device.c
+index 0c45cec..7023929 100644
+--- a/src/d3d/d3d8_device.c
++++ b/src/d3d/d3d8_device.c
+@@ -876,6 +876,9 @@ static void present_scene(void)
+     /* The screenshot key's picture: the game's alone, before the corner
+      * line, the settings menu and the touch controls go over it. */
+     d3d8_screenshot_take(fit.x, fit.y, fit.w, fit.h);
++    /* With HDR output, what comes after this is kept out of the highlight
++     * stretch: white text stays at paper white. */
++    rhi_swapchain_mark_scene();
+     d3d8_overlay_present(rhi_swapchain_view(), s->swap_width, s->swap_height, fit.x, fit.y, fit.h);
+     d3d8_touch_draw(rhi_swapchain_view(), s->swap_width, s->swap_height);
+     keep_presented();
+diff --git a/src/d3d/rhi.c b/src/d3d/rhi.c
+index 9d86be7..f2c5ed5 100644
+--- a/src/d3d/rhi.c
++++ b/src/d3d/rhi.c
+@@ -101,6 +101,27 @@ int      rhi_swapchain_readback(void *dst, uint32_t pitch, uint32_t *w, uint32_t
+ }
+ void     rhi_swapchain_set_vrr(int on)                 { if (g_rhi) g_rhi->swapchain_set_vrr(on); }
+ 
++void rhi_swapchain_set_hdr(const RhiHdr *hdr)
++{
++    if (g_rhi && g_rhi->swapchain_set_hdr && hdr)
++        g_rhi->swapchain_set_hdr(hdr);
++}
++
++int rhi_swapchain_hdr_status(RhiHdrStatus *st)
++{
++    if (g_rhi && g_rhi->swapchain_hdr_status)
++        return g_rhi->swapchain_hdr_status(st);
++    if (st)
++        memset(st, 0, sizeof *st);
++    return 0;
++}
++
++void rhi_swapchain_mark_scene(void)
++{
++    if (g_rhi && g_rhi->swapchain_mark_scene)
++        g_rhi->swapchain_mark_scene();
++}
++
+ RhiBuffer *rhi_buffer_create(const RhiBufferDesc *d, const void *init) { return g_rhi->buffer_create(d, init); }
+ void  rhi_buffer_destroy(RhiBuffer *b)                  { if (b) g_rhi->buffer_destroy(b); }
+ void *rhi_buffer_map(RhiBuffer *b, uint32_t mode)       { return g_rhi->buffer_map(b, mode); }
+diff --git a/src/d3d/rhi.h b/src/d3d/rhi.h
+index a74e1c2..89f3dc1 100644
+--- a/src/d3d/rhi.h
++++ b/src/d3d/rhi.h
+@@ -380,6 +380,38 @@ int         rhi_swapchain_readback(void *dst, uint32_t dst_pitch,
+  * thread that presents. */
+ void        rhi_swapchain_set_vrr(int on);
+ 
++/* HDR output. On, and with the display in HDR (Windows' "Use HDR" on for
++ * the screen the window is on), the swap chain becomes scRGB (FP16, linear,
++ * BT.709 primaries) and the picture -- still drawn as before, into an 8-bit
++ * target that rhi_swapchain_view now returns -- is mapped into it at each
++ * present: the game's white at paper_nits, and the brightest parts of the
++ * game's picture (not the menus and text drawn over it) stretched up to
++ * peak_nits. peak_nits 0 or not above paper_nits: no stretch; below 0: the
++ * display's own peak. Off, or a display without HDR, the swap chain is the
++ * 8-bit one it always was and nothing changes. Any thread; the presenting
++ * thread applies it after its next present. rhi_swapchain_readback reads
++ * the 8-bit picture either way, so screenshots and tests do not change. */
++typedef struct RhiHdr {
++    int   on;
++    float paper_nits;
++    float peak_nits;
++} RhiHdr;
++typedef struct RhiHdrStatus {
++    int   active;           /* the swap chain is HDR now */
++    int   display_hdr;      /* the window's display is in HDR mode */
++    float display_peak;     /* its peak in nits as Windows reports it, 0 unknown */
++    float peak_nits;        /* what highlights go up to now (active only) */
++} RhiHdrStatus;
++void        rhi_swapchain_set_hdr(const RhiHdr *hdr);
++/* 1 if the swap chain is HDR now; st (may be NULL) filled in either way. A
++ * backend without HDR reports all zero. Any thread. */
++int         rhi_swapchain_hdr_status(RhiHdrStatus *st);
++/* The game's picture is complete in rhi_swapchain_view: what is drawn into
++ * it after this (menus, counters, touch controls) is kept out of the
++ * highlight stretch. Presenting thread, between the display resolve and
++ * the overlays. A no-op unless HDR is active. */
++void        rhi_swapchain_mark_scene(void);
++
+ /* Buffers */
+ RhiBuffer *rhi_buffer_create(const RhiBufferDesc *desc, const void *initial);
+ void       rhi_buffer_destroy(RhiBuffer *b);
+diff --git a/src/d3d/rhi_backend.h b/src/d3d/rhi_backend.h
+index 000d798..b54e373 100644
+--- a/src/d3d/rhi_backend.h
++++ b/src/d3d/rhi_backend.h
+@@ -85,6 +85,11 @@ typedef struct RhiBackend {
+     int  (*occlusion_begin)(void);
+     void (*occlusion_end)(RhiOcclusion *);
+     int  (*occlusion_result)(const RhiOcclusion *, uint64_t *);
++
++    /* HDR output (rhi.h); NULL in a backend without it. */
++    void (*swapchain_set_hdr)(const RhiHdr *);
++    int  (*swapchain_hdr_status)(RhiHdrStatus *);
++    void (*swapchain_mark_scene)(void);
+ } RhiBackend;
+ 
+ extern const RhiBackend rhi_d3d11_backend;
+diff --git a/src/d3d/rhi_d3d11.c b/src/d3d/rhi_d3d11.c
+index 3a62a46..9ed9c6f 100644
+--- a/src/d3d/rhi_d3d11.c
++++ b/src/d3d/rhi_d3d11.c
+@@ -13,6 +13,7 @@
+ #define COBJMACROS
+ #include <windows.h>
+ #include <d3d11.h>
++#include <dxgi1_6.h>
+ #include <d3dcompiler.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -226,6 +227,13 @@ RhiImage *rhi_d3d11_wrap_image(void *native)
+ }
+ 
+ static void staging_release(void);
++static int  hdr_make_targets(UINT w, UINT h);
++static void hdr_release_targets(void);
++static void hdr_release_all(void);
++static int  g_hdr_active;       /* the swap chain is FP16 scRGB now (HDR output, below) */
++static UINT g_swap_flags;       /* the swap chain's creation flags */
++static ID3D11RenderTargetView *g_sdr_rtv;
++static ID3D11Texture2D        *g_sdr_tex;
+ 
+ /* ---- the device and swap chain -------------------------------------------------------- */
+ 
+@@ -240,6 +248,7 @@ static void release_back_buffer_view(void)
+         ID3D11RenderTargetView_Release(g_present_rtv);
+         g_present_rtv = NULL;
+     }
++    hdr_release_targets();
+ }
+ 
+ static int make_back_buffer_view(void)
+@@ -250,15 +259,629 @@ static int make_back_buffer_view(void)
+     if (FAILED(hr))
+         return -1;
+     hr = ID3D11Device_CreateRenderTargetView(g_dev, (ID3D11Resource *)bb, NULL, &g_present_rtv);
+-    ID3D11Texture2D_Release(bb);
+     if (FAILED(hr)) {
++        ID3D11Texture2D_Release(bb);
+         g_present_rtv = NULL;
+         return -1;
+     }
+-    g_present_view = rhi_d3d11_wrap_view(g_present_rtv, RHI_VIEW_RENDER_TARGET);
++    /* With HDR output on, the picture is drawn into the 8-bit target and
++     * mapped into this buffer at the present (HDR output, below). */
++    if (g_hdr_active) {
++        D3D11_TEXTURE2D_DESC td;
++
++        ID3D11Texture2D_GetDesc(bb, &td);
++        if (hdr_make_targets(td.Width, td.Height) != 0) {
++            ID3D11Texture2D_Release(bb);
++            return -1;
++        }
++    }
++    ID3D11Texture2D_Release(bb);
++    g_present_view = rhi_d3d11_wrap_view(g_hdr_active ? g_sdr_rtv : g_present_rtv,
++                                         RHI_VIEW_RENDER_TARGET);
+     return g_present_view ? 0 : -1;
+ }
+ 
++/* ---- HDR output ------------------------------------------------------------------------- */
++
++/* rhi_swapchain_set_hdr. While HDR is active the swap chain's buffers are
++ * scRGB -- R16G16B16A16_FLOAT, linear, BT.709 primaries, 1.0 = 80 nits --
++ * and the picture is drawn, exactly as before, into an 8-bit target of the
++ * back buffer's size (g_sdr_*), which rhi_swapchain_view hands out. At each
++ * present one full-screen pass maps that into the back buffer: the 8-bit
++ * value decoded with a 2.2 gamma (what the console's TVs showed), white
++ * put at paper white, and, above a knee in luminance, stretched smoothly up
++ * to the peak. The stretch is for the game's picture alone: a copy of it
++ * is kept when it is complete (rhi_swapchain_mark_scene, before the menus
++ * and counters go over it), and a pixel the overlays changed is not
++ * stretched, so white text stays at paper white. Off, the swap chain is the
++ * R8G8B8A8 one it always was, drawn into directly; nothing else runs.
++ *
++ * Only a flip-model swap chain can be FP16, and only a display in HDR mode
++ * shows it as HDR, so both are required. The display is looked at again
++ * every second (the window moves to another screen, Windows' HDR switch is
++ * flipped): through a DXGI factory of our own, made again when it says it
++ * is out of date, since a factory's outputs keep the mode they had when it
++ * was made. The switch itself is a ResizeBuffers to the new format with the
++ * colour space set to match, on the presenting thread, after a present.
++ *
++ * RECOMP_HDR_FORCE=1 makes the swap chain HDR on a display without it (the
++ * picture is then wrong: for checking the path on any machine). */
++#ifndef DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709
++#define DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709 ((DXGI_COLOR_SPACE_TYPE)1)
++#endif
++/* IDXGISwapChain3 and IDXGIOutput6, named here so no particular dxguid.lib
++ * is needed for them. */
++static const GUID RHI_IID_IDXGISwapChain3 =
++    { 0x94d99bdb, 0xf1f8, 0x4ab0, { 0xb2, 0x36, 0x7d, 0xa0, 0x17, 0x0e, 0xda, 0xb1 } };
++static const GUID RHI_IID_IDXGIOutput6 =
++    { 0x068346e8, 0xaaec, 0x4b84, { 0xad, 0xd7, 0x13, 0x7f, 0x51, 0x3f, 0x77, 0xa1 } };
++
++#define HDR_SDR_FORMAT DXGI_FORMAT_R8G8B8A8_UNORM
++#define HDR_OUT_FORMAT DXGI_FORMAT_R16G16B16A16_FLOAT
++#define HDR_KNEE       0.55f    /* linear luminance where highlights start to stretch */
++
++static HWND g_hwnd;             /* the swap chain's window */
++static int  g_flip;             /* the swap chain is the flip model */
++
++/* What was asked for: any thread writes, the presenting thread reads. */
++static volatile LONG g_hdr_req_on;
++static volatile LONG g_hdr_req_paper = 200;
++static volatile LONG g_hdr_req_peak = -1;
++static volatile LONG g_hdr_req_serial;
++/* What is: the presenting thread writes, rhi_swapchain_hdr_status reads. */
++static volatile LONG g_hdr_st_active, g_hdr_st_display, g_hdr_st_display_peak, g_hdr_st_peak;
++
++static int  g_hdr_broken;       /* its shaders or targets could not be made: never again */
++static int  g_hdr_seen_serial = -1;
++static ULONGLONG g_hdr_probe_at;
++static int  g_hdr_display;      /* the window's display is in HDR mode */
++static float g_hdr_display_peak;
++static IDXGIFactory1 *g_hdr_factory;
++static HMONITOR g_hdr_probe_mon;        /* the screen the last probe found */
++
++/* g_sdr_tex, g_sdr_rtv (above): what rhi_swapchain_view draws into */
++static ID3D11ShaderResourceView *g_sdr_srv;
++static ID3D11Texture2D          *g_scene_tex;   /* the game's picture alone */
++static ID3D11ShaderResourceView *g_scene_srv;
++static int                       g_scene_marked; /* g_scene_tex is this frame's */
++static ID3D11VertexShader *g_hdr_vs;
++static ID3D11PixelShader  *g_hdr_ps;
++static ID3D11Buffer       *g_hdr_cb;
++static ID3D11Texture2D    *g_hdr_probe_px;      /* RECOMP_HDR_PROBE_PIXEL */
++
++static const char g_hdr_hlsl[] =
++    "Texture2D<float4> frame_tex : register(t0);\n"
++    "Texture2D<float4> scene_tex : register(t1);\n"
++    "cbuffer P : register(b0) { float paper; float ratio; float knee; float use_scene; };\n"
++    "float4 vs(uint id : SV_VertexID) : SV_Position {\n"
++    "    float2 uv = float2((id << 1) & 2, id & 2);\n"
++    "    return float4(uv * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);\n"
++    "}\n"
++    "float4 ps(float4 pos : SV_Position) : SV_Target {\n"
++    "    int3 p = int3(int2(pos.xy), 0);\n"
++    "    float3 c = saturate(frame_tex.Load(p).rgb);\n"
++    "    float3 l = pow(c, 2.2);\n"
++    "    if (ratio > 1.0 && use_scene > 0.5) {\n"
++    "        float3 s = scene_tex.Load(p).rgb;\n"
++    "        if (all(abs(s - c) < 0.5 / 255.0)) {\n"
++    "            float y = dot(l, float3(0.2126, 0.7152, 0.0722));\n"
++    "            if (y > knee) {\n"
++    "                float x = y - knee;\n"
++    "                float a = (ratio - 1.0) / ((1.0 - knee) * (1.0 - knee));\n"
++    "                l *= (y + a * x * x) / y;\n"
++    "            }\n"
++    "        }\n"
++    "    }\n"
++    "    return float4(l * paper, 1.0);\n"
++    "}\n";
++
++static int env_on(const char *name)
++{
++    const char *v = getenv(name);
++    return v && *v && strcmp(v, "0") != 0;
++}
++
++static void hdr_release_targets(void)
++{
++    if (g_sdr_srv)   { ID3D11ShaderResourceView_Release(g_sdr_srv); g_sdr_srv = NULL; }
++    if (g_sdr_rtv)   { ID3D11RenderTargetView_Release(g_sdr_rtv); g_sdr_rtv = NULL; }
++    if (g_sdr_tex)   { ID3D11Texture2D_Release(g_sdr_tex); g_sdr_tex = NULL; }
++    if (g_scene_srv) { ID3D11ShaderResourceView_Release(g_scene_srv); g_scene_srv = NULL; }
++    if (g_scene_tex) { ID3D11Texture2D_Release(g_scene_tex); g_scene_tex = NULL; }
++    g_scene_marked = 0;
++}
++
++static void hdr_release_all(void)
++{
++    hdr_release_targets();
++    if (g_hdr_vs) { ID3D11VertexShader_Release(g_hdr_vs); g_hdr_vs = NULL; }
++    if (g_hdr_ps) { ID3D11PixelShader_Release(g_hdr_ps); g_hdr_ps = NULL; }
++    if (g_hdr_cb) { ID3D11Buffer_Release(g_hdr_cb); g_hdr_cb = NULL; }
++    if (g_hdr_probe_px) { ID3D11Texture2D_Release(g_hdr_probe_px); g_hdr_probe_px = NULL; }
++    if (g_hdr_factory) { IDXGIFactory1_Release(g_hdr_factory); g_hdr_factory = NULL; }
++    g_hdr_active = 0;
++    g_hdr_seen_serial = -1;
++    g_hdr_probe_at = 0;
++    g_hdr_probe_mon = NULL;
++    InterlockedExchange(&g_hdr_st_active, 0);
++}
++
++/* The 8-bit target and the copy of the scene, the back buffer's size. */
++static int hdr_make_targets(UINT w, UINT h)
++{
++    D3D11_TEXTURE2D_DESC td;
++
++    memset(&td, 0, sizeof td);
++    td.Width = w;
++    td.Height = h;
++    td.MipLevels = 1;
++    td.ArraySize = 1;
++    td.Format = HDR_SDR_FORMAT;
++    td.SampleDesc.Count = 1;
++    td.Usage = D3D11_USAGE_DEFAULT;
++    td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
++    if (FAILED(ID3D11Device_CreateTexture2D(g_dev, &td, NULL, &g_sdr_tex)) ||
++        FAILED(ID3D11Device_CreateRenderTargetView(g_dev, (ID3D11Resource *)g_sdr_tex, NULL, &g_sdr_rtv)) ||
++        FAILED(ID3D11Device_CreateShaderResourceView(g_dev, (ID3D11Resource *)g_sdr_tex, NULL, &g_sdr_srv)))
++        goto fail;
++    td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
++    if (FAILED(ID3D11Device_CreateTexture2D(g_dev, &td, NULL, &g_scene_tex)) ||
++        FAILED(ID3D11Device_CreateShaderResourceView(g_dev, (ID3D11Resource *)g_scene_tex, NULL, &g_scene_srv)))
++        goto fail;
++    {
++        /* Black, as a new swap chain's buffer is, until the first frame. */
++        static const float black[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
++        ID3D11DeviceContext_ClearRenderTargetView(g_ctx, g_sdr_rtv, black);
++    }
++    g_scene_marked = 0;
++    return 0;
++fail:
++    hdr_release_targets();
++    return -1;
++}
++
++static int hdr_make_shaders(void)
++{
++    ID3DBlob *code = NULL, *errors = NULL;
++    D3D11_BUFFER_DESC bd;
++    HRESULT hr;
++
++    if (g_hdr_vs && g_hdr_ps && g_hdr_cb)
++        return 0;
++    hr = D3DCompile(g_hdr_hlsl, sizeof g_hdr_hlsl - 1, "hdr_output", NULL, NULL, "vs", "vs_4_0",
++                    D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &code, &errors);
++    if (SUCCEEDED(hr))
++        hr = ID3D11Device_CreateVertexShader(g_dev, ID3D10Blob_GetBufferPointer(code),
++                                             ID3D10Blob_GetBufferSize(code), NULL, &g_hdr_vs);
++    if (code) { ID3D10Blob_Release(code); code = NULL; }
++    if (SUCCEEDED(hr)) {
++        if (errors) { ID3D10Blob_Release(errors); errors = NULL; }
++        hr = D3DCompile(g_hdr_hlsl, sizeof g_hdr_hlsl - 1, "hdr_output", NULL, NULL, "ps", "ps_4_0",
++                        D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &code, &errors);
++    }
++    if (SUCCEEDED(hr))
++        hr = ID3D11Device_CreatePixelShader(g_dev, ID3D10Blob_GetBufferPointer(code),
++                                            ID3D10Blob_GetBufferSize(code), NULL, &g_hdr_ps);
++    if (code)
++        ID3D10Blob_Release(code);
++    if (FAILED(hr)) {
++        fprintf(stderr, "[RHI] d3d11: HDR output shaders failed (0x%08lX)%s%s\n", (unsigned long)hr,
++                errors ? ": " : "", errors ? (const char *)ID3D10Blob_GetBufferPointer(errors) : "");
++        if (errors)
++            ID3D10Blob_Release(errors);
++        return -1;
++    }
++    if (errors)
++        ID3D10Blob_Release(errors);
++    memset(&bd, 0, sizeof bd);
++    bd.ByteWidth = 16;
++    bd.Usage = D3D11_USAGE_DEFAULT;
++    bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
++    if (FAILED(ID3D11Device_CreateBuffer(g_dev, &bd, NULL, &g_hdr_cb))) {
++        g_hdr_cb = NULL;
++        return -1;
++    }
++    return 0;
++}
++
++/* The window's display: in HDR mode or not, and its peak. */
++static void hdr_probe_display(void)
++{
++    HMONITOR mon;
++    IDXGIAdapter1 *ad;
++    UINT a, o;
++    int hdr = 0, found = 0;
++    float peak = 0.0f;
++
++    if (!g_hwnd)
++        return;
++    mon = MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTONEAREST);
++    if (g_hdr_factory && !IDXGIFactory1_IsCurrent(g_hdr_factory)) {
++        IDXGIFactory1_Release(g_hdr_factory);
++        g_hdr_factory = NULL;
++    }
++    /* Same screen, and nothing about the displays has changed since (a
++     * factory goes out of date when one does, HDR switched on or off
++     * included): what was found last time still holds. */
++    if (g_hdr_factory && mon == g_hdr_probe_mon)
++        return;
++    if (!g_hdr_factory &&
++        FAILED(CreateDXGIFactory1(&IID_IDXGIFactory1, (void **)&g_hdr_factory))) {
++        g_hdr_factory = NULL;
++        return;
++    }
++    for (a = 0; !found && IDXGIFactory1_EnumAdapters1(g_hdr_factory, a, &ad) == S_OK; a++) {
++        IDXGIOutput *out;
++
++        for (o = 0; !found && IDXGIAdapter1_EnumOutputs(ad, o, &out) == S_OK; o++) {
++            DXGI_OUTPUT_DESC od;
++
++            if (SUCCEEDED(IDXGIOutput_GetDesc(out, &od)) && od.Monitor == mon) {
++                IDXGIOutput6 *o6 = NULL;
++
++                found = 1;
++                if (SUCCEEDED(IDXGIOutput_QueryInterface(out, &RHI_IID_IDXGIOutput6, (void **)&o6))) {
++                    DXGI_OUTPUT_DESC1 d1;
++
++                    if (SUCCEEDED(IDXGIOutput6_GetDesc1(o6, &d1))) {
++                        hdr = d1.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
++                        peak = d1.MaxLuminance;
++                    }
++                    IDXGIOutput6_Release(o6);
++                }
++            }
++            IDXGIOutput_Release(out);
++        }
++        IDXGIAdapter1_Release(ad);
++    }
++    if (!found)
++        return;                         /* between screens: keep what we had */
++    g_hdr_probe_mon = mon;
++    if (hdr != g_hdr_display || peak != g_hdr_display_peak) {
++        fprintf(stderr, "[RHI] d3d11: the display is %s (peak %.0f nits as reported)\n",
++                hdr ? "in HDR mode" : "not in HDR mode", peak);
++        fflush(stderr);
++    }
++    g_hdr_display = hdr;
++    g_hdr_display_peak = peak;
++    InterlockedExchange(&g_hdr_st_display, hdr);
++    InterlockedExchange(&g_hdr_st_display_peak, (LONG)(peak + 0.5f));
++}
++
++/* The peak highlights go up to, in nits: 0 for none. */
++static float hdr_peak_nits(float paper)
++{
++    LONG req = InterlockedCompareExchange(&g_hdr_req_peak, 0, 0);
++    float peak;
++
++    if (req == 0)
++        return 0.0f;
++    if (req < 0)
++        peak = g_hdr_display_peak > 0.0f ? g_hdr_display_peak : 1000.0f;
++    else
++        peak = (float)req;
++    /* Never past what the display says it can show. */
++    if (g_hdr_display_peak > 0.0f && peak > g_hdr_display_peak)
++        peak = g_hdr_display_peak;
++    return peak > paper ? peak : 0.0f;
++}
++
++/* Switch the swap chain to HDR (on) or back. Presenting thread, after a
++ * present, with nothing of the old back buffer bound. 0 on success; on a
++ * failure the swap chain is put back as it was if it can be. */
++static int hdr_switch(int on)
++{
++    IDXGISwapChain3 *sc3 = NULL;
++    ID3D11RenderTargetView *saved_rtv = NULL;
++    ID3D11DepthStencilView *saved_dsv = NULL;
++    DXGI_SWAP_CHAIN_DESC desc;
++    int bound_present, ok = 0;
++
++    if (FAILED(IDXGISwapChain_GetDesc(g_swap, &desc)))
++        return -1;
++    if (FAILED(IDXGISwapChain_QueryInterface(g_swap, &RHI_IID_IDXGISwapChain3, (void **)&sc3)))
++        return -1;
++    if (on && hdr_make_shaders() != 0) {
++        IDXGISwapChain3_Release(sc3);
++        return -1;
++    }
++    ID3D11DeviceContext_OMGetRenderTargets(g_ctx, 1, &saved_rtv, &saved_dsv);
++    bound_present = saved_rtv && (saved_rtv == g_present_rtv || saved_rtv == g_sdr_rtv);
++    if (bound_present) {
++        ID3D11RenderTargetView_Release(saved_rtv);
++        saved_rtv = NULL;
++    }
++    ID3D11DeviceContext_OMSetRenderTargets(g_ctx, 0, NULL, NULL);
++    release_back_buffer_view();
++    ID3D11DeviceContext_Flush(g_ctx);
++    if (SUCCEEDED(IDXGISwapChain_ResizeBuffers(g_swap, 0, desc.BufferDesc.Width, desc.BufferDesc.Height,
++                                               on ? HDR_OUT_FORMAT : DXGI_FORMAT_R8G8B8A8_UNORM,
++                                               g_swap_flags))) {
++        HRESULT cs = IDXGISwapChain3_SetColorSpace1(sc3, on ? DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709
++                                                           : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
++        g_hdr_active = on;
++        if (make_back_buffer_view() == 0 && SUCCEEDED(cs)) {
++            ok = 1;
++        } else if (on) {
++            /* Back to the 8-bit swap chain it was. */
++            release_back_buffer_view();
++            g_hdr_active = 0;
++            if (SUCCEEDED(IDXGISwapChain_ResizeBuffers(g_swap, 0, desc.BufferDesc.Width,
++                                                       desc.BufferDesc.Height,
++                                                       DXGI_FORMAT_R8G8B8A8_UNORM, g_swap_flags)))
++                IDXGISwapChain3_SetColorSpace1(sc3, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
++            make_back_buffer_view();
++        }
++    } else {
++        make_back_buffer_view();        /* the old buffers are still there */
++    }
++    IDXGISwapChain3_Release(sc3);
++    if (bound_present && g_present_view)
++        saved_rtv = (ID3D11RenderTargetView *)((struct RhiView *)g_present_view)->v;
++    ID3D11DeviceContext_OMSetRenderTargets(g_ctx, saved_rtv ? 1 : 0, saved_rtv ? &saved_rtv : NULL,
++                                           saved_dsv);
++    if (!bound_present && saved_rtv)
++        ID3D11RenderTargetView_Release(saved_rtv);
++    if (saved_dsv)
++        ID3D11DepthStencilView_Release(saved_dsv);
++    InterlockedExchange(&g_hdr_st_active, g_hdr_active);
++    return ok ? 0 : -1;
++}
++
++/* After each present: look at the display now and then, and follow what
++ * was asked for. */
++static void hdr_update(void)
++{
++    LONG serial = InterlockedCompareExchange(&g_hdr_req_serial, 0, 0);
++    ULONGLONG now = GetTickCount64();
++    int want, force;
++
++    if (!g_swap || g_hdr_broken)
++        return;
++    if (serial == g_hdr_seen_serial && now < g_hdr_probe_at)
++        return;
++    g_hdr_probe_at = now + 1000;
++    g_hdr_seen_serial = (int)serial;
++    /* Off and staying off: nothing to look at. */
++    if (!InterlockedCompareExchange(&g_hdr_req_on, 0, 0) && !g_hdr_active)
++        return;
++    hdr_probe_display();
++    force = env_on("RECOMP_HDR_FORCE");
++    want = InterlockedCompareExchange(&g_hdr_req_on, 0, 0) && g_flip && (g_hdr_display || force);
++    if (want != g_hdr_active) {
++        if (hdr_switch(want) != 0) {
++            fprintf(stderr, "[RHI] d3d11: HDR output could not be turned %s; staying %s\n",
++                    want ? "on" : "off", g_hdr_active ? "HDR" : "SDR");
++            if (want)
++                g_hdr_broken = 1;       /* do not try at every second */
++        } else if (g_hdr_active) {
++            float paper = (float)InterlockedCompareExchange(&g_hdr_req_paper, 0, 0);
++            fprintf(stderr, "[RHI] d3d11: HDR output on (scRGB%s), paper white %.0f nits, "
++                    "highlights %s%.0f nits\n", force && !g_hdr_display ? ", forced" : "", paper,
++                    hdr_peak_nits(paper) > 0.0f ? "to " : "off, ", hdr_peak_nits(paper) > 0.0f
++                    ? hdr_peak_nits(paper) : paper);
++        } else {
++            fprintf(stderr, "[RHI] d3d11: HDR output off\n");
++        }
++        fflush(stderr);
++    } else if (InterlockedCompareExchange(&g_hdr_req_on, 0, 0) && !g_flip && !g_hdr_broken) {
++        static int said;
++        if (!said++) {
++            fprintf(stderr, "[RHI] d3d11: HDR needs a flip-model swap chain; this one is not\n");
++            fflush(stderr);
++        }
++    }
++}
++
++/* RECOMP_HDR_PROBE_PIXEL=x,y: the back buffer's pixel there, in nits, in the
++ * log every second (a check of the mapping that needs no HDR screen). */
++static void hdr_probe_pixel(ID3D11Texture2D *bb)
++{
++    static ULONGLONG next;
++    const char *v = getenv("RECOMP_HDR_PROBE_PIXEL");
++    D3D11_TEXTURE2D_DESC td;
++    D3D11_MAPPED_SUBRESOURCE m;
++    D3D11_BOX box;
++    int x = 0, y = 0;
++    ULONGLONG now;
++
++    if (!v || !*v || sscanf(v, "%d,%d", &x, &y) != 2 || x < 0 || y < 0)
++        return;
++    now = GetTickCount64();
++    if (now < next)
++        return;
++    next = now + 1000;
++    ID3D11Texture2D_GetDesc(bb, &td);
++    if ((UINT)x >= td.Width || (UINT)y >= td.Height)
++        return;
++    if (!g_hdr_probe_px) {
++        D3D11_TEXTURE2D_DESC sd;
++        memset(&sd, 0, sizeof sd);
++        sd.Width = 1;
++        sd.Height = 1;
++        sd.MipLevels = 1;
++        sd.ArraySize = 1;
++        sd.Format = HDR_OUT_FORMAT;
++        sd.SampleDesc.Count = 1;
++        sd.Usage = D3D11_USAGE_STAGING;
++        sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
++        if (FAILED(ID3D11Device_CreateTexture2D(g_dev, &sd, NULL, &g_hdr_probe_px))) {
++            g_hdr_probe_px = NULL;
++            return;
++        }
++    }
++    box.left = (UINT)x; box.right = (UINT)x + 1;
++    box.top = (UINT)y;  box.bottom = (UINT)y + 1;
++    box.front = 0;      box.back = 1;
++    ID3D11DeviceContext_CopySubresourceRegion(g_ctx, (ID3D11Resource *)g_hdr_probe_px, 0, 0, 0, 0,
++                                              (ID3D11Resource *)bb, 0, &box);
++    if (SUCCEEDED(ID3D11DeviceContext_Map(g_ctx, (ID3D11Resource *)g_hdr_probe_px, 0,
++                                          D3D11_MAP_READ, 0, &m))) {
++        const uint16_t *h = (const uint16_t *)m.pData;
++        float f[3];
++        int i;
++
++        for (i = 0; i < 3; i++) {       /* half to float */
++            uint32_t s = (h[i] >> 15) & 1u, e = (h[i] >> 10) & 31u, man = h[i] & 1023u;
++            float val = e == 0 ? (float)man / 1024.0f / 16384.0f
++                               : (e == 31 ? 65504.0f : (1.0f + (float)man / 1024.0f) *
++                                  (float)(e >= 15 ? (1u << (e - 15)) : 1u) /
++                                  (float)(e < 15 ? (1u << (15 - e)) : 1u));
++            f[i] = s ? -val : val;
++        }
++        ID3D11DeviceContext_Unmap(g_ctx, (ID3D11Resource *)g_hdr_probe_px, 0);
++        fprintf(stderr, "[RHI] d3d11: HDR pixel %d,%d = %.1f %.1f %.1f nits\n", x, y,
++                f[0] * 80.0f, f[1] * 80.0f, f[2] * 80.0f);
++        fflush(stderr);
++    }
++}
++
++/* Map the 8-bit picture into the HDR back buffer, leaving the context's
++ * state as it found it. */
++static void hdr_convert(void)
++{
++    ID3D11Texture2D *bb = NULL;
++    ID3D11RenderTargetView *bb_rtv = g_present_rtv;
++    /* what is bound now, put back after */
++    ID3D11RenderTargetView *o_rtv[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT];
++    ID3D11DepthStencilView *o_dsv = NULL;
++    ID3D11InputLayout *o_il = NULL;
++    D3D11_PRIMITIVE_TOPOLOGY o_topo;
++    ID3D11VertexShader *o_vs = NULL;
++    ID3D11PixelShader *o_ps = NULL;
++    ID3D11GeometryShader *o_gs = NULL;
++    ID3D11ShaderResourceView *o_srv[2] = { NULL, NULL };
++    ID3D11Buffer *o_cb = NULL;
++    ID3D11RasterizerState *o_rs = NULL;
++    ID3D11BlendState *o_bs = NULL;
++    FLOAT o_bf[4];
++    UINT o_mask = 0, o_ref = 0, o_nvp = D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
++    ID3D11DepthStencilState *o_ds = NULL;
++    D3D11_VIEWPORT o_vp[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
++    D3D11_TEXTURE2D_DESC td;
++    D3D11_VIEWPORT vp;
++    ID3D11ShaderResourceView *srv[2];
++    float cb[4], paper, peak;
++    int i;
++
++    if (!g_sdr_srv || !g_scene_srv || !bb_rtv || !g_hdr_vs || !g_hdr_ps || !g_hdr_cb)
++        return;
++    ID3D11RenderTargetView_GetResource(bb_rtv, (ID3D11Resource **)&bb);
++    if (!bb)
++        return;
++    ID3D11Texture2D_GetDesc(bb, &td);
++
++    paper = (float)InterlockedCompareExchange(&g_hdr_req_paper, 0, 0);
++    peak = hdr_peak_nits(paper);
++    InterlockedExchange(&g_hdr_st_peak, (LONG)(peak > 0.0f ? peak + 0.5f : paper + 0.5f));
++    cb[0] = paper / 80.0f;
++    cb[1] = peak > 0.0f ? peak / paper : 1.0f;
++    cb[2] = HDR_KNEE;
++    cb[3] = g_scene_marked ? 1.0f : 0.0f;
++
++    ID3D11DeviceContext_OMGetRenderTargets(g_ctx, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, o_rtv, &o_dsv);
++    ID3D11DeviceContext_IAGetInputLayout(g_ctx, &o_il);
++    ID3D11DeviceContext_IAGetPrimitiveTopology(g_ctx, &o_topo);
++    ID3D11DeviceContext_VSGetShader(g_ctx, &o_vs, NULL, NULL);
++    ID3D11DeviceContext_PSGetShader(g_ctx, &o_ps, NULL, NULL);
++    ID3D11DeviceContext_GSGetShader(g_ctx, &o_gs, NULL, NULL);
++    ID3D11DeviceContext_PSGetShaderResources(g_ctx, 0, 2, o_srv);
++    ID3D11DeviceContext_PSGetConstantBuffers(g_ctx, 0, 1, &o_cb);
++    ID3D11DeviceContext_RSGetState(g_ctx, &o_rs);
++    ID3D11DeviceContext_RSGetViewports(g_ctx, &o_nvp, o_vp);
++    ID3D11DeviceContext_OMGetBlendState(g_ctx, &o_bs, o_bf, &o_mask);
++    ID3D11DeviceContext_OMGetDepthStencilState(g_ctx, &o_ds, &o_ref);
++
++    ID3D11DeviceContext_UpdateSubresource(g_ctx, (ID3D11Resource *)g_hdr_cb, 0, NULL, cb, 0, 0);
++    ID3D11DeviceContext_OMSetRenderTargets(g_ctx, 1, &bb_rtv, NULL);
++    memset(&vp, 0, sizeof vp);
++    vp.Width = (FLOAT)td.Width;
++    vp.Height = (FLOAT)td.Height;
++    vp.MaxDepth = 1.0f;
++    ID3D11DeviceContext_RSSetViewports(g_ctx, 1, &vp);
++    ID3D11DeviceContext_RSSetState(g_ctx, NULL);
++    ID3D11DeviceContext_OMSetBlendState(g_ctx, NULL, NULL, 0xFFFFFFFFu);
++    ID3D11DeviceContext_OMSetDepthStencilState(g_ctx, NULL, 0);
++    ID3D11DeviceContext_IASetInputLayout(g_ctx, NULL);
++    ID3D11DeviceContext_IASetPrimitiveTopology(g_ctx, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
++    ID3D11DeviceContext_VSSetShader(g_ctx, g_hdr_vs, NULL, 0);
++    ID3D11DeviceContext_GSSetShader(g_ctx, NULL, NULL, 0);
++    ID3D11DeviceContext_PSSetShader(g_ctx, g_hdr_ps, NULL, 0);
++    srv[0] = g_sdr_srv;
++    srv[1] = g_scene_srv;
++    ID3D11DeviceContext_PSSetShaderResources(g_ctx, 0, 2, srv);
++    ID3D11DeviceContext_PSSetConstantBuffers(g_ctx, 0, 1, &g_hdr_cb);
++    ID3D11DeviceContext_Draw(g_ctx, 3, 0);
++    srv[0] = srv[1] = NULL;
++    ID3D11DeviceContext_PSSetShaderResources(g_ctx, 0, 2, srv);
++
++    hdr_probe_pixel(bb);
++
++    ID3D11DeviceContext_OMSetRenderTargets(g_ctx, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, o_rtv, o_dsv);
++    ID3D11DeviceContext_IASetInputLayout(g_ctx, o_il);
++    ID3D11DeviceContext_IASetPrimitiveTopology(g_ctx, o_topo);
++    ID3D11DeviceContext_VSSetShader(g_ctx, o_vs, NULL, 0);
++    ID3D11DeviceContext_PSSetShader(g_ctx, o_ps, NULL, 0);
++    ID3D11DeviceContext_GSSetShader(g_ctx, o_gs, NULL, 0);
++    ID3D11DeviceContext_PSSetShaderResources(g_ctx, 0, 2, o_srv);
++    ID3D11DeviceContext_PSSetConstantBuffers(g_ctx, 0, 1, &o_cb);
++    ID3D11DeviceContext_RSSetState(g_ctx, o_rs);
++    if (o_nvp)
++        ID3D11DeviceContext_RSSetViewports(g_ctx, o_nvp, o_vp);
++    ID3D11DeviceContext_OMSetBlendState(g_ctx, o_bs, o_bf, o_mask);
++    ID3D11DeviceContext_OMSetDepthStencilState(g_ctx, o_ds, o_ref);
++
++    for (i = 0; i < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT; i++)
++        if (o_rtv[i]) ID3D11RenderTargetView_Release(o_rtv[i]);
++    if (o_dsv) ID3D11DepthStencilView_Release(o_dsv);
++    if (o_il)  ID3D11InputLayout_Release(o_il);
++    if (o_vs)  ID3D11VertexShader_Release(o_vs);
++    if (o_ps)  ID3D11PixelShader_Release(o_ps);
++    if (o_gs)  ID3D11GeometryShader_Release(o_gs);
++    for (i = 0; i < 2; i++)
++        if (o_srv[i]) ID3D11ShaderResourceView_Release(o_srv[i]);
++    if (o_cb)  ID3D11Buffer_Release(o_cb);
++    if (o_rs)  ID3D11RasterizerState_Release(o_rs);
++    if (o_bs)  ID3D11BlendState_Release(o_bs);
++    if (o_ds)  ID3D11DepthStencilState_Release(o_ds);
++    ID3D11Texture2D_Release(bb);
++    g_scene_marked = 0;
++}
++
++static void d_swapchain_set_hdr(const RhiHdr *h)
++{
++    LONG paper = (LONG)(h->paper_nits + 0.5f), peak;
++
++    if (paper < 1)
++        paper = 200;
++    peak = h->peak_nits < 0.0f ? -1 : (LONG)(h->peak_nits + 0.5f);
++    InterlockedExchange(&g_hdr_req_on, h->on ? 1 : 0);
++    InterlockedExchange(&g_hdr_req_paper, paper);
++    InterlockedExchange(&g_hdr_req_peak, peak);
++    InterlockedIncrement(&g_hdr_req_serial);
++}
++
++static int d_swapchain_hdr_status(RhiHdrStatus *st)
++{
++    int active = (int)InterlockedCompareExchange(&g_hdr_st_active, 0, 0);
++
++    if (st) {
++        st->active = active;
++        st->display_hdr = (int)InterlockedCompareExchange(&g_hdr_st_display, 0, 0);
++        st->display_peak = (float)InterlockedCompareExchange(&g_hdr_st_display_peak, 0, 0);
++        st->peak_nits = active ? (float)InterlockedCompareExchange(&g_hdr_st_peak, 0, 0) : 0.0f;
++    }
++    return active;
++}
++
++static void d_swapchain_mark_scene(void)
++{
++    if (!g_hdr_active || !g_scene_tex || !g_sdr_tex)
++        return;
++    ID3D11DeviceContext_CopyResource(g_ctx, (ID3D11Resource *)g_scene_tex, (ID3D11Resource *)g_sdr_tex);
++    g_scene_marked = 1;
++}
++
+ /* The swap chain is the flip model where the system has it: a variable-
+  * refresh display can only follow a flip-model swap chain, and only one
+  * created to allow tearing can present without waiting for a vblank while
+@@ -272,7 +895,6 @@ static int make_back_buffer_view(void)
+ #ifndef DXGI_SWAP_EFFECT_FLIP_DISCARD
+ #define DXGI_SWAP_EFFECT_FLIP_DISCARD ((DXGI_SWAP_EFFECT)4)
+ #endif
+-static UINT g_swap_flags;   /* the swap chain's creation flags */
+ static int  g_tearing;      /* created with ALLOW_TEARING */
+ static int  g_vrr;          /* rhi_swapchain_set_vrr */
+ 
+@@ -341,6 +963,8 @@ static int d_device_create(const RhiDeviceDesc *dd)
+         if (SUCCEEDED(hr)) {
+             g_swap_flags = tries[t].flags;
+             g_tearing = (tries[t].flags & D3D11_SC_FLAG_ALLOW_TEARING) != 0;
++            g_flip = tries[t].effect != DXGI_SWAP_EFFECT_DISCARD;
++            g_hwnd = (HWND)dd->window;
+             fprintf(stderr, "[RHI] d3d11: %s swap chain\n", tries[t].name);
+             break;
+         }
+@@ -367,6 +991,7 @@ static void d_device_destroy(void)
+     occl_release();
+     staging_release();
+     release_back_buffer_view();
++    hdr_release_all();
+     if (g_swap) { IDXGISwapChain_Release(g_swap); g_swap = NULL; }
+     if (g_ctx)  { ID3D11DeviceContext_Release(g_ctx); g_ctx = NULL; }
+     if (g_dev)  { ID3D11Device_Release(g_dev); g_dev = NULL; }
+@@ -386,18 +1011,31 @@ static int d_swapchain_resize(uint32_t w, uint32_t h)
+ {
+     ID3D11RenderTargetView *saved_rtv = NULL;
+     ID3D11DepthStencilView *saved_dsv = NULL;
+-    int ok = -1;
++    int ok = -1, rebind_present = 0;
+ 
+     if (!g_swap)
+         return -1;
+     /* ResizeBuffers wants every reference to the old back buffer gone,
+      * including any the context still holds. */
+     ID3D11DeviceContext_OMGetRenderTargets(g_ctx, 1, &saved_rtv, &saved_dsv);
++    /* The 8-bit target of HDR output goes with the buffers: if that is what
++     * was bound, its replacement is bound instead. */
++    if (saved_rtv && g_hdr_active && saved_rtv == g_sdr_rtv) {
++        ID3D11RenderTargetView_Release(saved_rtv);
++        saved_rtv = NULL;
++        rebind_present = 1;
++    }
+     ID3D11DeviceContext_OMSetRenderTargets(g_ctx, 0, NULL, NULL);
+     release_back_buffer_view();
+     if (SUCCEEDED(IDXGISwapChain_ResizeBuffers(g_swap, 0, w, h, DXGI_FORMAT_UNKNOWN, g_swap_flags)))
+         ok = make_back_buffer_view();
+-    ID3D11DeviceContext_OMSetRenderTargets(g_ctx, 1, &saved_rtv, saved_dsv);
++    if (rebind_present && g_present_view) {
++        ID3D11RenderTargetView *v = (ID3D11RenderTargetView *)((struct RhiView *)g_present_view)->v;
++        ID3D11DeviceContext_OMSetRenderTargets(g_ctx, 1, &v, saved_dsv);
++    } else {
++        ID3D11DeviceContext_OMSetRenderTargets(g_ctx, saved_rtv ? 1 : 0, saved_rtv ? &saved_rtv : NULL,
++                                               saved_dsv);
++    }
+     if (saved_rtv) ID3D11RenderTargetView_Release(saved_rtv);
+     if (saved_dsv) ID3D11DepthStencilView_Release(saved_dsv);
+     return ok;
+@@ -428,21 +1066,36 @@ static void d_swapchain_set_vrr(int on)
+ static int32_t d_present(uint32_t interval)
+ {
+     UINT flags = (interval == 0 && g_vrr && g_tearing) ? DXGI_PRESENT_ALLOW_TEARING : 0;
++    int32_t hr;
+ 
+-    return g_swap ? (int32_t)IDXGISwapChain_Present(g_swap, interval, flags) : -1;
++    if (!g_swap)
++        return -1;
++    if (g_hdr_active)
++        hdr_convert();
++    hr = (int32_t)IDXGISwapChain_Present(g_swap, interval, flags);
++    hdr_update();                       /* HDR output: follow the request and the display */
++    return hr;
+ }
+ 
+ static int d_image_readback(RhiImage *img, uint32_t sub, void *dst, uint32_t dst_pitch);
+ 
+-/* The swap chain here is R8G8B8A8, so its rows are already RGBA8. */
++/* The swap chain here is R8G8B8A8, so its rows are already RGBA8. With HDR
++ * output on, the 8-bit picture before the mapping is read: the same rows
++ * an SDR swap chain would have shown. */
+ static int d_swapchain_readback(void *dst, uint32_t pitch, uint32_t *w, uint32_t *h)
+ {
+     ID3D11Texture2D *bb = NULL;
+     RhiImage *img;
+     int rc = -1;
+ 
+-    if (!g_swap || FAILED(IDXGISwapChain_GetBuffer(g_swap, 0, &IID_ID3D11Texture2D, (void **)&bb)))
++    if (!g_swap)
++        return -1;
++    if (g_hdr_active && g_sdr_tex) {
++        bb = g_sdr_tex;
++        ID3D11Texture2D_AddRef(bb);
++    } else if (FAILED(IDXGISwapChain_GetBuffer(g_swap, 0, &IID_ID3D11Texture2D, (void **)&bb))) {
+         return -1;
++    }
+     img = rhi_d3d11_wrap_image(bb);
+     ID3D11Texture2D_Release(bb);
+     if (!img)
+@@ -1379,6 +2032,7 @@ const RhiBackend rhi_d3d11_backend = {
+     d_set_raster_state, d_draw, d_draw_indexed, d_clear_color, d_clear_depth,
+     d_image_copy,
+     d_occlusion_begin, d_occlusion_end, d_occlusion_result,
++    d_swapchain_set_hdr, d_swapchain_hdr_status, d_swapchain_mark_scene,
+ };
+ 
+ #endif /* _WIN32 */
+diff --git a/src/hle/hle_d3d8.c b/src/hle/hle_d3d8.c
+index 6d2f78d..9b2538b 100644
+--- a/src/hle/hle_d3d8.c
++++ b/src/hle/hle_d3d8.c
+@@ -1326,6 +1326,9 @@ static void shadow_create(uint32_t pp_va)
+      * waits for the display's refresh, which is what stops tearing. The
+      * title's pace is the flip gate's either way. */
+     xbox_D3D8SetVsync(recomp_config_bool("RECOMP_VSYNC", "vsync", 1));
++    /* HDR output, off by default; the renderer turns it on once the
++     * display is in HDR mode. */
++    hle_apply_hdr();
+     /* The size the title's screen-space geometry is measured in, whatever
+      * size the host ends up rendering at. */
+     xbox_D3D8SetGuestSize(width, height);
+@@ -3319,6 +3322,36 @@ void hle_set_fps_overlay(int on)
+     g_overlay_set = on ? 1 : 0;
+ }
+ 
++/* HDR output from the settings (hdr, hdr_brightness, hdr_peak), each with
++ * its environment variable over it. */
++void hle_apply_hdr(void)
++{
++    RhiHdr h;
++    int peak = recomp_hdr_peak_parse(recomp_config_lookup("RECOMP_HDR_PEAK", "hdr_peak"));
++    static int said = -1;
++
++    h.on = recomp_config_bool("RECOMP_HDR", "hdr", 0);
++    h.paper_nits = (float)recomp_hdr_brightness_parse(
++        recomp_config_lookup("RECOMP_HDR_BRIGHTNESS", "hdr_brightness"));
++    h.peak_nits = peak == RECOMP_HDR_PEAK_AUTO ? -1.0f : (float)peak;
++    rhi_swapchain_set_hdr(&h);
++    if (said != h.on) {
++        said = h.on;
++        fprintf(stderr, "[HLE-D3D8] HDR output %s\n", h.on ? "asked for" : "off");
++        fflush(stderr);
++    }
++}
++
++int hle_hdr_status(int *display_hdr, int *peak_nits)
++{
++    RhiHdrStatus st;
++    int active = rhi_swapchain_hdr_status(&st);
++
++    if (display_hdr) *display_hdr = st.display_hdr;
++    if (peak_nits)   *peak_nits = (int)(st.peak_nits + 0.5f);
++    return active;
++}
++
+ int hle_vsync(void)
+ {
+     return xbox_D3D8Vsync();
+diff --git a/src/hle/hle_settings.h b/src/hle/hle_settings.h
+index dc40085..dcae68e 100644
+--- a/src/hle/hle_settings.h
++++ b/src/hle/hle_settings.h
+@@ -25,6 +25,13 @@ void        hle_set_frame_cap(const char *name);
+ int  hle_frame_interp(void);
+ void hle_set_frame_interp(int n);
+ 
++/* HDR output: hle_apply_hdr sends the hdr, hdr_brightness and hdr_peak
++ * settings to the renderer (again after the menu changes one);
++ * hle_hdr_status is 1 while the picture goes out as HDR, and says whether
++ * the display is in HDR mode and what highlights go up to. */
++void hle_apply_hdr(void);
++int  hle_hdr_status(int *display_hdr, int *peak_nits);
++
+ /* VSync: every present waits for the display's refresh (vsync). */
+ int  hle_vsync(void);
+ void hle_set_vsync(int on);
+diff --git a/src/hle/hle_settings_menu.c b/src/hle/hle_settings_menu.c
+index d1fca68..8924b18 100644
+--- a/src/hle/hle_settings_menu.c
++++ b/src/hle/hle_settings_menu.c
+@@ -85,7 +85,7 @@ enum {
+ /* LIVE_TITLE: the title reads the key itself while it runs
+  * (recomp_config_lookup returns what the menu set), so it applies at once --
+  * unless its environment variable is set, which wins: the row says so. */
+-enum { LIVE_NONE, LIVE_CAP, LIVE_INTERP, LIVE_FPS, LIVE_FULLSCREEN, LIVE_TITLE, LIVE_VIBRATION, LIVE_VSYNC };
++enum { LIVE_NONE, LIVE_CAP, LIVE_INTERP, LIVE_FPS, LIVE_FULLSCREEN, LIVE_TITLE, LIVE_VIBRATION, LIVE_VSYNC, LIVE_HDR };
+ 
+ enum { TAB_DISPLAY, TAB_GAME, TAB_CONTROLS, TAB_ABOUT, TAB_COUNT };
+ static const char *const TAB_NAMES[TAB_COUNT] = { "Display", "Game", "Controls", "About" };
+@@ -125,6 +125,25 @@ static const Item ITEMS[] = {
+     { TAB_DISPLAY, "Window", "Frame-rate counter", "fps_overlay", "RECOMP_FPS_OVERLAY", LIVE_FPS, 0, 0, 2,
+       { "0", "1" }, { "Off", "On" },
+       "Shows frames per second in the top-left corner. F8 toggles it too." },
++    /* Names written by item_name: HDR says when Windows has it off. */
++    { TAB_DISPLAY, "HDR", "HDR", "hdr", "RECOMP_HDR", LIVE_HDR, 0, 0, 2,
++      { "0", "1" }, { "Off", "On" },
++      "Sends the picture to the display as HDR: brighter whites and highlights, with the "
++      "game's colours unchanged. Needs HDR switched on for this display in Windows "
++      "(Settings > Display, or Win+Alt+B)." },
++    { TAB_DISPLAY, "HDR", "HDR brightness", "hdr_brightness", "RECOMP_HDR_BRIGHTNESS", LIVE_HDR, 0, 0, 10,
++      { "80", "100", "120", "150", "200", "250", "300", "400", "500", "600" },
++      { "80 nits", "100 nits", "120 nits", "150 nits", "200 nits", "250 nits", "300 nits",
++        "400 nits", "500 nits", "600 nits" },
++      "How bright the game's white is in HDR, in nits. Match it to how bright Windows "
++      "shows other programs, or raise it in a bright room." },
++    { TAB_DISPLAY, "HDR", "HDR highlights", "hdr_peak", "RECOMP_HDR_PEAK", LIVE_HDR, 0, 0, 9,
++      { "auto", "off", "400", "600", "800", "1000", "1500", "2000", "4000" },
++      { "Display's peak", "Off", "400 nits", "600 nits", "800 nits", "1000 nits", "1500 nits",
++        "2000 nits", "4000 nits" },
++      "How far the brightest parts of the picture (the sun, sails, sparkles on the sea) go "
++      "above the brightness. Display's peak uses what your display reports. Off keeps "
++      "them at the brightness. Menus and text are never stretched." },
+     { TAB_DISPLAY, "Picture", "Widescreen (16:9)", "widescreen", "RECOMP_WIDESCREEN", LIVE_NONE, 0, 0, 2,
+       { "0", "1" }, { "Off", "On" },
+       "Shows more of the world to the sides instead of the original 4:3 picture. "
+@@ -275,6 +294,12 @@ static const char *item_name(const Item *it, int i)
+         recomp_resolution_label(recomp_resolution_choices[i], wide, b, sizeof buf[0]);
+         return b;
+     }
++    if (strcmp(it->key, "hdr") == 0 && i == 1) {
++        int display = 0;
++
++        if (!hle_hdr_status(&display, NULL))
++            return display ? "On (starting)" : "On (Windows HDR is off)";
++    }
+     return it->names[i];
+ }
+ 
+@@ -333,6 +358,10 @@ static int current_index(const Item *it)
+             (strcmp(v, "2") == 0 || strcmp(v, "4") == 0 || strcmp(v, "mirror") == 0 ||
+              strcmp(v, "improved") == 0))
+             v = "clear";
++        /* hdr_peak 0 (or another word for off) is Off. */
++        if (v && strcmp(it->key, "hdr_peak") == 0 && *v && strcmp(v, "auto") != 0 &&
++            recomp_hdr_peak_parse(v) == 0)
++            v = "off";
+         break;
+     }
+     if ((i = value_index(it, v)) >= 0)
+@@ -431,6 +460,7 @@ static void set_index(const Item *it, int i)
+     case LIVE_FPS:        hle_set_fps_overlay(i); break;
+     case LIVE_FULLSCREEN: hle_set_fullscreen(i); break;
+     case LIVE_VSYNC:      hle_set_vsync(i); break;
++    case LIVE_HDR:        hle_apply_hdr(); break;
+     case LIVE_VIBRATION:  recomp_bindings_set_vibration(atoi(it->vals[i])); break;
+     case LIVE_TITLE:      break;
+     default:              break;   /* applies at the next start */

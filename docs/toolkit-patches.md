@@ -813,3 +813,26 @@ Each one, with the reason it exists:
   at once), after "Sea battles": the land battle's frame rate, paced in
   `src/recomp_manual.c`. Numbered 0079: 0076 to 0078 are taken (0078 is the
   headless window fix).
+
+- **0082-hdr-output** (`src/d3d/rhi_d3d11.c`, `rhi.h`, `rhi.c`,
+  `rhi_backend.h`, `d3d8_device.c`; `src/config/recomp_config.c`, `.h`;
+  `src/hle/hle_d3d8.c`, `hle_settings.h`, `hle_settings_menu.c`). HDR
+  output, off by default: settings `hdr`, `hdr_brightness` (paper white,
+  nits) and `hdr_peak` (`auto`, `off` or nits), live from three rows in a
+  new "HDR" group of the F2 Display tab. While it is on and the window's
+  monitor is in HDR mode (`IDXGIOutput6::GetDesc1`, looked at again every
+  second through a factory remade when it goes out of date), the D3D11
+  flip-model swap chain is resized to R16G16B16A16_FLOAT with the scRGB
+  colour space, and `rhi_swapchain_view` hands out an 8-bit target of the
+  same size instead of the back buffer, so every pass draws as before. At
+  the present one full-screen pass decodes it with a 2.2 gamma, puts white
+  at paper white and stretches luminance above 0.55 (linear) smoothly up to
+  the peak. `rhi_swapchain_mark_scene` (called from `present_scene` before
+  the overlays) copies the game's picture, and pixels the overlays changed
+  are not stretched. `rhi_swapchain_readback` reads the 8-bit target, so
+  screenshots and the headless tests are unchanged. The context state is
+  saved and put back around the pass. SDR (off, or Windows HDR off) is the
+  old path exactly. Test switches: `RECOMP_HDR_FORCE=1` makes the swap
+  chain HDR on any monitor; `RECOMP_HDR_PROBE_PIXEL=x,y` logs that back
+  buffer pixel in nits each second. Vulkan has no HDR output. Numbered
+  0082: 0080 is the town sneak row and 0081 is left for the F2 restyle.

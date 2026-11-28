@@ -32,6 +32,7 @@ Back pressed alone still reaches the game as usual.
 | Texture sharpness (off, 1x, 2x, 4x, 8x, 16x) | next start |
 | Variable refresh | next start |
 | VSync | at once |
+| HDR, HDR brightness (80 to 600 nits), HDR highlights (display's peak, off, 400 to 4000 nits) | at once |
 | Movies (skip all, skip intro, play all) | next start |
 | Legal screen (skip, show) | next start |
 | Sound | next start |
@@ -55,6 +56,20 @@ Every change is written to `pirates.ini` straight away, keeping its comments.
   unlocked running at about the 144 Hz refresh. VSync caps the frame rate at
   the refresh rate and never changes the game's speed. `vsync = 0` shows
   frames the moment they are ready, as before.
+- **HDR.** `hdr` (F2 Display tab "HDR", applies at once, off by default):
+  with HDR switched on for the monitor in Windows (Settings > Display, or
+  Win+Alt+B), the picture goes out as HDR (an scRGB swap chain). The game
+  itself still draws its 8-bit picture; it is mapped at each present.
+  `hdr_brightness` (default 200 nits) is where the game's white sits, so
+  set it to about what Windows shows other programs at. `hdr_peak`
+  (default `auto`, the peak the monitor reports) lets the brightest parts
+  of the game's picture (the sun, white sails, sparkles on the sea) go
+  above that, smoothly, up to the peak; `off` keeps everything at
+  `hdr_brightness`. The F2 menu, the frame-rate counter and other text
+  drawn over the game are never stretched. With Windows HDR off the row
+  reads "On (Windows HDR is off)" and the picture is the SDR one as before;
+  the game follows Windows' switch and the window moving to another
+  monitor within a second. Screenshots (F12) stay SDR PNGs.
 - **Frame interpolation.** The game runs its world at 30 fps at sea, in
   battles, duels and the town sneak. Frame interpolation (`frame_interp = 2`,
   off by default) draws the frame in between, so you see 60 while the game
@@ -209,6 +224,9 @@ defaults. Every line names the environment variable that overrides it, so a
 | `water_reflection` | `1` | The ship's reflection in the sea: `1` as the console (a faint rippled smear), `clear` (F2: Improved) four times larger with gentler ripples. `mirror`, `2` and `4` from older files read as `clear`. Applies at the next start. |
 | `vrr` | `0` | Variable refresh rate. |
 | `vsync` | `1` | Wait for the monitor's refresh: no tearing, frame rate at most the refresh rate. `0` off. |
+| `hdr` | `0` | HDR output, when Windows has HDR on for the monitor. |
+| `hdr_brightness` | `200` | HDR: the game's white in nits, 80 to 1000. |
+| `hdr_peak` | `auto` | HDR: highlights go up to this many nits (`auto` the monitor's peak, `off` none). |
 | `pad_follow_input` | `1` | Controller 1 is the pad used last. |
 | `pad_directinput` | `0` | SDL's DirectInput back end. |
 | `skip_intro` | `1` | `1` skips every movie, `intro` only the logos and title movie, `0` plays all. |
